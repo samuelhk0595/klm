@@ -1,0 +1,1642 @@
+- generic [ref=f1e1]:
+  - generic [ref=f1e3]:
+    - navigation "Projects" [ref=f1e4]:
+      - generic "KLM" [ref=f1e5]
+      - generic [ref=f1e8]:
+        - button "Switch to KLM" [ref=f1e29] [cursor=pointer]: KL
+        - button "Switch to klm-test" [ref=f1e30] [cursor=pointer]: KL
+      - button "Add project" [ref=f1e9] [cursor=pointer]
+      - button "Switch to light theme" [ref=f1e12] [cursor=pointer]
+    - complementary "Sessions" [ref=f1e31]:
+      - generic [ref=f1e33]:
+        - strong [ref=f1e34]: KLM
+        - generic [ref=f1e35]: Harness
+      - paragraph [ref=f1e36]: C:\Users\Samuel\Documents\Projects\Personal\klm
+      - button "New Session" [ref=f1e38] [cursor=pointer]
+      - generic [ref=f1e40]:
+        - generic [ref=f1e41]:
+          - heading "Sessions" [level=2] [ref=f1e42]
+          - generic [ref=f1e43]:
+            - button "Search sessions" [ref=f1e44] [cursor=pointer]
+            - button "Create session folder" [ref=f1e48] [cursor=pointer]
+        - generic [ref=f1e51]:
+          - generic [ref=f1e52]:
+            - button "Ungrouped" [expanded] [ref=f1e53] [cursor=pointer]
+            - button "New session in Ungrouped" [ref=f1e56] [cursor=pointer]
+          - generic [ref=f1e58]:
+            - button "Pi chat Pi" [ref=f1e59] [cursor=pointer]:
+              - generic [ref=f1e60]: Pi chat
+              - generic [ref=f1e61]: Pi
+            - button "OpenCode chat OpenCode" [ref=f1e62] [cursor=pointer]:
+              - generic [ref=f1e63]: OpenCode chat
+              - generic [ref=f1e64]: OpenCode
+            - button "Codex chat Codex" [ref=f1e65] [cursor=pointer]:
+              - generic [ref=f1e66]: Codex chat
+              - generic [ref=f1e67]: Codex
+            - button "Permission check OpenCode" [ref=f1e68] [cursor=pointer]:
+              - generic [ref=f1e69]: Permission check
+              - generic [ref=f1e70]: OpenCode
+            - button "Question tool OpenCode" [ref=f1e71] [cursor=pointer]:
+              - generic [ref=f1e72]: Question tool
+              - generic [ref=f1e73]: OpenCode
+            - button "Layout adjustement Pi" [ref=f1e74] [cursor=pointer]:
+              - generic [ref=f1e75]: Layout adjustement
+              - generic [ref=f1e76]: Pi
+      - generic [ref=f1e77]:
+        - button "Design system" [ref=f1e78] [cursor=pointer]
+        - button "Settings" [ref=f1e83] [cursor=pointer]
+    - main [ref=f1e19]:
+      - generic [ref=f1e20]:
+        - generic [ref=f1e21]:
+          - heading "Pi chat" [level=1] [ref=f1e87]
+          - generic [ref=f1e88]: error
+        - button "Session log" [ref=f1e90] [cursor=pointer]
+      - generic [ref=f1e23]:
+        - navigation "Session views" [ref=f1e24]:
+          - button "Chat" [ref=f1e25] [cursor=pointer]
+          - button "Design system" [ref=f1e26] [cursor=pointer]
+        - combobox "Move session to folder" [ref=f1e94] [cursor=pointer]:
+          - option "Ungrouped" [selected]
+      - log "Conversation" [ref=f1e95]:
+        - article "Your message" [ref=f1e96]:
+          - generic [ref=f1e97]:
+            - paragraph [ref=f1e98]: "Reply with exactly: Pi chat connected. Do not use tools or read files."
+            - button "Copy message" [ref=f1e100] [cursor=pointer]
+        - alert [ref=f1e104]:
+          - generic [ref=f1e107]:
+            - strong [ref=f1e108]: Harness error
+            - paragraph [ref=f1e109]: "402: {\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 103414. To increase, visit https://openrouter.ai/settings/credits and add more credits\",\"code\":402,\"metadata\":{\"limit_source\":\"openrouter_credits\",\"remedy_hint\":\"Add credits at https://openrouter.ai/settings/credits, or lower max_tokens / prompt size to fit your remaining balance.\",\"provider_name\":null,\"previous_errors\":[{\"code\":402,\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 113756. To increase, visit https://openrouter.ai/settings/credits and add more credits\"},{\"code\":402,\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 113756. To increase, visit https://openrouter.ai/settings/credits and add more credits\"}]}}"
+        - article "Your message" [ref=f1e110]:
+          - generic [ref=f1e111]:
+            - paragraph [ref=f1e112]: hi
+            - button "Copy message" [ref=f1e114] [cursor=pointer]
+        - alert [ref=f1e118]:
+          - generic [ref=f1e121]:
+            - strong [ref=f1e122]: Harness error
+            - paragraph [ref=f1e123]: "402: {\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 103414. To increase, visit https://openrouter.ai/settings/credits and add more credits\",\"code\":402,\"metadata\":{\"limit_source\":\"openrouter_credits\",\"remedy_hint\":\"Add credits at https://openrouter.ai/settings/credits, or lower max_tokens / prompt size to fit your remaining balance.\",\"provider_name\":null,\"previous_errors\":[{\"code\":402,\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 113756. To increase, visit https://openrouter.ai/settings/credits and add more credits\"},{\"code\":402,\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 113756. To increase, visit https://openrouter.ai/settings/credits and add more credits\"}]}}"
+      - generic [ref=f1e124]:
+        - form "Message composer" [ref=f1e125]:
+          - textbox "Message the agent" [ref=f1e126]
+          - generic [ref=f1e127]:
+            - generic [ref=f1e128]: Pi
+            - generic [ref=f1e129]:
+              - button "Choose model and thinking effort" [ref=f1e131] [cursor=pointer]:
+                - generic [ref=f1e132]: "OpenAI: GPT-5.6 Terra"
+                - generic [ref=f1e133]: medium
+              - button "Send message" [disabled] [ref=f1e136]
+        - generic "Session statistics" [ref=f1e139]:
+          - generic [ref=f1e140]: 1 turn · 1 step
+          - generic [ref=f1e141]: LLM 1s
+          - generic [ref=f1e142]: Cache hit 99%
+          - 'generic "Context: 19 / 1,050,000 tokens · 0% used" [ref=f1e143]': 19 / 1.1M · 0%
+          - 'generic "Session input: 0 tokens (including cache). Output: 0 tokens (including reported reasoning)." [ref=f1e144]': Input 0 tok · Output 0 tok
+    - complementary "Session details" [ref=f1e145]:
+      - generic [ref=f1e146]:
+        - heading "KLM" [level=2] [ref=f1e147]
+        - generic [ref=f1e148]:
+          - heading "Session" [level=2] [ref=f1e149]
+          - generic [ref=f1e151]:
+            - generic [ref=f1e152]: Pi chat
+            - generic [ref=f1e153]: Pi
+            - generic [ref=f1e154]: Error
+        - generic [ref=f1e156]:
+          - heading "Activity" [level=2] [ref=f1e157]
+          - generic [ref=f1e159]:
+            - generic [ref=f1e160]: 2 messages sent
+            - generic [ref=f1e161]: 0 tool calls
+      - generic [ref=f1e162]:
+        - code [ref=f1e163]: C:\Users\Samuel\Documents\Projects\Personal\klm
+        - text: KLM Engine
+  - dialog [ref=f1e164]:
+    - generic [ref=f1e165]:
+      - heading "Model" [level=2] [ref=f1e166]
+      - generic [ref=f1e167]:
+        - button "Refresh models" [ref=f1e168] [cursor=pointer]
+        - button "Close model picker" [ref=f1e174] [cursor=pointer]
+    - searchbox "Search models" [active] [ref=f1e178]
+    - generic [ref=f1e179]:
+      - 'button "Harness default OpenAI: GPT-5.6 Terra" [pressed] [ref=f1e180] [cursor=pointer]':
+        - generic [ref=f1e181]:
+          - text: Harness default
+          - generic [ref=f1e182]: "OpenAI: GPT-5.6 Terra"
+      - region "chatgpt-codex" [ref=f1e185]:
+        - heading "chatgpt-codex" [level=3] [ref=f1e186]
+        - button "GPT-5.3 Codex Spark chatgpt-codex/gpt-5.3-codex-spark" [ref=f1e187] [cursor=pointer]:
+          - generic [ref=f1e188]:
+            - text: GPT-5.3 Codex Spark
+            - generic [ref=f1e189]: chatgpt-codex/gpt-5.3-codex-spark
+        - button "GPT-5.4 chatgpt-codex/gpt-5.4" [ref=f1e190] [cursor=pointer]:
+          - generic [ref=f1e191]:
+            - text: GPT-5.4
+            - generic [ref=f1e192]: chatgpt-codex/gpt-5.4
+        - button "GPT-5.4 Mini chatgpt-codex/gpt-5.4-mini" [ref=f1e193] [cursor=pointer]:
+          - generic [ref=f1e194]:
+            - text: GPT-5.4 Mini
+            - generic [ref=f1e195]: chatgpt-codex/gpt-5.4-mini
+        - button "GPT-5.5 chatgpt-codex/gpt-5.5" [ref=f1e196] [cursor=pointer]:
+          - generic [ref=f1e197]:
+            - text: GPT-5.5
+            - generic [ref=f1e198]: chatgpt-codex/gpt-5.5
+      - region "openrouter" [ref=f1e199]:
+        - heading "openrouter" [level=3] [ref=f1e200]
+        - 'button "AionLabs: Aion-2.0 openrouter/aion-labs/aion-2.0" [ref=f1e201] [cursor=pointer]':
+          - generic [ref=f1e202]:
+            - text: "AionLabs: Aion-2.0"
+            - generic [ref=f1e203]: openrouter/aion-labs/aion-2.0
+        - 'button "AionLabs: Aion-3.0 openrouter/aion-labs/aion-3.0" [ref=f1e204] [cursor=pointer]':
+          - generic [ref=f1e205]:
+            - text: "AionLabs: Aion-3.0"
+            - generic [ref=f1e206]: openrouter/aion-labs/aion-3.0
+        - 'button "AionLabs: Aion-3.0-Mini openrouter/aion-labs/aion-3.0-mini" [ref=f1e207] [cursor=pointer]':
+          - generic [ref=f1e208]:
+            - text: "AionLabs: Aion-3.0-Mini"
+            - generic [ref=f1e209]: openrouter/aion-labs/aion-3.0-mini
+        - 'button "Amazon: Nova 2 Lite openrouter/amazon/nova-2-lite-v1" [ref=f1e210] [cursor=pointer]':
+          - generic [ref=f1e211]:
+            - text: "Amazon: Nova 2 Lite"
+            - generic [ref=f1e212]: openrouter/amazon/nova-2-lite-v1
+        - 'button "Amazon: Nova Lite 1.0 openrouter/amazon/nova-lite-v1" [ref=f1e213] [cursor=pointer]':
+          - generic [ref=f1e214]:
+            - text: "Amazon: Nova Lite 1.0"
+            - generic [ref=f1e215]: openrouter/amazon/nova-lite-v1
+        - 'button "Amazon: Nova Micro 1.0 openrouter/amazon/nova-micro-v1" [ref=f1e216] [cursor=pointer]':
+          - generic [ref=f1e217]:
+            - text: "Amazon: Nova Micro 1.0"
+            - generic [ref=f1e218]: openrouter/amazon/nova-micro-v1
+        - 'button "Amazon: Nova Premier 1.0 openrouter/amazon/nova-premier-v1" [ref=f1e219] [cursor=pointer]':
+          - generic [ref=f1e220]:
+            - text: "Amazon: Nova Premier 1.0"
+            - generic [ref=f1e221]: openrouter/amazon/nova-premier-v1
+        - 'button "Amazon: Nova Pro 1.0 openrouter/amazon/nova-pro-v1" [ref=f1e222] [cursor=pointer]':
+          - generic [ref=f1e223]:
+            - text: "Amazon: Nova Pro 1.0"
+            - generic [ref=f1e224]: openrouter/amazon/nova-pro-v1
+        - button "Anthropic Claude Haiku Latest openrouter/~anthropic/claude-haiku-latest" [ref=f1e225] [cursor=pointer]:
+          - generic [ref=f1e226]:
+            - text: Anthropic Claude Haiku Latest
+            - generic [ref=f1e227]: openrouter/~anthropic/claude-haiku-latest
+        - button "Anthropic Claude Sonnet Latest openrouter/~anthropic/claude-sonnet-latest" [ref=f1e228] [cursor=pointer]:
+          - generic [ref=f1e229]:
+            - text: Anthropic Claude Sonnet Latest
+            - generic [ref=f1e230]: openrouter/~anthropic/claude-sonnet-latest
+        - 'button "Anthropic: Claude 3 Haiku openrouter/anthropic/claude-3-haiku" [ref=f1e231] [cursor=pointer]':
+          - generic [ref=f1e232]:
+            - text: "Anthropic: Claude 3 Haiku"
+            - generic [ref=f1e233]: openrouter/anthropic/claude-3-haiku
+        - 'button "Anthropic: Claude Fable 5 openrouter/anthropic/claude-fable-5" [ref=f1e234] [cursor=pointer]':
+          - generic [ref=f1e235]:
+            - text: "Anthropic: Claude Fable 5"
+            - generic [ref=f1e236]: openrouter/anthropic/claude-fable-5
+        - 'button "Anthropic: Claude Fable 5 (batch) openrouter/anthropic/claude-fable-5:batch" [ref=f1e237] [cursor=pointer]':
+          - generic [ref=f1e238]:
+            - text: "Anthropic: Claude Fable 5 (batch)"
+            - generic [ref=f1e239]: openrouter/anthropic/claude-fable-5:batch
+        - 'button "Anthropic: Claude Fable 5.1 openrouter/anthropic/claude-fable-5.1" [ref=f1e240] [cursor=pointer]':
+          - generic [ref=f1e241]:
+            - text: "Anthropic: Claude Fable 5.1"
+            - generic [ref=f1e242]: openrouter/anthropic/claude-fable-5.1
+        - 'button "Anthropic: Claude Fable 5.1 (batch) openrouter/anthropic/claude-fable-5.1:batch" [ref=f1e243] [cursor=pointer]':
+          - generic [ref=f1e244]:
+            - text: "Anthropic: Claude Fable 5.1 (batch)"
+            - generic [ref=f1e245]: openrouter/anthropic/claude-fable-5.1:batch
+        - 'button "Anthropic: Claude Fable Latest openrouter/~anthropic/claude-fable-latest" [ref=f1e246] [cursor=pointer]':
+          - generic [ref=f1e247]:
+            - text: "Anthropic: Claude Fable Latest"
+            - generic [ref=f1e248]: openrouter/~anthropic/claude-fable-latest
+        - 'button "Anthropic: Claude Haiku 4.5 openrouter/anthropic/claude-haiku-4.5" [ref=f1e249] [cursor=pointer]':
+          - generic [ref=f1e250]:
+            - text: "Anthropic: Claude Haiku 4.5"
+            - generic [ref=f1e251]: openrouter/anthropic/claude-haiku-4.5
+        - 'button "Anthropic: Claude Haiku 4.5 (batch) openrouter/anthropic/claude-haiku-4.5:batch" [ref=f1e252] [cursor=pointer]':
+          - generic [ref=f1e253]:
+            - text: "Anthropic: Claude Haiku 4.5 (batch)"
+            - generic [ref=f1e254]: openrouter/anthropic/claude-haiku-4.5:batch
+        - 'button "Anthropic: Claude Opus 4 openrouter/anthropic/claude-opus-4" [ref=f1e255] [cursor=pointer]':
+          - generic [ref=f1e256]:
+            - text: "Anthropic: Claude Opus 4"
+            - generic [ref=f1e257]: openrouter/anthropic/claude-opus-4
+        - 'button "Anthropic: Claude Opus 4.1 openrouter/anthropic/claude-opus-4.1" [ref=f1e258] [cursor=pointer]':
+          - generic [ref=f1e259]:
+            - text: "Anthropic: Claude Opus 4.1"
+            - generic [ref=f1e260]: openrouter/anthropic/claude-opus-4.1
+        - 'button "Anthropic: Claude Opus 4.1 (batch) openrouter/anthropic/claude-opus-4.1:batch" [ref=f1e261] [cursor=pointer]':
+          - generic [ref=f1e262]:
+            - text: "Anthropic: Claude Opus 4.1 (batch)"
+            - generic [ref=f1e263]: openrouter/anthropic/claude-opus-4.1:batch
+        - 'button "Anthropic: Claude Opus 4.5 openrouter/anthropic/claude-opus-4.5" [ref=f1e264] [cursor=pointer]':
+          - generic [ref=f1e265]:
+            - text: "Anthropic: Claude Opus 4.5"
+            - generic [ref=f1e266]: openrouter/anthropic/claude-opus-4.5
+        - 'button "Anthropic: Claude Opus 4.5 (batch) openrouter/anthropic/claude-opus-4.5:batch" [ref=f1e267] [cursor=pointer]':
+          - generic [ref=f1e268]:
+            - text: "Anthropic: Claude Opus 4.5 (batch)"
+            - generic [ref=f1e269]: openrouter/anthropic/claude-opus-4.5:batch
+        - 'button "Anthropic: Claude Opus 4.6 openrouter/anthropic/claude-opus-4.6" [ref=f1e270] [cursor=pointer]':
+          - generic [ref=f1e271]:
+            - text: "Anthropic: Claude Opus 4.6"
+            - generic [ref=f1e272]: openrouter/anthropic/claude-opus-4.6
+        - 'button "Anthropic: Claude Opus 4.6 (batch) openrouter/anthropic/claude-opus-4.6:batch" [ref=f1e273] [cursor=pointer]':
+          - generic [ref=f1e274]:
+            - text: "Anthropic: Claude Opus 4.6 (batch)"
+            - generic [ref=f1e275]: openrouter/anthropic/claude-opus-4.6:batch
+        - 'button "Anthropic: Claude Opus 4.7 openrouter/anthropic/claude-opus-4.7" [ref=f1e276] [cursor=pointer]':
+          - generic [ref=f1e277]:
+            - text: "Anthropic: Claude Opus 4.7"
+            - generic [ref=f1e278]: openrouter/anthropic/claude-opus-4.7
+        - 'button "Anthropic: Claude Opus 4.7 (batch) openrouter/anthropic/claude-opus-4.7:batch" [ref=f1e279] [cursor=pointer]':
+          - generic [ref=f1e280]:
+            - text: "Anthropic: Claude Opus 4.7 (batch)"
+            - generic [ref=f1e281]: openrouter/anthropic/claude-opus-4.7:batch
+        - 'button "Anthropic: Claude Opus 4.8 openrouter/anthropic/claude-opus-4.8" [ref=f1e282] [cursor=pointer]':
+          - generic [ref=f1e283]:
+            - text: "Anthropic: Claude Opus 4.8"
+            - generic [ref=f1e284]: openrouter/anthropic/claude-opus-4.8
+        - 'button "Anthropic: Claude Opus 4.8 (batch) openrouter/anthropic/claude-opus-4.8:batch" [ref=f1e285] [cursor=pointer]':
+          - generic [ref=f1e286]:
+            - text: "Anthropic: Claude Opus 4.8 (batch)"
+            - generic [ref=f1e287]: openrouter/anthropic/claude-opus-4.8:batch
+        - 'button "Anthropic: Claude Opus Latest openrouter/~anthropic/claude-opus-latest" [ref=f1e288] [cursor=pointer]':
+          - generic [ref=f1e289]:
+            - text: "Anthropic: Claude Opus Latest"
+            - generic [ref=f1e290]: openrouter/~anthropic/claude-opus-latest
+        - 'button "Anthropic: Claude Sonnet 4 openrouter/anthropic/claude-sonnet-4" [ref=f1e291] [cursor=pointer]':
+          - generic [ref=f1e292]:
+            - text: "Anthropic: Claude Sonnet 4"
+            - generic [ref=f1e293]: openrouter/anthropic/claude-sonnet-4
+        - 'button "Anthropic: Claude Sonnet 4.5 openrouter/anthropic/claude-sonnet-4.5" [ref=f1e294] [cursor=pointer]':
+          - generic [ref=f1e295]:
+            - text: "Anthropic: Claude Sonnet 4.5"
+            - generic [ref=f1e296]: openrouter/anthropic/claude-sonnet-4.5
+        - 'button "Anthropic: Claude Sonnet 4.5 (batch) openrouter/anthropic/claude-sonnet-4.5:batch" [ref=f1e297] [cursor=pointer]':
+          - generic [ref=f1e298]:
+            - text: "Anthropic: Claude Sonnet 4.5 (batch)"
+            - generic [ref=f1e299]: openrouter/anthropic/claude-sonnet-4.5:batch
+        - 'button "Anthropic: Claude Sonnet 4.6 openrouter/anthropic/claude-sonnet-4.6" [ref=f1e300] [cursor=pointer]':
+          - generic [ref=f1e301]:
+            - text: "Anthropic: Claude Sonnet 4.6"
+            - generic [ref=f1e302]: openrouter/anthropic/claude-sonnet-4.6
+        - 'button "Anthropic: Claude Sonnet 4.6 (batch) openrouter/anthropic/claude-sonnet-4.6:batch" [ref=f1e303] [cursor=pointer]':
+          - generic [ref=f1e304]:
+            - text: "Anthropic: Claude Sonnet 4.6 (batch)"
+            - generic [ref=f1e305]: openrouter/anthropic/claude-sonnet-4.6:batch
+        - 'button "Anthropic: Claude Sonnet 5 openrouter/anthropic/claude-sonnet-5" [ref=f1e306] [cursor=pointer]':
+          - generic [ref=f1e307]:
+            - text: "Anthropic: Claude Sonnet 5"
+            - generic [ref=f1e308]: openrouter/anthropic/claude-sonnet-5
+        - 'button "Anthropic: Claude Sonnet 5 (batch) openrouter/anthropic/claude-sonnet-5:batch" [ref=f1e309] [cursor=pointer]':
+          - generic [ref=f1e310]:
+            - text: "Anthropic: Claude Sonnet 5 (batch)"
+            - generic [ref=f1e311]: openrouter/anthropic/claude-sonnet-5:batch
+        - 'button "Arcee AI: Trinity Large Thinking openrouter/arcee-ai/trinity-large-thinking" [ref=f1e312] [cursor=pointer]':
+          - generic [ref=f1e313]:
+            - text: "Arcee AI: Trinity Large Thinking"
+            - generic [ref=f1e314]: openrouter/arcee-ai/trinity-large-thinking
+        - button "Auto openrouter/auto" [ref=f1e315] [cursor=pointer]:
+          - generic [ref=f1e316]:
+            - text: Auto
+            - generic [ref=f1e317]: openrouter/auto
+        - button "Auto Router openrouter/openrouter/auto" [ref=f1e318] [cursor=pointer]:
+          - generic [ref=f1e319]:
+            - text: Auto Router
+            - generic [ref=f1e320]: openrouter/openrouter/auto
+        - button "Auto Router (Beta) openrouter/openrouter/auto-beta" [ref=f1e321] [cursor=pointer]:
+          - generic [ref=f1e322]:
+            - text: Auto Router (Beta)
+            - generic [ref=f1e323]: openrouter/openrouter/auto-beta
+        - 'button "ByteDance Seed: Seed 1.6 openrouter/bytedance-seed/seed-1.6" [ref=f1e324] [cursor=pointer]':
+          - generic [ref=f1e325]:
+            - text: "ByteDance Seed: Seed 1.6"
+            - generic [ref=f1e326]: openrouter/bytedance-seed/seed-1.6
+        - 'button "ByteDance Seed: Seed 1.6 Flash openrouter/bytedance-seed/seed-1.6-flash" [ref=f1e327] [cursor=pointer]':
+          - generic [ref=f1e328]:
+            - text: "ByteDance Seed: Seed 1.6 Flash"
+            - generic [ref=f1e329]: openrouter/bytedance-seed/seed-1.6-flash
+        - 'button "ByteDance Seed: Seed 2.1 Turbo openrouter/bytedance-seed/seed-2-1-turbo" [ref=f1e330] [cursor=pointer]':
+          - generic [ref=f1e331]:
+            - text: "ByteDance Seed: Seed 2.1 Turbo"
+            - generic [ref=f1e332]: openrouter/bytedance-seed/seed-2-1-turbo
+        - 'button "ByteDance Seed: Seed-2.0-Code openrouter/bytedance-seed/seed-2.0-code" [ref=f1e333] [cursor=pointer]':
+          - generic [ref=f1e334]:
+            - text: "ByteDance Seed: Seed-2.0-Code"
+            - generic [ref=f1e335]: openrouter/bytedance-seed/seed-2.0-code
+        - 'button "ByteDance Seed: Seed-2.0-Lite openrouter/bytedance-seed/seed-2.0-lite" [ref=f1e336] [cursor=pointer]':
+          - generic [ref=f1e337]:
+            - text: "ByteDance Seed: Seed-2.0-Lite"
+            - generic [ref=f1e338]: openrouter/bytedance-seed/seed-2.0-lite
+        - 'button "ByteDance Seed: Seed-2.0-Mini openrouter/bytedance-seed/seed-2.0-mini" [ref=f1e339] [cursor=pointer]':
+          - generic [ref=f1e340]:
+            - text: "ByteDance Seed: Seed-2.0-Mini"
+            - generic [ref=f1e341]: openrouter/bytedance-seed/seed-2.0-mini
+        - button "Claude Opus 5 openrouter/anthropic/claude-opus-5" [ref=f1e342] [cursor=pointer]:
+          - generic [ref=f1e343]:
+            - text: Claude Opus 5
+            - generic [ref=f1e344]: openrouter/anthropic/claude-opus-5
+        - button "Claude Opus 5 (batch) openrouter/anthropic/claude-opus-5:batch" [ref=f1e345] [cursor=pointer]:
+          - generic [ref=f1e346]:
+            - text: Claude Opus 5 (batch)
+            - generic [ref=f1e347]: openrouter/anthropic/claude-opus-5:batch
+        - 'button "Cohere: Command R (08-2024) openrouter/cohere/command-r-08-2024" [ref=f1e348] [cursor=pointer]':
+          - generic [ref=f1e349]:
+            - text: "Cohere: Command R (08-2024)"
+            - generic [ref=f1e350]: openrouter/cohere/command-r-08-2024
+        - 'button "Cohere: Command R+ (08-2024) openrouter/cohere/command-r-plus-08-2024" [ref=f1e351] [cursor=pointer]':
+          - generic [ref=f1e352]:
+            - text: "Cohere: Command R+ (08-2024)"
+            - generic [ref=f1e353]: openrouter/cohere/command-r-plus-08-2024
+        - 'button "Cohere: North Mini Code (free) openrouter/cohere/north-mini-code:free" [ref=f1e354] [cursor=pointer]':
+          - generic [ref=f1e355]:
+            - text: "Cohere: North Mini Code (free)"
+            - generic [ref=f1e356]: openrouter/cohere/north-mini-code:free
+        - button "DeepSeek V4 Flash Latest openrouter/~deepseek/deepseek-v4-flash-latest" [ref=f1e357] [cursor=pointer]:
+          - generic [ref=f1e358]:
+            - text: DeepSeek V4 Flash Latest
+            - generic [ref=f1e359]: openrouter/~deepseek/deepseek-v4-flash-latest
+        - 'button "DeepSeek: DeepSeek V3 openrouter/deepseek/deepseek-chat" [ref=f1e360] [cursor=pointer]':
+          - generic [ref=f1e361]:
+            - text: "DeepSeek: DeepSeek V3"
+            - generic [ref=f1e362]: openrouter/deepseek/deepseek-chat
+        - 'button "DeepSeek: DeepSeek V3 0324 openrouter/deepseek/deepseek-chat-v3-0324" [ref=f1e363] [cursor=pointer]':
+          - generic [ref=f1e364]:
+            - text: "DeepSeek: DeepSeek V3 0324"
+            - generic [ref=f1e365]: openrouter/deepseek/deepseek-chat-v3-0324
+        - 'button "DeepSeek: DeepSeek V3.1 openrouter/deepseek/deepseek-chat-v3.1" [ref=f1e366] [cursor=pointer]':
+          - generic [ref=f1e367]:
+            - text: "DeepSeek: DeepSeek V3.1"
+            - generic [ref=f1e368]: openrouter/deepseek/deepseek-chat-v3.1
+        - 'button "DeepSeek: DeepSeek V3.1 Terminus openrouter/deepseek/deepseek-v3.1-terminus" [ref=f1e369] [cursor=pointer]':
+          - generic [ref=f1e370]:
+            - text: "DeepSeek: DeepSeek V3.1 Terminus"
+            - generic [ref=f1e371]: openrouter/deepseek/deepseek-v3.1-terminus
+        - 'button "DeepSeek: DeepSeek V3.2 openrouter/deepseek/deepseek-v3.2" [ref=f1e372] [cursor=pointer]':
+          - generic [ref=f1e373]:
+            - text: "DeepSeek: DeepSeek V3.2"
+            - generic [ref=f1e374]: openrouter/deepseek/deepseek-v3.2
+        - 'button "DeepSeek: DeepSeek V3.2 Exp openrouter/deepseek/deepseek-v3.2-exp" [ref=f1e375] [cursor=pointer]':
+          - generic [ref=f1e376]:
+            - text: "DeepSeek: DeepSeek V3.2 Exp"
+            - generic [ref=f1e377]: openrouter/deepseek/deepseek-v3.2-exp
+        - 'button "DeepSeek: DeepSeek V4 Flash 0423 openrouter/deepseek/deepseek-v4-flash" [ref=f1e378] [cursor=pointer]':
+          - generic [ref=f1e379]:
+            - text: "DeepSeek: DeepSeek V4 Flash 0423"
+            - generic [ref=f1e380]: openrouter/deepseek/deepseek-v4-flash
+        - 'button "DeepSeek: DeepSeek V4 Flash 0731 openrouter/deepseek/deepseek-v4-flash-0731" [ref=f1e381] [cursor=pointer]':
+          - generic [ref=f1e382]:
+            - text: "DeepSeek: DeepSeek V4 Flash 0731"
+            - generic [ref=f1e383]: openrouter/deepseek/deepseek-v4-flash-0731
+        - 'button "DeepSeek: DeepSeek V4 Flash 0731 (batch) openrouter/deepseek/deepseek-v4-flash-0731:batch" [ref=f1e384] [cursor=pointer]':
+          - generic [ref=f1e385]:
+            - text: "DeepSeek: DeepSeek V4 Flash 0731 (batch)"
+            - generic [ref=f1e386]: openrouter/deepseek/deepseek-v4-flash-0731:batch
+        - 'button "DeepSeek: DeepSeek V4 Flash Vision Exp openrouter/deepseek/deepseek-v4-flash-vision-exp" [ref=f1e387] [cursor=pointer]':
+          - generic [ref=f1e388]:
+            - text: "DeepSeek: DeepSeek V4 Flash Vision Exp"
+            - generic [ref=f1e389]: openrouter/deepseek/deepseek-v4-flash-vision-exp
+        - 'button "DeepSeek: DeepSeek V4 Flash Vision Exp (batch) openrouter/deepseek/deepseek-v4-flash-vision-exp:batch" [ref=f1e390] [cursor=pointer]':
+          - generic [ref=f1e391]:
+            - text: "DeepSeek: DeepSeek V4 Flash Vision Exp (batch)"
+            - generic [ref=f1e392]: openrouter/deepseek/deepseek-v4-flash-vision-exp:batch
+        - 'button "DeepSeek: DeepSeek V4 Pro 0423 openrouter/deepseek/deepseek-v4-pro" [ref=f1e393] [cursor=pointer]':
+          - generic [ref=f1e394]:
+            - text: "DeepSeek: DeepSeek V4 Pro 0423"
+            - generic [ref=f1e395]: openrouter/deepseek/deepseek-v4-pro
+        - 'button "DeepSeek: DeepSeek V4 Pro 0813 openrouter/deepseek/deepseek-v4-pro-0813" [ref=f1e396] [cursor=pointer]':
+          - generic [ref=f1e397]:
+            - text: "DeepSeek: DeepSeek V4 Pro 0813"
+            - generic [ref=f1e398]: openrouter/deepseek/deepseek-v4-pro-0813
+        - 'button "DeepSeek: DeepSeek V4 Pro 0813 (batch) openrouter/deepseek/deepseek-v4-pro-0813:batch" [ref=f1e399] [cursor=pointer]':
+          - generic [ref=f1e400]:
+            - text: "DeepSeek: DeepSeek V4 Pro 0813 (batch)"
+            - generic [ref=f1e401]: openrouter/deepseek/deepseek-v4-pro-0813:batch
+        - 'button "DeepSeek: R1 openrouter/deepseek/deepseek-r1" [ref=f1e402] [cursor=pointer]':
+          - generic [ref=f1e403]:
+            - text: "DeepSeek: R1"
+            - generic [ref=f1e404]: openrouter/deepseek/deepseek-r1
+        - 'button "DeepSeek: R1 0528 openrouter/deepseek/deepseek-r1-0528" [ref=f1e405] [cursor=pointer]':
+          - generic [ref=f1e406]:
+            - text: "DeepSeek: R1 0528"
+            - generic [ref=f1e407]: openrouter/deepseek/deepseek-r1-0528
+        - 'button "Dots Studio: Dots3-Note Preview (free) openrouter/dots-studio/dots-3-note-preview:free" [ref=f1e408] [cursor=pointer]':
+          - generic [ref=f1e409]:
+            - text: "Dots Studio: Dots3-Note Preview (free)"
+            - generic [ref=f1e410]: openrouter/dots-studio/dots-3-note-preview:free
+        - button "Free Models Router openrouter/openrouter/free" [ref=f1e411] [cursor=pointer]:
+          - generic [ref=f1e412]:
+            - text: Free Models Router
+            - generic [ref=f1e413]: openrouter/openrouter/free
+        - button "Google Gemini Flash Latest openrouter/~google/gemini-flash-latest" [ref=f1e414] [cursor=pointer]:
+          - generic [ref=f1e415]:
+            - text: Google Gemini Flash Latest
+            - generic [ref=f1e416]: openrouter/~google/gemini-flash-latest
+        - button "Google Gemini Pro Latest openrouter/~google/gemini-pro-latest" [ref=f1e417] [cursor=pointer]:
+          - generic [ref=f1e418]:
+            - text: Google Gemini Pro Latest
+            - generic [ref=f1e419]: openrouter/~google/gemini-pro-latest
+        - 'button "Google: Gemini 2.5 Flash openrouter/google/gemini-2.5-flash" [ref=f1e420] [cursor=pointer]':
+          - generic [ref=f1e421]:
+            - text: "Google: Gemini 2.5 Flash"
+            - generic [ref=f1e422]: openrouter/google/gemini-2.5-flash
+        - 'button "Google: Gemini 2.5 Flash (batch) openrouter/google/gemini-2.5-flash:batch" [ref=f1e423] [cursor=pointer]':
+          - generic [ref=f1e424]:
+            - text: "Google: Gemini 2.5 Flash (batch)"
+            - generic [ref=f1e425]: openrouter/google/gemini-2.5-flash:batch
+        - 'button "Google: Gemini 2.5 Flash Lite openrouter/google/gemini-2.5-flash-lite" [ref=f1e426] [cursor=pointer]':
+          - generic [ref=f1e427]:
+            - text: "Google: Gemini 2.5 Flash Lite"
+            - generic [ref=f1e428]: openrouter/google/gemini-2.5-flash-lite
+        - 'button "Google: Gemini 2.5 Flash Lite (batch) openrouter/google/gemini-2.5-flash-lite:batch" [ref=f1e429] [cursor=pointer]':
+          - generic [ref=f1e430]:
+            - text: "Google: Gemini 2.5 Flash Lite (batch)"
+            - generic [ref=f1e431]: openrouter/google/gemini-2.5-flash-lite:batch
+        - 'button "Google: Gemini 2.5 Pro openrouter/google/gemini-2.5-pro" [ref=f1e432] [cursor=pointer]':
+          - generic [ref=f1e433]:
+            - text: "Google: Gemini 2.5 Pro"
+            - generic [ref=f1e434]: openrouter/google/gemini-2.5-pro
+        - 'button "Google: Gemini 2.5 Pro (batch) openrouter/google/gemini-2.5-pro:batch" [ref=f1e435] [cursor=pointer]':
+          - generic [ref=f1e436]:
+            - text: "Google: Gemini 2.5 Pro (batch)"
+            - generic [ref=f1e437]: openrouter/google/gemini-2.5-pro:batch
+        - 'button "Google: Gemini 2.5 Pro Preview 05-06 openrouter/google/gemini-2.5-pro-preview-05-06" [ref=f1e438] [cursor=pointer]':
+          - generic [ref=f1e439]:
+            - text: "Google: Gemini 2.5 Pro Preview 05-06"
+            - generic [ref=f1e440]: openrouter/google/gemini-2.5-pro-preview-05-06
+        - 'button "Google: Gemini 2.5 Pro Preview 06-05 openrouter/google/gemini-2.5-pro-preview" [ref=f1e441] [cursor=pointer]':
+          - generic [ref=f1e442]:
+            - text: "Google: Gemini 2.5 Pro Preview 06-05"
+            - generic [ref=f1e443]: openrouter/google/gemini-2.5-pro-preview
+        - 'button "Google: Gemini 3 Flash Preview openrouter/google/gemini-3-flash-preview" [ref=f1e444] [cursor=pointer]':
+          - generic [ref=f1e445]:
+            - text: "Google: Gemini 3 Flash Preview"
+            - generic [ref=f1e446]: openrouter/google/gemini-3-flash-preview
+        - 'button "Google: Gemini 3 Flash Preview (batch) openrouter/google/gemini-3-flash-preview:batch" [ref=f1e447] [cursor=pointer]':
+          - generic [ref=f1e448]:
+            - text: "Google: Gemini 3 Flash Preview (batch)"
+            - generic [ref=f1e449]: openrouter/google/gemini-3-flash-preview:batch
+        - 'button "Google: Gemini 3.1 Flash Lite openrouter/google/gemini-3.1-flash-lite" [ref=f1e450] [cursor=pointer]':
+          - generic [ref=f1e451]:
+            - text: "Google: Gemini 3.1 Flash Lite"
+            - generic [ref=f1e452]: openrouter/google/gemini-3.1-flash-lite
+        - 'button "Google: Gemini 3.1 Flash Lite (batch) openrouter/google/gemini-3.1-flash-lite:batch" [ref=f1e453] [cursor=pointer]':
+          - generic [ref=f1e454]:
+            - text: "Google: Gemini 3.1 Flash Lite (batch)"
+            - generic [ref=f1e455]: openrouter/google/gemini-3.1-flash-lite:batch
+        - 'button "Google: Gemini 3.1 Flash Lite Preview openrouter/google/gemini-3.1-flash-lite-preview" [ref=f1e456] [cursor=pointer]':
+          - generic [ref=f1e457]:
+            - text: "Google: Gemini 3.1 Flash Lite Preview"
+            - generic [ref=f1e458]: openrouter/google/gemini-3.1-flash-lite-preview
+        - 'button "Google: Gemini 3.1 Pro Preview openrouter/google/gemini-3.1-pro-preview" [ref=f1e459] [cursor=pointer]':
+          - generic [ref=f1e460]:
+            - text: "Google: Gemini 3.1 Pro Preview"
+            - generic [ref=f1e461]: openrouter/google/gemini-3.1-pro-preview
+        - 'button "Google: Gemini 3.1 Pro Preview (batch) openrouter/google/gemini-3.1-pro-preview:batch" [ref=f1e462] [cursor=pointer]':
+          - generic [ref=f1e463]:
+            - text: "Google: Gemini 3.1 Pro Preview (batch)"
+            - generic [ref=f1e464]: openrouter/google/gemini-3.1-pro-preview:batch
+        - 'button "Google: Gemini 3.1 Pro Preview Custom Tools openrouter/google/gemini-3.1-pro-preview-customtools" [ref=f1e465] [cursor=pointer]':
+          - generic [ref=f1e466]:
+            - text: "Google: Gemini 3.1 Pro Preview Custom Tools"
+            - generic [ref=f1e467]: openrouter/google/gemini-3.1-pro-preview-customtools
+        - 'button "Google: Gemini 3.5 Flash openrouter/google/gemini-3.5-flash" [ref=f1e468] [cursor=pointer]':
+          - generic [ref=f1e469]:
+            - text: "Google: Gemini 3.5 Flash"
+            - generic [ref=f1e470]: openrouter/google/gemini-3.5-flash
+        - 'button "Google: Gemini 3.5 Flash (batch) openrouter/google/gemini-3.5-flash:batch" [ref=f1e471] [cursor=pointer]':
+          - generic [ref=f1e472]:
+            - text: "Google: Gemini 3.5 Flash (batch)"
+            - generic [ref=f1e473]: openrouter/google/gemini-3.5-flash:batch
+        - 'button "Google: Gemini 3.5 Flash Lite openrouter/google/gemini-3.5-flash-lite" [ref=f1e474] [cursor=pointer]':
+          - generic [ref=f1e475]:
+            - text: "Google: Gemini 3.5 Flash Lite"
+            - generic [ref=f1e476]: openrouter/google/gemini-3.5-flash-lite
+        - 'button "Google: Gemini 3.5 Flash Lite (batch) openrouter/google/gemini-3.5-flash-lite:batch" [ref=f1e477] [cursor=pointer]':
+          - generic [ref=f1e478]:
+            - text: "Google: Gemini 3.5 Flash Lite (batch)"
+            - generic [ref=f1e479]: openrouter/google/gemini-3.5-flash-lite:batch
+        - 'button "Google: Gemini 3.6 Flash openrouter/google/gemini-3.6-flash" [ref=f1e480] [cursor=pointer]':
+          - generic [ref=f1e481]:
+            - text: "Google: Gemini 3.6 Flash"
+            - generic [ref=f1e482]: openrouter/google/gemini-3.6-flash
+        - 'button "Google: Gemini 3.6 Flash (batch) openrouter/google/gemini-3.6-flash:batch" [ref=f1e483] [cursor=pointer]':
+          - generic [ref=f1e484]:
+            - text: "Google: Gemini 3.6 Flash (batch)"
+            - generic [ref=f1e485]: openrouter/google/gemini-3.6-flash:batch
+        - 'button "Google: Gemini 3.7 Flash openrouter/google/gemini-3.7-flash" [ref=f1e486] [cursor=pointer]':
+          - generic [ref=f1e487]:
+            - text: "Google: Gemini 3.7 Flash"
+            - generic [ref=f1e488]: openrouter/google/gemini-3.7-flash
+        - 'button "Google: Gemini 3.7 Flash (batch) openrouter/google/gemini-3.7-flash:batch" [ref=f1e489] [cursor=pointer]':
+          - generic [ref=f1e490]:
+            - text: "Google: Gemini 3.7 Flash (batch)"
+            - generic [ref=f1e491]: openrouter/google/gemini-3.7-flash:batch
+        - 'button "Google: Gemini 3.8 Flash openrouter/google/gemini-3.8-flash" [ref=f1e492] [cursor=pointer]':
+          - generic [ref=f1e493]:
+            - text: "Google: Gemini 3.8 Flash"
+            - generic [ref=f1e494]: openrouter/google/gemini-3.8-flash
+        - 'button "Google: Gemini 3.8 Flash (batch) openrouter/google/gemini-3.8-flash:batch" [ref=f1e495] [cursor=pointer]':
+          - generic [ref=f1e496]:
+            - text: "Google: Gemini 3.8 Flash (batch)"
+            - generic [ref=f1e497]: openrouter/google/gemini-3.8-flash:batch
+        - 'button "Google: Gemma 3 12B openrouter/google/gemma-3-12b-it" [ref=f1e498] [cursor=pointer]':
+          - generic [ref=f1e499]:
+            - text: "Google: Gemma 3 12B"
+            - generic [ref=f1e500]: openrouter/google/gemma-3-12b-it
+        - 'button "Google: Gemma 3 27B openrouter/google/gemma-3-27b-it" [ref=f1e501] [cursor=pointer]':
+          - generic [ref=f1e502]:
+            - text: "Google: Gemma 3 27B"
+            - generic [ref=f1e503]: openrouter/google/gemma-3-27b-it
+        - 'button "Google: Gemma 4 26B A4B openrouter/google/gemma-4-26b-a4b-it" [ref=f1e504] [cursor=pointer]':
+          - generic [ref=f1e505]:
+            - text: "Google: Gemma 4 26B A4B"
+            - generic [ref=f1e506]: openrouter/google/gemma-4-26b-a4b-it
+        - 'button "Google: Gemma 4 26B A4B (free) openrouter/google/gemma-4-26b-a4b-it:free" [ref=f1e507] [cursor=pointer]':
+          - generic [ref=f1e508]:
+            - text: "Google: Gemma 4 26B A4B (free)"
+            - generic [ref=f1e509]: openrouter/google/gemma-4-26b-a4b-it:free
+        - 'button "Google: Gemma 4 31B openrouter/google/gemma-4-31b-it" [ref=f1e510] [cursor=pointer]':
+          - generic [ref=f1e511]:
+            - text: "Google: Gemma 4 31B"
+            - generic [ref=f1e512]: openrouter/google/gemma-4-31b-it
+        - 'button "Google: Gemma 4 31B (batch) openrouter/google/gemma-4-31b-it:batch" [ref=f1e513] [cursor=pointer]':
+          - generic [ref=f1e514]:
+            - text: "Google: Gemma 4 31B (batch)"
+            - generic [ref=f1e515]: openrouter/google/gemma-4-31b-it:batch
+        - 'button "Google: Gemma 4 31B (free) openrouter/google/gemma-4-31b-it:free" [ref=f1e516] [cursor=pointer]':
+          - generic [ref=f1e517]:
+            - text: "Google: Gemma 4 31B (free)"
+            - generic [ref=f1e518]: openrouter/google/gemma-4-31b-it:free
+        - 'button "Google: Nano Banana Pro (Gemini 3 Pro Image) openrouter/google/gemini-3-pro-image" [ref=f1e519] [cursor=pointer]':
+          - generic [ref=f1e520]:
+            - text: "Google: Nano Banana Pro (Gemini 3 Pro Image)"
+            - generic [ref=f1e521]: openrouter/google/gemini-3-pro-image
+        - 'button "IBM: Granite 4.2 8B openrouter/ibm-granite/granite-4.2-8b" [ref=f1e522] [cursor=pointer]':
+          - generic [ref=f1e523]:
+            - text: "IBM: Granite 4.2 8B"
+            - generic [ref=f1e524]: openrouter/ibm-granite/granite-4.2-8b
+        - 'button "Inception: Mercury 2 openrouter/inception/mercury-2" [ref=f1e525] [cursor=pointer]':
+          - generic [ref=f1e526]:
+            - text: "Inception: Mercury 2"
+            - generic [ref=f1e527]: openrouter/inception/mercury-2
+        - 'button "Inception: Mercury 2.5 openrouter/inception/mercury-2.5" [ref=f1e528] [cursor=pointer]':
+          - generic [ref=f1e529]:
+            - text: "Inception: Mercury 2.5"
+            - generic [ref=f1e530]: openrouter/inception/mercury-2.5
+        - 'button "Inception: Mercury 2.5 Preview openrouter/inception/mercury-2.5-preview" [ref=f1e531] [cursor=pointer]':
+          - generic [ref=f1e532]:
+            - text: "Inception: Mercury 2.5 Preview"
+            - generic [ref=f1e533]: openrouter/inception/mercury-2.5-preview
+        - 'button "Kwaipilot: KAT-Coder-Pro V2 openrouter/kwaipilot/kat-coder-pro-v2" [ref=f1e534] [cursor=pointer]':
+          - generic [ref=f1e535]:
+            - text: "Kwaipilot: KAT-Coder-Pro V2"
+            - generic [ref=f1e536]: openrouter/kwaipilot/kat-coder-pro-v2
+        - 'button "Kwaipilot: KAT-Coder-Pro V2.5 openrouter/kwaipilot/kat-coder-pro-v2.5" [ref=f1e537] [cursor=pointer]':
+          - generic [ref=f1e538]:
+            - text: "Kwaipilot: KAT-Coder-Pro V2.5"
+            - generic [ref=f1e539]: openrouter/kwaipilot/kat-coder-pro-v2.5
+        - 'button "LiquidAI: LFM2.5-2.6B (free) openrouter/liquid/lfm-2.5-2.6b:free" [ref=f1e540] [cursor=pointer]':
+          - generic [ref=f1e541]:
+            - text: "LiquidAI: LFM2.5-2.6B (free)"
+            - generic [ref=f1e542]: openrouter/liquid/lfm-2.5-2.6b:free
+        - 'button "Meituan: LongCat 2.0 openrouter/meituan/longcat-2.0" [ref=f1e543] [cursor=pointer]':
+          - generic [ref=f1e544]:
+            - text: "Meituan: LongCat 2.0"
+            - generic [ref=f1e545]: openrouter/meituan/longcat-2.0
+        - 'button "Meta: Llama 3.1 70B Instruct openrouter/meta-llama/llama-3.1-70b-instruct" [ref=f1e546] [cursor=pointer]':
+          - generic [ref=f1e547]:
+            - text: "Meta: Llama 3.1 70B Instruct"
+            - generic [ref=f1e548]: openrouter/meta-llama/llama-3.1-70b-instruct
+        - 'button "Meta: Llama 3.1 8B Instruct openrouter/meta-llama/llama-3.1-8b-instruct" [ref=f1e549] [cursor=pointer]':
+          - generic [ref=f1e550]:
+            - text: "Meta: Llama 3.1 8B Instruct"
+            - generic [ref=f1e551]: openrouter/meta-llama/llama-3.1-8b-instruct
+        - 'button "Meta: Llama 3.3 70B Instruct openrouter/meta-llama/llama-3.3-70b-instruct" [ref=f1e552] [cursor=pointer]':
+          - generic [ref=f1e553]:
+            - text: "Meta: Llama 3.3 70B Instruct"
+            - generic [ref=f1e554]: openrouter/meta-llama/llama-3.3-70b-instruct
+        - 'button "Meta: Llama 4 Maverick openrouter/meta-llama/llama-4-maverick" [ref=f1e555] [cursor=pointer]':
+          - generic [ref=f1e556]:
+            - text: "Meta: Llama 4 Maverick"
+            - generic [ref=f1e557]: openrouter/meta-llama/llama-4-maverick
+        - 'button "Meta: Llama 4 Scout openrouter/meta-llama/llama-4-scout" [ref=f1e558] [cursor=pointer]':
+          - generic [ref=f1e559]:
+            - text: "Meta: Llama 4 Scout"
+            - generic [ref=f1e560]: openrouter/meta-llama/llama-4-scout
+        - 'button "Meta: Muse Glimmer 30B openrouter/meta/muse-glimmer-30b" [ref=f1e561] [cursor=pointer]':
+          - generic [ref=f1e562]:
+            - text: "Meta: Muse Glimmer 30B"
+            - generic [ref=f1e563]: openrouter/meta/muse-glimmer-30b
+        - 'button "Meta: Muse Glimmer 30B (batch) openrouter/meta/muse-glimmer-30b:batch" [ref=f1e564] [cursor=pointer]':
+          - generic [ref=f1e565]:
+            - text: "Meta: Muse Glimmer 30B (batch)"
+            - generic [ref=f1e566]: openrouter/meta/muse-glimmer-30b:batch
+        - 'button "Meta: Muse Spark 1.1 openrouter/meta/muse-spark-1.1" [ref=f1e567] [cursor=pointer]':
+          - generic [ref=f1e568]:
+            - text: "Meta: Muse Spark 1.1"
+            - generic [ref=f1e569]: openrouter/meta/muse-spark-1.1
+        - 'button "Meta: Muse Spark 1.2 openrouter/meta/muse-spark-1.2" [ref=f1e570] [cursor=pointer]':
+          - generic [ref=f1e571]:
+            - text: "Meta: Muse Spark 1.2"
+            - generic [ref=f1e572]: openrouter/meta/muse-spark-1.2
+        - 'button "Meta: Muse Spark 1.2 Contributor openrouter/meta/muse-spark-1.2-contributor" [ref=f1e573] [cursor=pointer]':
+          - generic [ref=f1e574]:
+            - text: "Meta: Muse Spark 1.2 Contributor"
+            - generic [ref=f1e575]: openrouter/meta/muse-spark-1.2-contributor
+        - 'button "Meta: Muse Spark 1.3 openrouter/meta/muse-spark-1.3" [ref=f1e576] [cursor=pointer]':
+          - generic [ref=f1e577]:
+            - text: "Meta: Muse Spark 1.3"
+            - generic [ref=f1e578]: openrouter/meta/muse-spark-1.3
+        - 'button "Meta: Muse Spark 1.3 Contributor openrouter/meta/muse-spark-1.3-contributor" [ref=f1e579] [cursor=pointer]':
+          - generic [ref=f1e580]:
+            - text: "Meta: Muse Spark 1.3 Contributor"
+            - generic [ref=f1e581]: openrouter/meta/muse-spark-1.3-contributor
+        - 'button "MiniMax: MiniMax M1 openrouter/minimax/minimax-m1" [ref=f1e582] [cursor=pointer]':
+          - generic [ref=f1e583]:
+            - text: "MiniMax: MiniMax M1"
+            - generic [ref=f1e584]: openrouter/minimax/minimax-m1
+        - 'button "MiniMax: MiniMax M2 openrouter/minimax/minimax-m2" [ref=f1e585] [cursor=pointer]':
+          - generic [ref=f1e586]:
+            - text: "MiniMax: MiniMax M2"
+            - generic [ref=f1e587]: openrouter/minimax/minimax-m2
+        - 'button "MiniMax: MiniMax M2.1 openrouter/minimax/minimax-m2.1" [ref=f1e588] [cursor=pointer]':
+          - generic [ref=f1e589]:
+            - text: "MiniMax: MiniMax M2.1"
+            - generic [ref=f1e590]: openrouter/minimax/minimax-m2.1
+        - 'button "MiniMax: MiniMax M2.5 openrouter/minimax/minimax-m2.5" [ref=f1e591] [cursor=pointer]':
+          - generic [ref=f1e592]:
+            - text: "MiniMax: MiniMax M2.5"
+            - generic [ref=f1e593]: openrouter/minimax/minimax-m2.5
+        - 'button "MiniMax: MiniMax M2.7 openrouter/minimax/minimax-m2.7" [ref=f1e594] [cursor=pointer]':
+          - generic [ref=f1e595]:
+            - text: "MiniMax: MiniMax M2.7"
+            - generic [ref=f1e596]: openrouter/minimax/minimax-m2.7
+        - 'button "MiniMax: MiniMax M2.7 (free) openrouter/minimax/minimax-m2.7:free" [ref=f1e597] [cursor=pointer]':
+          - generic [ref=f1e598]:
+            - text: "MiniMax: MiniMax M2.7 (free)"
+            - generic [ref=f1e599]: openrouter/minimax/minimax-m2.7:free
+        - 'button "MiniMax: MiniMax M3 openrouter/minimax/minimax-m3" [ref=f1e600] [cursor=pointer]':
+          - generic [ref=f1e601]:
+            - text: "MiniMax: MiniMax M3"
+            - generic [ref=f1e602]: openrouter/minimax/minimax-m3
+        - 'button "MiniMax: MiniMax M3 (batch) openrouter/minimax/minimax-m3:batch" [ref=f1e603] [cursor=pointer]':
+          - generic [ref=f1e604]:
+            - text: "MiniMax: MiniMax M3 (batch)"
+            - generic [ref=f1e605]: openrouter/minimax/minimax-m3:batch
+        - 'button "MiniMax: MiniMax M3 (free) openrouter/minimax/minimax-m3:free" [ref=f1e606] [cursor=pointer]':
+          - generic [ref=f1e607]:
+            - text: "MiniMax: MiniMax M3 (free)"
+            - generic [ref=f1e608]: openrouter/minimax/minimax-m3:free
+        - button "Mistral Large openrouter/mistralai/mistral-large" [ref=f1e609] [cursor=pointer]:
+          - generic [ref=f1e610]:
+            - text: Mistral Large
+            - generic [ref=f1e611]: openrouter/mistralai/mistral-large
+        - button "Mistral Large 2407 openrouter/mistralai/mistral-large-2407" [ref=f1e612] [cursor=pointer]:
+          - generic [ref=f1e613]:
+            - text: Mistral Large 2407
+            - generic [ref=f1e614]: openrouter/mistralai/mistral-large-2407
+        - 'button "Mistral: Codestral 2508 openrouter/mistralai/codestral-2508" [ref=f1e615] [cursor=pointer]':
+          - generic [ref=f1e616]:
+            - text: "Mistral: Codestral 2508"
+            - generic [ref=f1e617]: openrouter/mistralai/codestral-2508
+        - 'button "Mistral: Devstral 2 2512 openrouter/mistralai/devstral-2512" [ref=f1e618] [cursor=pointer]':
+          - generic [ref=f1e619]:
+            - text: "Mistral: Devstral 2 2512"
+            - generic [ref=f1e620]: openrouter/mistralai/devstral-2512
+        - 'button "Mistral: Ministral 3 14B 2512 openrouter/mistralai/ministral-14b-2512" [ref=f1e621] [cursor=pointer]':
+          - generic [ref=f1e622]:
+            - text: "Mistral: Ministral 3 14B 2512"
+            - generic [ref=f1e623]: openrouter/mistralai/ministral-14b-2512
+        - 'button "Mistral: Ministral 3 3B 2512 openrouter/mistralai/ministral-3b-2512" [ref=f1e624] [cursor=pointer]':
+          - generic [ref=f1e625]:
+            - text: "Mistral: Ministral 3 3B 2512"
+            - generic [ref=f1e626]: openrouter/mistralai/ministral-3b-2512
+        - 'button "Mistral: Ministral 3 8B 2512 openrouter/mistralai/ministral-8b-2512" [ref=f1e627] [cursor=pointer]':
+          - generic [ref=f1e628]:
+            - text: "Mistral: Ministral 3 8B 2512"
+            - generic [ref=f1e629]: openrouter/mistralai/ministral-8b-2512
+        - 'button "Mistral: Mistral Large 3 2512 openrouter/mistralai/mistral-large-2512" [ref=f1e630] [cursor=pointer]':
+          - generic [ref=f1e631]:
+            - text: "Mistral: Mistral Large 3 2512"
+            - generic [ref=f1e632]: openrouter/mistralai/mistral-large-2512
+        - 'button "Mistral: Mistral Medium 3 openrouter/mistralai/mistral-medium-3" [ref=f1e633] [cursor=pointer]':
+          - generic [ref=f1e634]:
+            - text: "Mistral: Mistral Medium 3"
+            - generic [ref=f1e635]: openrouter/mistralai/mistral-medium-3
+        - 'button "Mistral: Mistral Medium 3.1 openrouter/mistralai/mistral-medium-3.1" [ref=f1e636] [cursor=pointer]':
+          - generic [ref=f1e637]:
+            - text: "Mistral: Mistral Medium 3.1"
+            - generic [ref=f1e638]: openrouter/mistralai/mistral-medium-3.1
+        - 'button "Mistral: Mistral Medium 3.5 openrouter/mistralai/mistral-medium-3-5" [ref=f1e639] [cursor=pointer]':
+          - generic [ref=f1e640]:
+            - text: "Mistral: Mistral Medium 3.5"
+            - generic [ref=f1e641]: openrouter/mistralai/mistral-medium-3-5
+        - 'button "Mistral: Mistral Medium 3.5 (batch) openrouter/mistralai/mistral-medium-3-5:batch" [ref=f1e642] [cursor=pointer]':
+          - generic [ref=f1e643]:
+            - text: "Mistral: Mistral Medium 3.5 (batch)"
+            - generic [ref=f1e644]: openrouter/mistralai/mistral-medium-3-5:batch
+        - 'button "Mistral: Mistral Nemo openrouter/mistralai/mistral-nemo" [ref=f1e645] [cursor=pointer]':
+          - generic [ref=f1e646]:
+            - text: "Mistral: Mistral Nemo"
+            - generic [ref=f1e647]: openrouter/mistralai/mistral-nemo
+        - 'button "Mistral: Mistral Small 3.2 24B openrouter/mistralai/mistral-small-3.2-24b-instruct" [ref=f1e648] [cursor=pointer]':
+          - generic [ref=f1e649]:
+            - text: "Mistral: Mistral Small 3.2 24B"
+            - generic [ref=f1e650]: openrouter/mistralai/mistral-small-3.2-24b-instruct
+        - 'button "Mistral: Mistral Small 4 openrouter/mistralai/mistral-small-2603" [ref=f1e651] [cursor=pointer]':
+          - generic [ref=f1e652]:
+            - text: "Mistral: Mistral Small 4"
+            - generic [ref=f1e653]: openrouter/mistralai/mistral-small-2603
+        - 'button "Mistral: Mixtral 8x22B Instruct openrouter/mistralai/mixtral-8x22b-instruct" [ref=f1e654] [cursor=pointer]':
+          - generic [ref=f1e655]:
+            - text: "Mistral: Mixtral 8x22B Instruct"
+            - generic [ref=f1e656]: openrouter/mistralai/mixtral-8x22b-instruct
+        - 'button "Mistral: Saba openrouter/mistralai/mistral-saba" [ref=f1e657] [cursor=pointer]':
+          - generic [ref=f1e658]:
+            - text: "Mistral: Saba"
+            - generic [ref=f1e659]: openrouter/mistralai/mistral-saba
+        - 'button "Mistral: Voxtral Small 24B 2507 openrouter/mistralai/voxtral-small-24b-2507" [ref=f1e660] [cursor=pointer]':
+          - generic [ref=f1e661]:
+            - text: "Mistral: Voxtral Small 24B 2507"
+            - generic [ref=f1e662]: openrouter/mistralai/voxtral-small-24b-2507
+        - button "MoonshotAI Kimi Latest openrouter/~moonshotai/kimi-latest" [ref=f1e663] [cursor=pointer]:
+          - generic [ref=f1e664]:
+            - text: MoonshotAI Kimi Latest
+            - generic [ref=f1e665]: openrouter/~moonshotai/kimi-latest
+        - 'button "MoonshotAI: Kimi K2 0711 openrouter/moonshotai/kimi-k2" [ref=f1e666] [cursor=pointer]':
+          - generic [ref=f1e667]:
+            - text: "MoonshotAI: Kimi K2 0711"
+            - generic [ref=f1e668]: openrouter/moonshotai/kimi-k2
+        - 'button "MoonshotAI: Kimi K2 0905 openrouter/moonshotai/kimi-k2-0905" [ref=f1e669] [cursor=pointer]':
+          - generic [ref=f1e670]:
+            - text: "MoonshotAI: Kimi K2 0905"
+            - generic [ref=f1e671]: openrouter/moonshotai/kimi-k2-0905
+        - 'button "MoonshotAI: Kimi K2 Thinking openrouter/moonshotai/kimi-k2-thinking" [ref=f1e672] [cursor=pointer]':
+          - generic [ref=f1e673]:
+            - text: "MoonshotAI: Kimi K2 Thinking"
+            - generic [ref=f1e674]: openrouter/moonshotai/kimi-k2-thinking
+        - 'button "MoonshotAI: Kimi K2.5 openrouter/moonshotai/kimi-k2.5" [ref=f1e675] [cursor=pointer]':
+          - generic [ref=f1e676]:
+            - text: "MoonshotAI: Kimi K2.5"
+            - generic [ref=f1e677]: openrouter/moonshotai/kimi-k2.5
+        - 'button "MoonshotAI: Kimi K2.6 openrouter/moonshotai/kimi-k2.6" [ref=f1e678] [cursor=pointer]':
+          - generic [ref=f1e679]:
+            - text: "MoonshotAI: Kimi K2.6"
+            - generic [ref=f1e680]: openrouter/moonshotai/kimi-k2.6
+        - 'button "MoonshotAI: Kimi K2.7 Code openrouter/moonshotai/kimi-k2.7-code" [ref=f1e681] [cursor=pointer]':
+          - generic [ref=f1e682]:
+            - text: "MoonshotAI: Kimi K2.7 Code"
+            - generic [ref=f1e683]: openrouter/moonshotai/kimi-k2.7-code
+        - 'button "MoonshotAI: Kimi K3 openrouter/moonshotai/kimi-k3" [ref=f1e684] [cursor=pointer]':
+          - generic [ref=f1e685]:
+            - text: "MoonshotAI: Kimi K3"
+            - generic [ref=f1e686]: openrouter/moonshotai/kimi-k3
+        - 'button "MoonshotAI: Kimi K3 (batch) openrouter/moonshotai/kimi-k3:batch" [ref=f1e687] [cursor=pointer]':
+          - generic [ref=f1e688]:
+            - text: "MoonshotAI: Kimi K3 (batch)"
+            - generic [ref=f1e689]: openrouter/moonshotai/kimi-k3:batch
+        - 'button "NVIDIA: Nemotron 3 Nano 30B A3B openrouter/nvidia/nemotron-3-nano-30b-a3b" [ref=f1e690] [cursor=pointer]':
+          - generic [ref=f1e691]:
+            - text: "NVIDIA: Nemotron 3 Nano 30B A3B"
+            - generic [ref=f1e692]: openrouter/nvidia/nemotron-3-nano-30b-a3b
+        - 'button "NVIDIA: Nemotron 3 Nano Omni (free) openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" [ref=f1e693] [cursor=pointer]':
+          - generic [ref=f1e694]:
+            - text: "NVIDIA: Nemotron 3 Nano Omni (free)"
+            - generic [ref=f1e695]: openrouter/nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+        - 'button "NVIDIA: Nemotron 3 Super openrouter/nvidia/nemotron-3-super-120b-a12b" [ref=f1e696] [cursor=pointer]':
+          - generic [ref=f1e697]:
+            - text: "NVIDIA: Nemotron 3 Super"
+            - generic [ref=f1e698]: openrouter/nvidia/nemotron-3-super-120b-a12b
+        - 'button "NVIDIA: Nemotron 3 Super (free) openrouter/nvidia/nemotron-3-super-120b-a12b:free" [ref=f1e699] [cursor=pointer]':
+          - generic [ref=f1e700]:
+            - text: "NVIDIA: Nemotron 3 Super (free)"
+            - generic [ref=f1e701]: openrouter/nvidia/nemotron-3-super-120b-a12b:free
+        - 'button "NVIDIA: Nemotron 3 Ultra openrouter/nvidia/nemotron-3-ultra-550b-a55b" [ref=f1e702] [cursor=pointer]':
+          - generic [ref=f1e703]:
+            - text: "NVIDIA: Nemotron 3 Ultra"
+            - generic [ref=f1e704]: openrouter/nvidia/nemotron-3-ultra-550b-a55b
+        - 'button "NVIDIA: Nemotron 3 Ultra (free) openrouter/nvidia/nemotron-3-ultra-550b-a55b:free" [ref=f1e705] [cursor=pointer]':
+          - generic [ref=f1e706]:
+            - text: "NVIDIA: Nemotron 3 Ultra (free)"
+            - generic [ref=f1e707]: openrouter/nvidia/nemotron-3-ultra-550b-a55b:free
+        - 'button "NVIDIA: Nemotron 3.5 Lightning openrouter/nvidia/nemotron-3.5-lightning" [ref=f1e708] [cursor=pointer]':
+          - generic [ref=f1e709]:
+            - text: "NVIDIA: Nemotron 3.5 Lightning"
+            - generic [ref=f1e710]: openrouter/nvidia/nemotron-3.5-lightning
+        - 'button "NVIDIA: Nemotron 3.5 Lightning (free) openrouter/nvidia/nemotron-3.5-lightning:free" [ref=f1e711] [cursor=pointer]':
+          - generic [ref=f1e712]:
+            - text: "NVIDIA: Nemotron 3.5 Lightning (free)"
+            - generic [ref=f1e713]: openrouter/nvidia/nemotron-3.5-lightning:free
+        - 'button "Nex AGI: Nex-N2-Mini openrouter/nex-agi/nex-n2-mini" [ref=f1e714] [cursor=pointer]':
+          - generic [ref=f1e715]:
+            - text: "Nex AGI: Nex-N2-Mini"
+            - generic [ref=f1e716]: openrouter/nex-agi/nex-n2-mini
+        - 'button "Nex AGI: Nex-N2-Pro openrouter/nex-agi/nex-n2-pro" [ref=f1e717] [cursor=pointer]':
+          - generic [ref=f1e718]:
+            - text: "Nex AGI: Nex-N2-Pro"
+            - generic [ref=f1e719]: openrouter/nex-agi/nex-n2-pro
+        - 'button "Nex AGI: Nex-N2.5-Mini (free) openrouter/nex-agi/nex-n2.5-mini:free" [ref=f1e720] [cursor=pointer]':
+          - generic [ref=f1e721]:
+            - text: "Nex AGI: Nex-N2.5-Mini (free)"
+            - generic [ref=f1e722]: openrouter/nex-agi/nex-n2.5-mini:free
+        - 'button "Nex AGI: Nex-N2.5-Pro (free) openrouter/nex-agi/nex-n2.5-pro:free" [ref=f1e723] [cursor=pointer]':
+          - generic [ref=f1e724]:
+            - text: "Nex AGI: Nex-N2.5-Pro (free)"
+            - generic [ref=f1e725]: openrouter/nex-agi/nex-n2.5-pro:free
+        - button "OpenAI GPT Latest openrouter/~openai/gpt-latest" [ref=f1e726] [cursor=pointer]:
+          - generic [ref=f1e727]:
+            - text: OpenAI GPT Latest
+            - generic [ref=f1e728]: openrouter/~openai/gpt-latest
+        - button "OpenAI GPT Mini Latest openrouter/~openai/gpt-mini-latest" [ref=f1e729] [cursor=pointer]:
+          - generic [ref=f1e730]:
+            - text: OpenAI GPT Mini Latest
+            - generic [ref=f1e731]: openrouter/~openai/gpt-mini-latest
+        - 'button "OpenAI: GPT Audio openrouter/openai/gpt-audio" [ref=f1e732] [cursor=pointer]':
+          - generic [ref=f1e733]:
+            - text: "OpenAI: GPT Audio"
+            - generic [ref=f1e734]: openrouter/openai/gpt-audio
+        - 'button "OpenAI: GPT Audio Mini openrouter/openai/gpt-audio-mini" [ref=f1e735] [cursor=pointer]':
+          - generic [ref=f1e736]:
+            - text: "OpenAI: GPT Audio Mini"
+            - generic [ref=f1e737]: openrouter/openai/gpt-audio-mini
+        - 'button "OpenAI: GPT Chat Latest openrouter/openai/gpt-chat-latest" [ref=f1e738] [cursor=pointer]':
+          - generic [ref=f1e739]:
+            - text: "OpenAI: GPT Chat Latest"
+            - generic [ref=f1e740]: openrouter/openai/gpt-chat-latest
+        - 'button "OpenAI: GPT-3.5 Turbo openrouter/openai/gpt-3.5-turbo" [ref=f1e741] [cursor=pointer]':
+          - generic [ref=f1e742]:
+            - text: "OpenAI: GPT-3.5 Turbo"
+            - generic [ref=f1e743]: openrouter/openai/gpt-3.5-turbo
+        - 'button "OpenAI: GPT-3.5 Turbo (batch) openrouter/openai/gpt-3.5-turbo:batch" [ref=f1e744] [cursor=pointer]':
+          - generic [ref=f1e745]:
+            - text: "OpenAI: GPT-3.5 Turbo (batch)"
+            - generic [ref=f1e746]: openrouter/openai/gpt-3.5-turbo:batch
+        - 'button "OpenAI: GPT-3.5 Turbo (older v0613) openrouter/openai/gpt-3.5-turbo-0613" [ref=f1e747] [cursor=pointer]':
+          - generic [ref=f1e748]:
+            - text: "OpenAI: GPT-3.5 Turbo (older v0613)"
+            - generic [ref=f1e749]: openrouter/openai/gpt-3.5-turbo-0613
+        - 'button "OpenAI: GPT-3.5 Turbo 16k openrouter/openai/gpt-3.5-turbo-16k" [ref=f1e750] [cursor=pointer]':
+          - generic [ref=f1e751]:
+            - text: "OpenAI: GPT-3.5 Turbo 16k"
+            - generic [ref=f1e752]: openrouter/openai/gpt-3.5-turbo-16k
+        - 'button "OpenAI: GPT-4 openrouter/openai/gpt-4" [ref=f1e753] [cursor=pointer]':
+          - generic [ref=f1e754]:
+            - text: "OpenAI: GPT-4"
+            - generic [ref=f1e755]: openrouter/openai/gpt-4
+        - 'button "OpenAI: GPT-4 Turbo openrouter/openai/gpt-4-turbo" [ref=f1e756] [cursor=pointer]':
+          - generic [ref=f1e757]:
+            - text: "OpenAI: GPT-4 Turbo"
+            - generic [ref=f1e758]: openrouter/openai/gpt-4-turbo
+        - 'button "OpenAI: GPT-4 Turbo (batch) openrouter/openai/gpt-4-turbo:batch" [ref=f1e759] [cursor=pointer]':
+          - generic [ref=f1e760]:
+            - text: "OpenAI: GPT-4 Turbo (batch)"
+            - generic [ref=f1e761]: openrouter/openai/gpt-4-turbo:batch
+        - 'button "OpenAI: GPT-4 Turbo Preview openrouter/openai/gpt-4-turbo-preview" [ref=f1e762] [cursor=pointer]':
+          - generic [ref=f1e763]:
+            - text: "OpenAI: GPT-4 Turbo Preview"
+            - generic [ref=f1e764]: openrouter/openai/gpt-4-turbo-preview
+        - 'button "OpenAI: GPT-4.1 openrouter/openai/gpt-4.1" [ref=f1e765] [cursor=pointer]':
+          - generic [ref=f1e766]:
+            - text: "OpenAI: GPT-4.1"
+            - generic [ref=f1e767]: openrouter/openai/gpt-4.1
+        - 'button "OpenAI: GPT-4.1 (batch) openrouter/openai/gpt-4.1:batch" [ref=f1e768] [cursor=pointer]':
+          - generic [ref=f1e769]:
+            - text: "OpenAI: GPT-4.1 (batch)"
+            - generic [ref=f1e770]: openrouter/openai/gpt-4.1:batch
+        - 'button "OpenAI: GPT-4.1 Mini openrouter/openai/gpt-4.1-mini" [ref=f1e771] [cursor=pointer]':
+          - generic [ref=f1e772]:
+            - text: "OpenAI: GPT-4.1 Mini"
+            - generic [ref=f1e773]: openrouter/openai/gpt-4.1-mini
+        - 'button "OpenAI: GPT-4.1 Mini (batch) openrouter/openai/gpt-4.1-mini:batch" [ref=f1e774] [cursor=pointer]':
+          - generic [ref=f1e775]:
+            - text: "OpenAI: GPT-4.1 Mini (batch)"
+            - generic [ref=f1e776]: openrouter/openai/gpt-4.1-mini:batch
+        - 'button "OpenAI: GPT-4.1 Nano openrouter/openai/gpt-4.1-nano" [ref=f1e777] [cursor=pointer]':
+          - generic [ref=f1e778]:
+            - text: "OpenAI: GPT-4.1 Nano"
+            - generic [ref=f1e779]: openrouter/openai/gpt-4.1-nano
+        - 'button "OpenAI: GPT-4.1 Nano (batch) openrouter/openai/gpt-4.1-nano:batch" [ref=f1e780] [cursor=pointer]':
+          - generic [ref=f1e781]:
+            - text: "OpenAI: GPT-4.1 Nano (batch)"
+            - generic [ref=f1e782]: openrouter/openai/gpt-4.1-nano:batch
+        - 'button "OpenAI: GPT-4o openrouter/openai/gpt-4o" [ref=f1e783] [cursor=pointer]':
+          - generic [ref=f1e784]:
+            - text: "OpenAI: GPT-4o"
+            - generic [ref=f1e785]: openrouter/openai/gpt-4o
+        - 'button "OpenAI: GPT-4o (2024-05-13) openrouter/openai/gpt-4o-2024-05-13" [ref=f1e786] [cursor=pointer]':
+          - generic [ref=f1e787]:
+            - text: "OpenAI: GPT-4o (2024-05-13)"
+            - generic [ref=f1e788]: openrouter/openai/gpt-4o-2024-05-13
+        - 'button "OpenAI: GPT-4o (2024-08-06) openrouter/openai/gpt-4o-2024-08-06" [ref=f1e789] [cursor=pointer]':
+          - generic [ref=f1e790]:
+            - text: "OpenAI: GPT-4o (2024-08-06)"
+            - generic [ref=f1e791]: openrouter/openai/gpt-4o-2024-08-06
+        - 'button "OpenAI: GPT-4o (2024-11-20) openrouter/openai/gpt-4o-2024-11-20" [ref=f1e792] [cursor=pointer]':
+          - generic [ref=f1e793]:
+            - text: "OpenAI: GPT-4o (2024-11-20)"
+            - generic [ref=f1e794]: openrouter/openai/gpt-4o-2024-11-20
+        - 'button "OpenAI: GPT-4o (batch) openrouter/openai/gpt-4o:batch" [ref=f1e795] [cursor=pointer]':
+          - generic [ref=f1e796]:
+            - text: "OpenAI: GPT-4o (batch)"
+            - generic [ref=f1e797]: openrouter/openai/gpt-4o:batch
+        - 'button "OpenAI: GPT-4o-mini openrouter/openai/gpt-4o-mini" [ref=f1e798] [cursor=pointer]':
+          - generic [ref=f1e799]:
+            - text: "OpenAI: GPT-4o-mini"
+            - generic [ref=f1e800]: openrouter/openai/gpt-4o-mini
+        - 'button "OpenAI: GPT-4o-mini (2024-07-18) openrouter/openai/gpt-4o-mini-2024-07-18" [ref=f1e801] [cursor=pointer]':
+          - generic [ref=f1e802]:
+            - text: "OpenAI: GPT-4o-mini (2024-07-18)"
+            - generic [ref=f1e803]: openrouter/openai/gpt-4o-mini-2024-07-18
+        - 'button "OpenAI: GPT-4o-mini (batch) openrouter/openai/gpt-4o-mini:batch" [ref=f1e804] [cursor=pointer]':
+          - generic [ref=f1e805]:
+            - text: "OpenAI: GPT-4o-mini (batch)"
+            - generic [ref=f1e806]: openrouter/openai/gpt-4o-mini:batch
+        - 'button "OpenAI: GPT-5 openrouter/openai/gpt-5" [ref=f1e807] [cursor=pointer]':
+          - generic [ref=f1e808]:
+            - text: "OpenAI: GPT-5"
+            - generic [ref=f1e809]: openrouter/openai/gpt-5
+        - 'button "OpenAI: GPT-5 (batch) openrouter/openai/gpt-5:batch" [ref=f1e810] [cursor=pointer]':
+          - generic [ref=f1e811]:
+            - text: "OpenAI: GPT-5 (batch)"
+            - generic [ref=f1e812]: openrouter/openai/gpt-5:batch
+        - 'button "OpenAI: GPT-5 Mini openrouter/openai/gpt-5-mini" [ref=f1e813] [cursor=pointer]':
+          - generic [ref=f1e814]:
+            - text: "OpenAI: GPT-5 Mini"
+            - generic [ref=f1e815]: openrouter/openai/gpt-5-mini
+        - 'button "OpenAI: GPT-5 Mini (batch) openrouter/openai/gpt-5-mini:batch" [ref=f1e816] [cursor=pointer]':
+          - generic [ref=f1e817]:
+            - text: "OpenAI: GPT-5 Mini (batch)"
+            - generic [ref=f1e818]: openrouter/openai/gpt-5-mini:batch
+        - 'button "OpenAI: GPT-5 Nano openrouter/openai/gpt-5-nano" [ref=f1e819] [cursor=pointer]':
+          - generic [ref=f1e820]:
+            - text: "OpenAI: GPT-5 Nano"
+            - generic [ref=f1e821]: openrouter/openai/gpt-5-nano
+        - 'button "OpenAI: GPT-5 Nano (batch) openrouter/openai/gpt-5-nano:batch" [ref=f1e822] [cursor=pointer]':
+          - generic [ref=f1e823]:
+            - text: "OpenAI: GPT-5 Nano (batch)"
+            - generic [ref=f1e824]: openrouter/openai/gpt-5-nano:batch
+        - 'button "OpenAI: GPT-5 Pro openrouter/openai/gpt-5-pro" [ref=f1e825] [cursor=pointer]':
+          - generic [ref=f1e826]:
+            - text: "OpenAI: GPT-5 Pro"
+            - generic [ref=f1e827]: openrouter/openai/gpt-5-pro
+        - 'button "OpenAI: GPT-5 Pro (batch) openrouter/openai/gpt-5-pro:batch" [ref=f1e828] [cursor=pointer]':
+          - generic [ref=f1e829]:
+            - text: "OpenAI: GPT-5 Pro (batch)"
+            - generic [ref=f1e830]: openrouter/openai/gpt-5-pro:batch
+        - 'button "OpenAI: GPT-5.1 openrouter/openai/gpt-5.1" [ref=f1e831] [cursor=pointer]':
+          - generic [ref=f1e832]:
+            - text: "OpenAI: GPT-5.1"
+            - generic [ref=f1e833]: openrouter/openai/gpt-5.1
+        - 'button "OpenAI: GPT-5.1 (batch) openrouter/openai/gpt-5.1:batch" [ref=f1e834] [cursor=pointer]':
+          - generic [ref=f1e835]:
+            - text: "OpenAI: GPT-5.1 (batch)"
+            - generic [ref=f1e836]: openrouter/openai/gpt-5.1:batch
+        - 'button "OpenAI: GPT-5.1-Codex openrouter/openai/gpt-5.1-codex" [ref=f1e837] [cursor=pointer]':
+          - generic [ref=f1e838]:
+            - text: "OpenAI: GPT-5.1-Codex"
+            - generic [ref=f1e839]: openrouter/openai/gpt-5.1-codex
+        - 'button "OpenAI: GPT-5.1-Codex-Max openrouter/openai/gpt-5.1-codex-max" [ref=f1e840] [cursor=pointer]':
+          - generic [ref=f1e841]:
+            - text: "OpenAI: GPT-5.1-Codex-Max"
+            - generic [ref=f1e842]: openrouter/openai/gpt-5.1-codex-max
+        - 'button "OpenAI: GPT-5.1-Codex-Mini openrouter/openai/gpt-5.1-codex-mini" [ref=f1e843] [cursor=pointer]':
+          - generic [ref=f1e844]:
+            - text: "OpenAI: GPT-5.1-Codex-Mini"
+            - generic [ref=f1e845]: openrouter/openai/gpt-5.1-codex-mini
+        - 'button "OpenAI: GPT-5.2 openrouter/openai/gpt-5.2" [ref=f1e846] [cursor=pointer]':
+          - generic [ref=f1e847]:
+            - text: "OpenAI: GPT-5.2"
+            - generic [ref=f1e848]: openrouter/openai/gpt-5.2
+        - 'button "OpenAI: GPT-5.2 (batch) openrouter/openai/gpt-5.2:batch" [ref=f1e849] [cursor=pointer]':
+          - generic [ref=f1e850]:
+            - text: "OpenAI: GPT-5.2 (batch)"
+            - generic [ref=f1e851]: openrouter/openai/gpt-5.2:batch
+        - 'button "OpenAI: GPT-5.2 Chat openrouter/openai/gpt-5.2-chat" [ref=f1e852] [cursor=pointer]':
+          - generic [ref=f1e853]:
+            - text: "OpenAI: GPT-5.2 Chat"
+            - generic [ref=f1e854]: openrouter/openai/gpt-5.2-chat
+        - 'button "OpenAI: GPT-5.2 Pro openrouter/openai/gpt-5.2-pro" [ref=f1e855] [cursor=pointer]':
+          - generic [ref=f1e856]:
+            - text: "OpenAI: GPT-5.2 Pro"
+            - generic [ref=f1e857]: openrouter/openai/gpt-5.2-pro
+        - 'button "OpenAI: GPT-5.2 Pro (batch) openrouter/openai/gpt-5.2-pro:batch" [ref=f1e858] [cursor=pointer]':
+          - generic [ref=f1e859]:
+            - text: "OpenAI: GPT-5.2 Pro (batch)"
+            - generic [ref=f1e860]: openrouter/openai/gpt-5.2-pro:batch
+        - 'button "OpenAI: GPT-5.2-Codex openrouter/openai/gpt-5.2-codex" [ref=f1e861] [cursor=pointer]':
+          - generic [ref=f1e862]:
+            - text: "OpenAI: GPT-5.2-Codex"
+            - generic [ref=f1e863]: openrouter/openai/gpt-5.2-codex
+        - 'button "OpenAI: GPT-5.3-Codex openrouter/openai/gpt-5.3-codex" [ref=f1e864] [cursor=pointer]':
+          - generic [ref=f1e865]:
+            - text: "OpenAI: GPT-5.3-Codex"
+            - generic [ref=f1e866]: openrouter/openai/gpt-5.3-codex
+        - 'button "OpenAI: GPT-5.4 openrouter/openai/gpt-5.4" [ref=f1e867] [cursor=pointer]':
+          - generic [ref=f1e868]:
+            - text: "OpenAI: GPT-5.4"
+            - generic [ref=f1e869]: openrouter/openai/gpt-5.4
+        - 'button "OpenAI: GPT-5.4 (batch) openrouter/openai/gpt-5.4:batch" [ref=f1e870] [cursor=pointer]':
+          - generic [ref=f1e871]:
+            - text: "OpenAI: GPT-5.4 (batch)"
+            - generic [ref=f1e872]: openrouter/openai/gpt-5.4:batch
+        - 'button "OpenAI: GPT-5.4 Mini openrouter/openai/gpt-5.4-mini" [ref=f1e873] [cursor=pointer]':
+          - generic [ref=f1e874]:
+            - text: "OpenAI: GPT-5.4 Mini"
+            - generic [ref=f1e875]: openrouter/openai/gpt-5.4-mini
+        - 'button "OpenAI: GPT-5.4 Mini (batch) openrouter/openai/gpt-5.4-mini:batch" [ref=f1e876] [cursor=pointer]':
+          - generic [ref=f1e877]:
+            - text: "OpenAI: GPT-5.4 Mini (batch)"
+            - generic [ref=f1e878]: openrouter/openai/gpt-5.4-mini:batch
+        - 'button "OpenAI: GPT-5.4 Nano openrouter/openai/gpt-5.4-nano" [ref=f1e879] [cursor=pointer]':
+          - generic [ref=f1e880]:
+            - text: "OpenAI: GPT-5.4 Nano"
+            - generic [ref=f1e881]: openrouter/openai/gpt-5.4-nano
+        - 'button "OpenAI: GPT-5.4 Nano (batch) openrouter/openai/gpt-5.4-nano:batch" [ref=f1e882] [cursor=pointer]':
+          - generic [ref=f1e883]:
+            - text: "OpenAI: GPT-5.4 Nano (batch)"
+            - generic [ref=f1e884]: openrouter/openai/gpt-5.4-nano:batch
+        - 'button "OpenAI: GPT-5.4 Pro openrouter/openai/gpt-5.4-pro" [ref=f1e885] [cursor=pointer]':
+          - generic [ref=f1e886]:
+            - text: "OpenAI: GPT-5.4 Pro"
+            - generic [ref=f1e887]: openrouter/openai/gpt-5.4-pro
+        - 'button "OpenAI: GPT-5.4 Pro (batch) openrouter/openai/gpt-5.4-pro:batch" [ref=f1e888] [cursor=pointer]':
+          - generic [ref=f1e889]:
+            - text: "OpenAI: GPT-5.4 Pro (batch)"
+            - generic [ref=f1e890]: openrouter/openai/gpt-5.4-pro:batch
+        - 'button "OpenAI: GPT-5.5 openrouter/openai/gpt-5.5" [ref=f1e891] [cursor=pointer]':
+          - generic [ref=f1e892]:
+            - text: "OpenAI: GPT-5.5"
+            - generic [ref=f1e893]: openrouter/openai/gpt-5.5
+        - 'button "OpenAI: GPT-5.5 (batch) openrouter/openai/gpt-5.5:batch" [ref=f1e894] [cursor=pointer]':
+          - generic [ref=f1e895]:
+            - text: "OpenAI: GPT-5.5 (batch)"
+            - generic [ref=f1e896]: openrouter/openai/gpt-5.5:batch
+        - 'button "OpenAI: GPT-5.5 Pro openrouter/openai/gpt-5.5-pro" [ref=f1e897] [cursor=pointer]':
+          - generic [ref=f1e898]:
+            - text: "OpenAI: GPT-5.5 Pro"
+            - generic [ref=f1e899]: openrouter/openai/gpt-5.5-pro
+        - 'button "OpenAI: GPT-5.5 Pro (batch) openrouter/openai/gpt-5.5-pro:batch" [ref=f1e900] [cursor=pointer]':
+          - generic [ref=f1e901]:
+            - text: "OpenAI: GPT-5.5 Pro (batch)"
+            - generic [ref=f1e902]: openrouter/openai/gpt-5.5-pro:batch
+        - 'button "OpenAI: GPT-5.6 Luna openrouter/openai/gpt-5.6-luna" [ref=f1e903] [cursor=pointer]':
+          - generic [ref=f1e904]:
+            - text: "OpenAI: GPT-5.6 Luna"
+            - generic [ref=f1e905]: openrouter/openai/gpt-5.6-luna
+        - 'button "OpenAI: GPT-5.6 Luna (batch) openrouter/openai/gpt-5.6-luna:batch" [ref=f1e906] [cursor=pointer]':
+          - generic [ref=f1e907]:
+            - text: "OpenAI: GPT-5.6 Luna (batch)"
+            - generic [ref=f1e908]: openrouter/openai/gpt-5.6-luna:batch
+        - 'button "OpenAI: GPT-5.6 Luna Pro openrouter/openai/gpt-5.6-luna-pro" [ref=f1e909] [cursor=pointer]':
+          - generic [ref=f1e910]:
+            - text: "OpenAI: GPT-5.6 Luna Pro"
+            - generic [ref=f1e911]: openrouter/openai/gpt-5.6-luna-pro
+        - 'button "OpenAI: GPT-5.6 Luna Pro (batch) openrouter/openai/gpt-5.6-luna-pro:batch" [ref=f1e912] [cursor=pointer]':
+          - generic [ref=f1e913]:
+            - text: "OpenAI: GPT-5.6 Luna Pro (batch)"
+            - generic [ref=f1e914]: openrouter/openai/gpt-5.6-luna-pro:batch
+        - 'button "OpenAI: GPT-5.6 Sol openrouter/openai/gpt-5.6-sol" [ref=f1e915] [cursor=pointer]':
+          - generic [ref=f1e916]:
+            - text: "OpenAI: GPT-5.6 Sol"
+            - generic [ref=f1e917]: openrouter/openai/gpt-5.6-sol
+        - 'button "OpenAI: GPT-5.6 Sol (batch) openrouter/openai/gpt-5.6-sol:batch" [ref=f1e918] [cursor=pointer]':
+          - generic [ref=f1e919]:
+            - text: "OpenAI: GPT-5.6 Sol (batch)"
+            - generic [ref=f1e920]: openrouter/openai/gpt-5.6-sol:batch
+        - 'button "OpenAI: GPT-5.6 Sol Pro openrouter/openai/gpt-5.6-sol-pro" [ref=f1e921] [cursor=pointer]':
+          - generic [ref=f1e922]:
+            - text: "OpenAI: GPT-5.6 Sol Pro"
+            - generic [ref=f1e923]: openrouter/openai/gpt-5.6-sol-pro
+        - 'button "OpenAI: GPT-5.6 Sol Pro (batch) openrouter/openai/gpt-5.6-sol-pro:batch" [ref=f1e924] [cursor=pointer]':
+          - generic [ref=f1e925]:
+            - text: "OpenAI: GPT-5.6 Sol Pro (batch)"
+            - generic [ref=f1e926]: openrouter/openai/gpt-5.6-sol-pro:batch
+        - 'button "OpenAI: GPT-5.6 Terra openrouter/openai/gpt-5.6-terra" [ref=f1e927] [cursor=pointer]':
+          - generic [ref=f1e928]:
+            - text: "OpenAI: GPT-5.6 Terra"
+            - generic [ref=f1e929]: openrouter/openai/gpt-5.6-terra
+        - 'button "OpenAI: GPT-5.6 Terra (batch) openrouter/openai/gpt-5.6-terra:batch" [ref=f1e930] [cursor=pointer]':
+          - generic [ref=f1e931]:
+            - text: "OpenAI: GPT-5.6 Terra (batch)"
+            - generic [ref=f1e932]: openrouter/openai/gpt-5.6-terra:batch
+        - 'button "OpenAI: GPT-5.6 Terra Pro openrouter/openai/gpt-5.6-terra-pro" [ref=f1e933] [cursor=pointer]':
+          - generic [ref=f1e934]:
+            - text: "OpenAI: GPT-5.6 Terra Pro"
+            - generic [ref=f1e935]: openrouter/openai/gpt-5.6-terra-pro
+        - 'button "OpenAI: GPT-5.6 Terra Pro (batch) openrouter/openai/gpt-5.6-terra-pro:batch" [ref=f1e936] [cursor=pointer]':
+          - generic [ref=f1e937]:
+            - text: "OpenAI: GPT-5.6 Terra Pro (batch)"
+            - generic [ref=f1e938]: openrouter/openai/gpt-5.6-terra-pro:batch
+        - 'button "OpenAI: GPT-6 Astra openrouter/openai/gpt-6-astra" [ref=f1e939] [cursor=pointer]':
+          - generic [ref=f1e940]:
+            - text: "OpenAI: GPT-6 Astra"
+            - generic [ref=f1e941]: openrouter/openai/gpt-6-astra
+        - 'button "OpenAI: GPT-6 Astra (batch) openrouter/openai/gpt-6-astra:batch" [ref=f1e942] [cursor=pointer]':
+          - generic [ref=f1e943]:
+            - text: "OpenAI: GPT-6 Astra (batch)"
+            - generic [ref=f1e944]: openrouter/openai/gpt-6-astra:batch
+        - 'button "OpenAI: GPT-6 Astra Pro openrouter/openai/gpt-6-astra-pro" [ref=f1e945] [cursor=pointer]':
+          - generic [ref=f1e946]:
+            - text: "OpenAI: GPT-6 Astra Pro"
+            - generic [ref=f1e947]: openrouter/openai/gpt-6-astra-pro
+        - 'button "OpenAI: GPT-6 Astra Pro (batch) openrouter/openai/gpt-6-astra-pro:batch" [ref=f1e948] [cursor=pointer]':
+          - generic [ref=f1e949]:
+            - text: "OpenAI: GPT-6 Astra Pro (batch)"
+            - generic [ref=f1e950]: openrouter/openai/gpt-6-astra-pro:batch
+        - 'button "OpenAI: gpt-oss-120b openrouter/openai/gpt-oss-120b" [ref=f1e951] [cursor=pointer]':
+          - generic [ref=f1e952]:
+            - text: "OpenAI: gpt-oss-120b"
+            - generic [ref=f1e953]: openrouter/openai/gpt-oss-120b
+        - 'button "OpenAI: gpt-oss-120b (batch) openrouter/openai/gpt-oss-120b:batch" [ref=f1e954] [cursor=pointer]':
+          - generic [ref=f1e955]:
+            - text: "OpenAI: gpt-oss-120b (batch)"
+            - generic [ref=f1e956]: openrouter/openai/gpt-oss-120b:batch
+        - 'button "OpenAI: gpt-oss-20b openrouter/openai/gpt-oss-20b" [ref=f1e957] [cursor=pointer]':
+          - generic [ref=f1e958]:
+            - text: "OpenAI: gpt-oss-20b"
+            - generic [ref=f1e959]: openrouter/openai/gpt-oss-20b
+        - 'button "OpenAI: gpt-oss-safeguard-20b openrouter/openai/gpt-oss-safeguard-20b" [ref=f1e960] [cursor=pointer]':
+          - generic [ref=f1e961]:
+            - text: "OpenAI: gpt-oss-safeguard-20b"
+            - generic [ref=f1e962]: openrouter/openai/gpt-oss-safeguard-20b
+        - 'button "OpenAI: o1 openrouter/openai/o1" [ref=f1e963] [cursor=pointer]':
+          - generic [ref=f1e964]:
+            - text: "OpenAI: o1"
+            - generic [ref=f1e965]: openrouter/openai/o1
+        - 'button "OpenAI: o3 openrouter/openai/o3" [ref=f1e966] [cursor=pointer]':
+          - generic [ref=f1e967]:
+            - text: "OpenAI: o3"
+            - generic [ref=f1e968]: openrouter/openai/o3
+        - 'button "OpenAI: o3 (batch) openrouter/openai/o3:batch" [ref=f1e969] [cursor=pointer]':
+          - generic [ref=f1e970]:
+            - text: "OpenAI: o3 (batch)"
+            - generic [ref=f1e971]: openrouter/openai/o3:batch
+        - 'button "OpenAI: o3 Mini openrouter/openai/o3-mini" [ref=f1e972] [cursor=pointer]':
+          - generic [ref=f1e973]:
+            - text: "OpenAI: o3 Mini"
+            - generic [ref=f1e974]: openrouter/openai/o3-mini
+        - 'button "OpenAI: o3 Mini (batch) openrouter/openai/o3-mini:batch" [ref=f1e975] [cursor=pointer]':
+          - generic [ref=f1e976]:
+            - text: "OpenAI: o3 Mini (batch)"
+            - generic [ref=f1e977]: openrouter/openai/o3-mini:batch
+        - 'button "OpenAI: o3 Mini High openrouter/openai/o3-mini-high" [ref=f1e978] [cursor=pointer]':
+          - generic [ref=f1e979]:
+            - text: "OpenAI: o3 Mini High"
+            - generic [ref=f1e980]: openrouter/openai/o3-mini-high
+        - 'button "OpenAI: o3 Pro openrouter/openai/o3-pro" [ref=f1e981] [cursor=pointer]':
+          - generic [ref=f1e982]:
+            - text: "OpenAI: o3 Pro"
+            - generic [ref=f1e983]: openrouter/openai/o3-pro
+        - 'button "OpenAI: o4 Mini openrouter/openai/o4-mini" [ref=f1e984] [cursor=pointer]':
+          - generic [ref=f1e985]:
+            - text: "OpenAI: o4 Mini"
+            - generic [ref=f1e986]: openrouter/openai/o4-mini
+        - 'button "OpenAI: o4 Mini (batch) openrouter/openai/o4-mini:batch" [ref=f1e987] [cursor=pointer]':
+          - generic [ref=f1e988]:
+            - text: "OpenAI: o4 Mini (batch)"
+            - generic [ref=f1e989]: openrouter/openai/o4-mini:batch
+        - 'button "OpenAI: o4 Mini High openrouter/openai/o4-mini-high" [ref=f1e990] [cursor=pointer]':
+          - generic [ref=f1e991]:
+            - text: "OpenAI: o4 Mini High"
+            - generic [ref=f1e992]: openrouter/openai/o4-mini-high
+        - 'button "OpenRouter: Fusion openrouter/openrouter/fusion" [ref=f1e993] [cursor=pointer]':
+          - generic [ref=f1e994]:
+            - text: "OpenRouter: Fusion"
+            - generic [ref=f1e995]: openrouter/openrouter/fusion
+        - 'button "Poolside: Laguna S 2.1 openrouter/poolside/laguna-s-2.1" [ref=f1e996] [cursor=pointer]':
+          - generic [ref=f1e997]:
+            - text: "Poolside: Laguna S 2.1"
+            - generic [ref=f1e998]: openrouter/poolside/laguna-s-2.1
+        - 'button "Poolside: Laguna S 2.1 (free) openrouter/poolside/laguna-s-2.1:free" [ref=f1e999] [cursor=pointer]':
+          - generic [ref=f1e1000]:
+            - text: "Poolside: Laguna S 2.1 (free)"
+            - generic [ref=f1e1001]: openrouter/poolside/laguna-s-2.1:free
+        - 'button "Poolside: Laguna XS 2.1 openrouter/poolside/laguna-xs-2.1" [ref=f1e1002] [cursor=pointer]':
+          - generic [ref=f1e1003]:
+            - text: "Poolside: Laguna XS 2.1"
+            - generic [ref=f1e1004]: openrouter/poolside/laguna-xs-2.1
+        - 'button "Poolside: Laguna XS 2.1 (free) openrouter/poolside/laguna-xs-2.1:free" [ref=f1e1005] [cursor=pointer]':
+          - generic [ref=f1e1006]:
+            - text: "Poolside: Laguna XS 2.1 (free)"
+            - generic [ref=f1e1007]: openrouter/poolside/laguna-xs-2.1:free
+        - button "Qwen2.5 72B Instruct openrouter/qwen/qwen-2.5-72b-instruct" [ref=f1e1008] [cursor=pointer]:
+          - generic [ref=f1e1009]:
+            - text: Qwen2.5 72B Instruct
+            - generic [ref=f1e1010]: openrouter/qwen/qwen-2.5-72b-instruct
+        - 'button "Qwen: Qwen Plus 0728 openrouter/qwen/qwen-plus-2025-07-28" [ref=f1e1011] [cursor=pointer]':
+          - generic [ref=f1e1012]:
+            - text: "Qwen: Qwen Plus 0728"
+            - generic [ref=f1e1013]: openrouter/qwen/qwen-plus-2025-07-28
+        - 'button "Qwen: Qwen-Plus openrouter/qwen/qwen-plus" [ref=f1e1014] [cursor=pointer]':
+          - generic [ref=f1e1015]:
+            - text: "Qwen: Qwen-Plus"
+            - generic [ref=f1e1016]: openrouter/qwen/qwen-plus
+        - 'button "Qwen: Qwen2.5 7B Instruct openrouter/qwen/qwen-2.5-7b-instruct" [ref=f1e1017] [cursor=pointer]':
+          - generic [ref=f1e1018]:
+            - text: "Qwen: Qwen2.5 7B Instruct"
+            - generic [ref=f1e1019]: openrouter/qwen/qwen-2.5-7b-instruct
+        - 'button "Qwen: Qwen3 14B openrouter/qwen/qwen3-14b" [ref=f1e1020] [cursor=pointer]':
+          - generic [ref=f1e1021]:
+            - text: "Qwen: Qwen3 14B"
+            - generic [ref=f1e1022]: openrouter/qwen/qwen3-14b
+        - 'button "Qwen: Qwen3 235B A22B openrouter/qwen/qwen3-235b-a22b" [ref=f1e1023] [cursor=pointer]':
+          - generic [ref=f1e1024]:
+            - text: "Qwen: Qwen3 235B A22B"
+            - generic [ref=f1e1025]: openrouter/qwen/qwen3-235b-a22b
+        - 'button "Qwen: Qwen3 235B A22B Instruct 2507 openrouter/qwen/qwen3-235b-a22b-2507" [ref=f1e1026] [cursor=pointer]':
+          - generic [ref=f1e1027]:
+            - text: "Qwen: Qwen3 235B A22B Instruct 2507"
+            - generic [ref=f1e1028]: openrouter/qwen/qwen3-235b-a22b-2507
+        - 'button "Qwen: Qwen3 235B A22B Thinking 2507 openrouter/qwen/qwen3-235b-a22b-thinking-2507" [ref=f1e1029] [cursor=pointer]':
+          - generic [ref=f1e1030]:
+            - text: "Qwen: Qwen3 235B A22B Thinking 2507"
+            - generic [ref=f1e1031]: openrouter/qwen/qwen3-235b-a22b-thinking-2507
+        - 'button "Qwen: Qwen3 30B A3B openrouter/qwen/qwen3-30b-a3b" [ref=f1e1032] [cursor=pointer]':
+          - generic [ref=f1e1033]:
+            - text: "Qwen: Qwen3 30B A3B"
+            - generic [ref=f1e1034]: openrouter/qwen/qwen3-30b-a3b
+        - 'button "Qwen: Qwen3 30B A3B Instruct 2507 openrouter/qwen/qwen3-30b-a3b-instruct-2507" [ref=f1e1035] [cursor=pointer]':
+          - generic [ref=f1e1036]:
+            - text: "Qwen: Qwen3 30B A3B Instruct 2507"
+            - generic [ref=f1e1037]: openrouter/qwen/qwen3-30b-a3b-instruct-2507
+        - 'button "Qwen: Qwen3 30B A3B Thinking 2507 openrouter/qwen/qwen3-30b-a3b-thinking-2507" [ref=f1e1038] [cursor=pointer]':
+          - generic [ref=f1e1039]:
+            - text: "Qwen: Qwen3 30B A3B Thinking 2507"
+            - generic [ref=f1e1040]: openrouter/qwen/qwen3-30b-a3b-thinking-2507
+        - 'button "Qwen: Qwen3 32B openrouter/qwen/qwen3-32b" [ref=f1e1041] [cursor=pointer]':
+          - generic [ref=f1e1042]:
+            - text: "Qwen: Qwen3 32B"
+            - generic [ref=f1e1043]: openrouter/qwen/qwen3-32b
+        - 'button "Qwen: Qwen3 8B openrouter/qwen/qwen3-8b" [ref=f1e1044] [cursor=pointer]':
+          - generic [ref=f1e1045]:
+            - text: "Qwen: Qwen3 8B"
+            - generic [ref=f1e1046]: openrouter/qwen/qwen3-8b
+        - 'button "Qwen: Qwen3 Coder 30B A3B Instruct openrouter/qwen/qwen3-coder-30b-a3b-instruct" [ref=f1e1047] [cursor=pointer]':
+          - generic [ref=f1e1048]:
+            - text: "Qwen: Qwen3 Coder 30B A3B Instruct"
+            - generic [ref=f1e1049]: openrouter/qwen/qwen3-coder-30b-a3b-instruct
+        - 'button "Qwen: Qwen3 Coder 480B A35B openrouter/qwen/qwen3-coder" [ref=f1e1050] [cursor=pointer]':
+          - generic [ref=f1e1051]:
+            - text: "Qwen: Qwen3 Coder 480B A35B"
+            - generic [ref=f1e1052]: openrouter/qwen/qwen3-coder
+        - 'button "Qwen: Qwen3 Coder Flash openrouter/qwen/qwen3-coder-flash" [ref=f1e1053] [cursor=pointer]':
+          - generic [ref=f1e1054]:
+            - text: "Qwen: Qwen3 Coder Flash"
+            - generic [ref=f1e1055]: openrouter/qwen/qwen3-coder-flash
+        - 'button "Qwen: Qwen3 Coder Next openrouter/qwen/qwen3-coder-next" [ref=f1e1056] [cursor=pointer]':
+          - generic [ref=f1e1057]:
+            - text: "Qwen: Qwen3 Coder Next"
+            - generic [ref=f1e1058]: openrouter/qwen/qwen3-coder-next
+        - 'button "Qwen: Qwen3 Coder Plus openrouter/qwen/qwen3-coder-plus" [ref=f1e1059] [cursor=pointer]':
+          - generic [ref=f1e1060]:
+            - text: "Qwen: Qwen3 Coder Plus"
+            - generic [ref=f1e1061]: openrouter/qwen/qwen3-coder-plus
+        - 'button "Qwen: Qwen3 Max openrouter/qwen/qwen3-max" [ref=f1e1062] [cursor=pointer]':
+          - generic [ref=f1e1063]:
+            - text: "Qwen: Qwen3 Max"
+            - generic [ref=f1e1064]: openrouter/qwen/qwen3-max
+        - 'button "Qwen: Qwen3 Max Thinking openrouter/qwen/qwen3-max-thinking" [ref=f1e1065] [cursor=pointer]':
+          - generic [ref=f1e1066]:
+            - text: "Qwen: Qwen3 Max Thinking"
+            - generic [ref=f1e1067]: openrouter/qwen/qwen3-max-thinking
+        - 'button "Qwen: Qwen3 Next 80B A3B Instruct openrouter/qwen/qwen3-next-80b-a3b-instruct" [ref=f1e1068] [cursor=pointer]':
+          - generic [ref=f1e1069]:
+            - text: "Qwen: Qwen3 Next 80B A3B Instruct"
+            - generic [ref=f1e1070]: openrouter/qwen/qwen3-next-80b-a3b-instruct
+        - 'button "Qwen: Qwen3 Next 80B A3B Thinking openrouter/qwen/qwen3-next-80b-a3b-thinking" [ref=f1e1071] [cursor=pointer]':
+          - generic [ref=f1e1072]:
+            - text: "Qwen: Qwen3 Next 80B A3B Thinking"
+            - generic [ref=f1e1073]: openrouter/qwen/qwen3-next-80b-a3b-thinking
+        - 'button "Qwen: Qwen3 VL 235B A22B Instruct openrouter/qwen/qwen3-vl-235b-a22b-instruct" [ref=f1e1074] [cursor=pointer]':
+          - generic [ref=f1e1075]:
+            - text: "Qwen: Qwen3 VL 235B A22B Instruct"
+            - generic [ref=f1e1076]: openrouter/qwen/qwen3-vl-235b-a22b-instruct
+        - 'button "Qwen: Qwen3 VL 235B A22B Thinking openrouter/qwen/qwen3-vl-235b-a22b-thinking" [ref=f1e1077] [cursor=pointer]':
+          - generic [ref=f1e1078]:
+            - text: "Qwen: Qwen3 VL 235B A22B Thinking"
+            - generic [ref=f1e1079]: openrouter/qwen/qwen3-vl-235b-a22b-thinking
+        - 'button "Qwen: Qwen3 VL 30B A3B Instruct openrouter/qwen/qwen3-vl-30b-a3b-instruct" [ref=f1e1080] [cursor=pointer]':
+          - generic [ref=f1e1081]:
+            - text: "Qwen: Qwen3 VL 30B A3B Instruct"
+            - generic [ref=f1e1082]: openrouter/qwen/qwen3-vl-30b-a3b-instruct
+        - 'button "Qwen: Qwen3 VL 30B A3B Thinking openrouter/qwen/qwen3-vl-30b-a3b-thinking" [ref=f1e1083] [cursor=pointer]':
+          - generic [ref=f1e1084]:
+            - text: "Qwen: Qwen3 VL 30B A3B Thinking"
+            - generic [ref=f1e1085]: openrouter/qwen/qwen3-vl-30b-a3b-thinking
+        - 'button "Qwen: Qwen3 VL 32B Instruct openrouter/qwen/qwen3-vl-32b-instruct" [ref=f1e1086] [cursor=pointer]':
+          - generic [ref=f1e1087]:
+            - text: "Qwen: Qwen3 VL 32B Instruct"
+            - generic [ref=f1e1088]: openrouter/qwen/qwen3-vl-32b-instruct
+        - 'button "Qwen: Qwen3 VL 8B Instruct openrouter/qwen/qwen3-vl-8b-instruct" [ref=f1e1089] [cursor=pointer]':
+          - generic [ref=f1e1090]:
+            - text: "Qwen: Qwen3 VL 8B Instruct"
+            - generic [ref=f1e1091]: openrouter/qwen/qwen3-vl-8b-instruct
+        - 'button "Qwen: Qwen3 VL 8B Thinking openrouter/qwen/qwen3-vl-8b-thinking" [ref=f1e1092] [cursor=pointer]':
+          - generic [ref=f1e1093]:
+            - text: "Qwen: Qwen3 VL 8B Thinking"
+            - generic [ref=f1e1094]: openrouter/qwen/qwen3-vl-8b-thinking
+        - 'button "Qwen: Qwen3.5 397B A17B openrouter/qwen/qwen3.5-397b-a17b" [ref=f1e1095] [cursor=pointer]':
+          - generic [ref=f1e1096]:
+            - text: "Qwen: Qwen3.5 397B A17B"
+            - generic [ref=f1e1097]: openrouter/qwen/qwen3.5-397b-a17b
+        - 'button "Qwen: Qwen3.5 Plus 2026-02-15 openrouter/qwen/qwen3.5-plus-02-15" [ref=f1e1098] [cursor=pointer]':
+          - generic [ref=f1e1099]:
+            - text: "Qwen: Qwen3.5 Plus 2026-02-15"
+            - generic [ref=f1e1100]: openrouter/qwen/qwen3.5-plus-02-15
+        - 'button "Qwen: Qwen3.5 Plus 2026-04-20 openrouter/qwen/qwen3.5-plus-20260420" [ref=f1e1101] [cursor=pointer]':
+          - generic [ref=f1e1102]:
+            - text: "Qwen: Qwen3.5 Plus 2026-04-20"
+            - generic [ref=f1e1103]: openrouter/qwen/qwen3.5-plus-20260420
+        - 'button "Qwen: Qwen3.5-122B-A10B openrouter/qwen/qwen3.5-122b-a10b" [ref=f1e1104] [cursor=pointer]':
+          - generic [ref=f1e1105]:
+            - text: "Qwen: Qwen3.5-122B-A10B"
+            - generic [ref=f1e1106]: openrouter/qwen/qwen3.5-122b-a10b
+        - 'button "Qwen: Qwen3.5-27B openrouter/qwen/qwen3.5-27b" [ref=f1e1107] [cursor=pointer]':
+          - generic [ref=f1e1108]:
+            - text: "Qwen: Qwen3.5-27B"
+            - generic [ref=f1e1109]: openrouter/qwen/qwen3.5-27b
+        - 'button "Qwen: Qwen3.5-35B-A3B openrouter/qwen/qwen3.5-35b-a3b" [ref=f1e1110] [cursor=pointer]':
+          - generic [ref=f1e1111]:
+            - text: "Qwen: Qwen3.5-35B-A3B"
+            - generic [ref=f1e1112]: openrouter/qwen/qwen3.5-35b-a3b
+        - 'button "Qwen: Qwen3.5-9B openrouter/qwen/qwen3.5-9b" [ref=f1e1113] [cursor=pointer]':
+          - generic [ref=f1e1114]:
+            - text: "Qwen: Qwen3.5-9B"
+            - generic [ref=f1e1115]: openrouter/qwen/qwen3.5-9b
+        - 'button "Qwen: Qwen3.5-9B (batch) openrouter/qwen/qwen3.5-9b:batch" [ref=f1e1116] [cursor=pointer]':
+          - generic [ref=f1e1117]:
+            - text: "Qwen: Qwen3.5-9B (batch)"
+            - generic [ref=f1e1118]: openrouter/qwen/qwen3.5-9b:batch
+        - 'button "Qwen: Qwen3.5-Flash openrouter/qwen/qwen3.5-flash-02-23" [ref=f1e1119] [cursor=pointer]':
+          - generic [ref=f1e1120]:
+            - text: "Qwen: Qwen3.5-Flash"
+            - generic [ref=f1e1121]: openrouter/qwen/qwen3.5-flash-02-23
+        - 'button "Qwen: Qwen3.6 27B openrouter/qwen/qwen3.6-27b" [ref=f1e1122] [cursor=pointer]':
+          - generic [ref=f1e1123]:
+            - text: "Qwen: Qwen3.6 27B"
+            - generic [ref=f1e1124]: openrouter/qwen/qwen3.6-27b
+        - 'button "Qwen: Qwen3.6 35B A3B openrouter/qwen/qwen3.6-35b-a3b" [ref=f1e1125] [cursor=pointer]':
+          - generic [ref=f1e1126]:
+            - text: "Qwen: Qwen3.6 35B A3B"
+            - generic [ref=f1e1127]: openrouter/qwen/qwen3.6-35b-a3b
+        - 'button "Qwen: Qwen3.6 Flash openrouter/qwen/qwen3.6-flash" [ref=f1e1128] [cursor=pointer]':
+          - generic [ref=f1e1129]:
+            - text: "Qwen: Qwen3.6 Flash"
+            - generic [ref=f1e1130]: openrouter/qwen/qwen3.6-flash
+        - 'button "Qwen: Qwen3.6 Max Preview openrouter/qwen/qwen3.6-max-preview" [ref=f1e1131] [cursor=pointer]':
+          - generic [ref=f1e1132]:
+            - text: "Qwen: Qwen3.6 Max Preview"
+            - generic [ref=f1e1133]: openrouter/qwen/qwen3.6-max-preview
+        - 'button "Qwen: Qwen3.6 Plus openrouter/qwen/qwen3.6-plus" [ref=f1e1134] [cursor=pointer]':
+          - generic [ref=f1e1135]:
+            - text: "Qwen: Qwen3.6 Plus"
+            - generic [ref=f1e1136]: openrouter/qwen/qwen3.6-plus
+        - 'button "Qwen: Qwen3.7 Flash openrouter/qwen/qwen3.7-flash" [ref=f1e1137] [cursor=pointer]':
+          - generic [ref=f1e1138]:
+            - text: "Qwen: Qwen3.7 Flash"
+            - generic [ref=f1e1139]: openrouter/qwen/qwen3.7-flash
+        - 'button "Qwen: Qwen3.7 Max openrouter/qwen/qwen3.7-max" [ref=f1e1140] [cursor=pointer]':
+          - generic [ref=f1e1141]:
+            - text: "Qwen: Qwen3.7 Max"
+            - generic [ref=f1e1142]: openrouter/qwen/qwen3.7-max
+        - 'button "Qwen: Qwen3.7 Plus openrouter/qwen/qwen3.7-plus" [ref=f1e1143] [cursor=pointer]':
+          - generic [ref=f1e1144]:
+            - text: "Qwen: Qwen3.7 Plus"
+            - generic [ref=f1e1145]: openrouter/qwen/qwen3.7-plus
+        - 'button "Qwen: Qwen3.8 2.4T A95B openrouter/qwen/qwen3.8-2.4t-a95b" [ref=f1e1146] [cursor=pointer]':
+          - generic [ref=f1e1147]:
+            - text: "Qwen: Qwen3.8 2.4T A95B"
+            - generic [ref=f1e1148]: openrouter/qwen/qwen3.8-2.4t-a95b
+        - 'button "Qwen: Qwen3.8 2.4T A95B (batch) openrouter/qwen/qwen3.8-2.4t-a95b:batch" [ref=f1e1149] [cursor=pointer]':
+          - generic [ref=f1e1150]:
+            - text: "Qwen: Qwen3.8 2.4T A95B (batch)"
+            - generic [ref=f1e1151]: openrouter/qwen/qwen3.8-2.4t-a95b:batch
+        - 'button "Qwen: Qwen3.8 27B openrouter/qwen/qwen3.8-27b" [ref=f1e1152] [cursor=pointer]':
+          - generic [ref=f1e1153]:
+            - text: "Qwen: Qwen3.8 27B"
+            - generic [ref=f1e1154]: openrouter/qwen/qwen3.8-27b
+        - 'button "Qwen: Qwen3.8 Flash openrouter/qwen/qwen3.8-flash" [ref=f1e1155] [cursor=pointer]':
+          - generic [ref=f1e1156]:
+            - text: "Qwen: Qwen3.8 Flash"
+            - generic [ref=f1e1157]: openrouter/qwen/qwen3.8-flash
+        - 'button "Qwen: Qwen3.8 Max (0902) openrouter/qwen/qwen3.8-max-0902" [ref=f1e1158] [cursor=pointer]':
+          - generic [ref=f1e1159]:
+            - text: "Qwen: Qwen3.8 Max (0902)"
+            - generic [ref=f1e1160]: openrouter/qwen/qwen3.8-max-0902
+        - button "Reka Edge openrouter/rekaai/reka-edge" [ref=f1e1161] [cursor=pointer]:
+          - generic [ref=f1e1162]:
+            - text: Reka Edge
+            - generic [ref=f1e1163]: openrouter/rekaai/reka-edge
+        - 'button "Relace: Relace Search openrouter/relace/relace-search" [ref=f1e1164] [cursor=pointer]':
+          - generic [ref=f1e1165]:
+            - text: "Relace: Relace Search"
+            - generic [ref=f1e1166]: openrouter/relace/relace-search
+        - 'button "Sakana: Fugu Ultra openrouter/sakana/fugu-ultra" [ref=f1e1167] [cursor=pointer]':
+          - generic [ref=f1e1168]:
+            - text: "Sakana: Fugu Ultra"
+            - generic [ref=f1e1169]: openrouter/sakana/fugu-ultra
+        - 'button "Sakana: Sakana Namazu openrouter/sakana/sakana-namazu" [ref=f1e1170] [cursor=pointer]':
+          - generic [ref=f1e1171]:
+            - text: "Sakana: Sakana Namazu"
+            - generic [ref=f1e1172]: openrouter/sakana/sakana-namazu
+        - 'button "Sao10K: Llama 3.1 Euryale 70B v2.2 openrouter/sao10k/l3.1-euryale-70b" [ref=f1e1173] [cursor=pointer]':
+          - generic [ref=f1e1174]:
+            - text: "Sao10K: Llama 3.1 Euryale 70B v2.2"
+            - generic [ref=f1e1175]: openrouter/sao10k/l3.1-euryale-70b
+        - 'button "SpaceXAI: Grok 4.20 openrouter/x-ai/grok-4.20" [ref=f1e1176] [cursor=pointer]':
+          - generic [ref=f1e1177]:
+            - text: "SpaceXAI: Grok 4.20"
+            - generic [ref=f1e1178]: openrouter/x-ai/grok-4.20
+        - 'button "SpaceXAI: Grok 4.3 openrouter/x-ai/grok-4.3" [ref=f1e1179] [cursor=pointer]':
+          - generic [ref=f1e1180]:
+            - text: "SpaceXAI: Grok 4.3"
+            - generic [ref=f1e1181]: openrouter/x-ai/grok-4.3
+        - 'button "SpaceXAI: Grok 4.3 (batch) openrouter/x-ai/grok-4.3:batch" [ref=f1e1182] [cursor=pointer]':
+          - generic [ref=f1e1183]:
+            - text: "SpaceXAI: Grok 4.3 (batch)"
+            - generic [ref=f1e1184]: openrouter/x-ai/grok-4.3:batch
+        - 'button "SpaceXAI: Grok 4.5 openrouter/x-ai/grok-4.5" [ref=f1e1185] [cursor=pointer]':
+          - generic [ref=f1e1186]:
+            - text: "SpaceXAI: Grok 4.5"
+            - generic [ref=f1e1187]: openrouter/x-ai/grok-4.5
+        - 'button "SpaceXAI: Grok 4.6 openrouter/x-ai/grok-4.6" [ref=f1e1188] [cursor=pointer]':
+          - generic [ref=f1e1189]:
+            - text: "SpaceXAI: Grok 4.6"
+            - generic [ref=f1e1190]: openrouter/x-ai/grok-4.6
+        - 'button "SpaceXAI: Grok Build 0.1 openrouter/x-ai/grok-build-0.1" [ref=f1e1191] [cursor=pointer]':
+          - generic [ref=f1e1192]:
+            - text: "SpaceXAI: Grok Build 0.1"
+            - generic [ref=f1e1193]: openrouter/x-ai/grok-build-0.1
+        - 'button "StepFun: Step 3.5 Flash openrouter/stepfun/step-3.5-flash" [ref=f1e1194] [cursor=pointer]':
+          - generic [ref=f1e1195]:
+            - text: "StepFun: Step 3.5 Flash"
+            - generic [ref=f1e1196]: openrouter/stepfun/step-3.5-flash
+        - 'button "StepFun: Step 3.7 Flash openrouter/stepfun/step-3.7-flash" [ref=f1e1197] [cursor=pointer]':
+          - generic [ref=f1e1198]:
+            - text: "StepFun: Step 3.7 Flash"
+            - generic [ref=f1e1199]: openrouter/stepfun/step-3.7-flash
+        - 'button "Tencent: Hy3 openrouter/tencent/hy3" [ref=f1e1200] [cursor=pointer]':
+          - generic [ref=f1e1201]:
+            - text: "Tencent: Hy3"
+            - generic [ref=f1e1202]: openrouter/tencent/hy3
+        - 'button "Tencent: Hy3 preview openrouter/tencent/hy3-preview" [ref=f1e1203] [cursor=pointer]':
+          - generic [ref=f1e1204]:
+            - text: "Tencent: Hy3 preview"
+            - generic [ref=f1e1205]: openrouter/tencent/hy3-preview
+        - 'button "Tencent: Hy4 preview openrouter/tencent/hy4-preview" [ref=f1e1206] [cursor=pointer]':
+          - generic [ref=f1e1207]:
+            - text: "Tencent: Hy4 preview"
+            - generic [ref=f1e1208]: openrouter/tencent/hy4-preview
+        - 'button "TheDrummer: UnslopNemo 12B openrouter/thedrummer/unslopnemo-12b" [ref=f1e1209] [cursor=pointer]':
+          - generic [ref=f1e1210]:
+            - text: "TheDrummer: UnslopNemo 12B"
+            - generic [ref=f1e1211]: openrouter/thedrummer/unslopnemo-12b
+        - 'button "Thinking Machines: Inkling openrouter/thinkingmachines/inkling" [ref=f1e1212] [cursor=pointer]':
+          - generic [ref=f1e1213]:
+            - text: "Thinking Machines: Inkling"
+            - generic [ref=f1e1214]: openrouter/thinkingmachines/inkling
+        - 'button "Thinking Machines: Inkling (batch) openrouter/thinkingmachines/inkling:batch" [ref=f1e1215] [cursor=pointer]':
+          - generic [ref=f1e1216]:
+            - text: "Thinking Machines: Inkling (batch)"
+            - generic [ref=f1e1217]: openrouter/thinkingmachines/inkling:batch
+        - 'button "Thinking Machines: Inkling (free) openrouter/thinkingmachines/inkling:free" [ref=f1e1218] [cursor=pointer]':
+          - generic [ref=f1e1219]:
+            - text: "Thinking Machines: Inkling (free)"
+            - generic [ref=f1e1220]: openrouter/thinkingmachines/inkling:free
+        - 'button "Thinking Machines: Inkling Small openrouter/thinkingmachines/inkling-small" [ref=f1e1221] [cursor=pointer]':
+          - generic [ref=f1e1222]:
+            - text: "Thinking Machines: Inkling Small"
+            - generic [ref=f1e1223]: openrouter/thinkingmachines/inkling-small
+        - 'button "Thinking Machines: Inkling Small (batch) openrouter/thinkingmachines/inkling-small:batch" [ref=f1e1224] [cursor=pointer]':
+          - generic [ref=f1e1225]:
+            - text: "Thinking Machines: Inkling Small (batch)"
+            - generic [ref=f1e1226]: openrouter/thinkingmachines/inkling-small:batch
+        - 'button "Thinking Machines: Inkling Small (free) openrouter/thinkingmachines/inkling-small:free" [ref=f1e1227] [cursor=pointer]':
+          - generic [ref=f1e1228]:
+            - text: "Thinking Machines: Inkling Small (free)"
+            - generic [ref=f1e1229]: openrouter/thinkingmachines/inkling-small:free
+        - 'button "Upstage: Solar Pro 3 openrouter/upstage/solar-pro-3" [ref=f1e1230] [cursor=pointer]':
+          - generic [ref=f1e1231]:
+            - text: "Upstage: Solar Pro 3"
+            - generic [ref=f1e1232]: openrouter/upstage/solar-pro-3
+        - 'button "Upstage: Solar Pro 4 openrouter/upstage/solar-pro4" [ref=f1e1233] [cursor=pointer]':
+          - generic [ref=f1e1234]:
+            - text: "Upstage: Solar Pro 4"
+            - generic [ref=f1e1235]: openrouter/upstage/solar-pro4
+        - 'button "Xiaomi: MiMo-V2.5 openrouter/xiaomi/mimo-v2.5" [ref=f1e1236] [cursor=pointer]':
+          - generic [ref=f1e1237]:
+            - text: "Xiaomi: MiMo-V2.5"
+            - generic [ref=f1e1238]: openrouter/xiaomi/mimo-v2.5
+        - 'button "Xiaomi: MiMo-V2.5-Pro openrouter/xiaomi/mimo-v2.5-pro" [ref=f1e1239] [cursor=pointer]':
+          - generic [ref=f1e1240]:
+            - text: "Xiaomi: MiMo-V2.5-Pro"
+            - generic [ref=f1e1241]: openrouter/xiaomi/mimo-v2.5-pro
+        - 'button "Z.ai: GLM 4.5 openrouter/z-ai/glm-4.5" [ref=f1e1242] [cursor=pointer]':
+          - generic [ref=f1e1243]:
+            - text: "Z.ai: GLM 4.5"
+            - generic [ref=f1e1244]: openrouter/z-ai/glm-4.5
+        - 'button "Z.ai: GLM 4.5 Air openrouter/z-ai/glm-4.5-air" [ref=f1e1245] [cursor=pointer]':
+          - generic [ref=f1e1246]:
+            - text: "Z.ai: GLM 4.5 Air"
+            - generic [ref=f1e1247]: openrouter/z-ai/glm-4.5-air
+        - 'button "Z.ai: GLM 4.5V openrouter/z-ai/glm-4.5v" [ref=f1e1248] [cursor=pointer]':
+          - generic [ref=f1e1249]:
+            - text: "Z.ai: GLM 4.5V"
+            - generic [ref=f1e1250]: openrouter/z-ai/glm-4.5v
+        - 'button "Z.ai: GLM 4.6 openrouter/z-ai/glm-4.6" [ref=f1e1251] [cursor=pointer]':
+          - generic [ref=f1e1252]:
+            - text: "Z.ai: GLM 4.6"
+            - generic [ref=f1e1253]: openrouter/z-ai/glm-4.6
+        - 'button "Z.ai: GLM 4.6V openrouter/z-ai/glm-4.6v" [ref=f1e1254] [cursor=pointer]':
+          - generic [ref=f1e1255]:
+            - text: "Z.ai: GLM 4.6V"
+            - generic [ref=f1e1256]: openrouter/z-ai/glm-4.6v
+        - 'button "Z.ai: GLM 4.7 openrouter/z-ai/glm-4.7" [ref=f1e1257] [cursor=pointer]':
+          - generic [ref=f1e1258]:
+            - text: "Z.ai: GLM 4.7"
+            - generic [ref=f1e1259]: openrouter/z-ai/glm-4.7
+        - 'button "Z.ai: GLM 4.7 Flash openrouter/z-ai/glm-4.7-flash" [ref=f1e1260] [cursor=pointer]':
+          - generic [ref=f1e1261]:
+            - text: "Z.ai: GLM 4.7 Flash"
+            - generic [ref=f1e1262]: openrouter/z-ai/glm-4.7-flash
+        - 'button "Z.ai: GLM 5 openrouter/z-ai/glm-5" [ref=f1e1263] [cursor=pointer]':
+          - generic [ref=f1e1264]:
+            - text: "Z.ai: GLM 5"
+            - generic [ref=f1e1265]: openrouter/z-ai/glm-5
+        - 'button "Z.ai: GLM 5 Turbo openrouter/z-ai/glm-5-turbo" [ref=f1e1266] [cursor=pointer]':
+          - generic [ref=f1e1267]:
+            - text: "Z.ai: GLM 5 Turbo"
+            - generic [ref=f1e1268]: openrouter/z-ai/glm-5-turbo
+        - 'button "Z.ai: GLM 5.1 openrouter/z-ai/glm-5.1" [ref=f1e1269] [cursor=pointer]':
+          - generic [ref=f1e1270]:
+            - text: "Z.ai: GLM 5.1"
+            - generic [ref=f1e1271]: openrouter/z-ai/glm-5.1
+        - 'button "Z.ai: GLM 5.2 openrouter/z-ai/glm-5.2" [ref=f1e1272] [cursor=pointer]':
+          - generic [ref=f1e1273]:
+            - text: "Z.ai: GLM 5.2"
+            - generic [ref=f1e1274]: openrouter/z-ai/glm-5.2
+        - 'button "Z.ai: GLM 5.2 (batch) openrouter/z-ai/glm-5.2:batch" [ref=f1e1275] [cursor=pointer]':
+          - generic [ref=f1e1276]:
+            - text: "Z.ai: GLM 5.2 (batch)"
+            - generic [ref=f1e1277]: openrouter/z-ai/glm-5.2:batch
+        - 'button "Z.ai: GLM 5.2 (free) openrouter/z-ai/glm-5.2:free" [ref=f1e1278] [cursor=pointer]':
+          - generic [ref=f1e1279]:
+            - text: "Z.ai: GLM 5.2 (free)"
+            - generic [ref=f1e1280]: openrouter/z-ai/glm-5.2:free
+        - 'button "Z.ai: GLM 5.3 openrouter/z-ai/glm-5.3" [ref=f1e1281] [cursor=pointer]':
+          - generic [ref=f1e1282]:
+            - text: "Z.ai: GLM 5.3"
+            - generic [ref=f1e1283]: openrouter/z-ai/glm-5.3
+        - 'button "Z.ai: GLM 5.3 (batch) openrouter/z-ai/glm-5.3:batch" [ref=f1e1284] [cursor=pointer]':
+          - generic [ref=f1e1285]:
+            - text: "Z.ai: GLM 5.3 (batch)"
+            - generic [ref=f1e1286]: openrouter/z-ai/glm-5.3:batch
+        - 'button "Z.ai: GLM 5.3 Flash openrouter/z-ai/glm-5.3-flash" [ref=f1e1287] [cursor=pointer]':
+          - generic [ref=f1e1288]:
+            - text: "Z.ai: GLM 5.3 Flash"
+            - generic [ref=f1e1289]: openrouter/z-ai/glm-5.3-flash
+        - 'button "Z.ai: GLM 5.3 Flash (batch) openrouter/z-ai/glm-5.3-flash:batch" [ref=f1e1290] [cursor=pointer]':
+          - generic [ref=f1e1291]:
+            - text: "Z.ai: GLM 5.3 Flash (batch)"
+            - generic [ref=f1e1292]: openrouter/z-ai/glm-5.3-flash:batch
+        - 'button "Z.ai: GLM 5V Turbo openrouter/z-ai/glm-5v-turbo" [ref=f1e1293] [cursor=pointer]':
+          - generic [ref=f1e1294]:
+            - text: "Z.ai: GLM 5V Turbo"
+            - generic [ref=f1e1295]: openrouter/z-ai/glm-5v-turbo
+        - 'button "Z.ai: GLM Flash Latest openrouter/~z-ai/glm-flash-latest" [ref=f1e1296] [cursor=pointer]':
+          - generic [ref=f1e1297]:
+            - text: "Z.ai: GLM Flash Latest"
+            - generic [ref=f1e1298]: openrouter/~z-ai/glm-flash-latest
+        - 'button "Z.ai: GLM Latest openrouter/~z-ai/glm-latest" [ref=f1e1299] [cursor=pointer]':
+          - generic [ref=f1e1300]:
+            - text: "Z.ai: GLM Latest"
+            - generic [ref=f1e1301]: openrouter/~z-ai/glm-latest
+        - 'button "inclusionAI: Ling 3.0 Flash openrouter/inclusionai/ling-3.0-flash" [ref=f1e1302] [cursor=pointer]':
+          - generic [ref=f1e1303]:
+            - text: "inclusionAI: Ling 3.0 Flash"
+            - generic [ref=f1e1304]: openrouter/inclusionai/ling-3.0-flash
+        - 'button "inclusionAI: Ling 3.0 Flash Fin openrouter/inclusionai/ling-3.0-flash-fin" [ref=f1e1305] [cursor=pointer]':
+          - generic [ref=f1e1306]:
+            - text: "inclusionAI: Ling 3.0 Flash Fin"
+            - generic [ref=f1e1307]: openrouter/inclusionai/ling-3.0-flash-fin
+        - 'button "inclusionAI: Ling 3.0 Flash Fin (free) openrouter/inclusionai/ling-3.0-flash-fin:free" [ref=f1e1308] [cursor=pointer]':
+          - generic [ref=f1e1309]:
+            - text: "inclusionAI: Ling 3.0 Flash Fin (free)"
+            - generic [ref=f1e1310]: openrouter/inclusionai/ling-3.0-flash-fin:free
+        - 'button "inclusionAI: Ling 3.0 Flash Sante (free) openrouter/inclusionai/ling-3.0-flash-sante:free" [ref=f1e1311] [cursor=pointer]':
+          - generic [ref=f1e1312]:
+            - text: "inclusionAI: Ling 3.0 Flash Sante (free)"
+            - generic [ref=f1e1313]: openrouter/inclusionai/ling-3.0-flash-sante:free
+        - 'button "xAI: Grok Latest openrouter/~x-ai/grok-latest" [ref=f1e1314] [cursor=pointer]':
+          - generic [ref=f1e1315]:
+            - text: "xAI: Grok Latest"
+            - generic [ref=f1e1316]: openrouter/~x-ai/grok-latest
+    - generic [ref=f1e1317]:
+      - generic [ref=f1e1318]: Thinking effort
+      - combobox "Thinking effort" [ref=f1e1319] [cursor=pointer]:
+        - option "Default (medium)" [selected]
+        - option "off"
+        - option "low"
+        - option "medium"
+        - option "high"
+        - option "xhigh"
+        - option "max"
+    - generic [ref=f1e1320]:
+      - button "Cancel" [ref=f1e1321] [cursor=pointer]
+      - button "Apply" [ref=f1e1322] [cursor=pointer]

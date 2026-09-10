@@ -1,0 +1,5 @@
+[     158ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:20102
+[  355313ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5173/src/features/chat/SessionStats.tsx?t=1789009869403:0
+[  355314ms] [ERROR] [vite] Failed to reload /src/features/chat/SessionStats.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://127.0.0.1:5173/@vite/client:808
+[  429067ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5173/src/features/chat/ComposerStatusBar.tsx?t=1789009943150:0
+[  429068ms] [ERROR] [vite] Failed to reload /src/features/chat/ComposerStatusBar.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://127.0.0.1:5173/@vite/client:808

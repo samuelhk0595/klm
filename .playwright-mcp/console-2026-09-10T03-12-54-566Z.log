@@ -1,0 +1,7 @@
+[     167ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:20102
+[ 3404246ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5173/src/features/workspace/SessionInspector.tsx?t=1789013378705:0
+[ 3404261ms] [ERROR] [vite] Failed to reload /src/features/workspace/SessionInspector.tsx. This could be due to syntax errors or importing non-existent modules. (see errors above) @ http://127.0.0.1:5173/@vite/client:808
+[ 3856231ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/events:0
+[ 3856967ms] [LOG] [vite] server connection lost. Polling for restart... @ http://127.0.0.1:5173/@vite/client:864
+[ 3865061ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:20102
+[ 5156217ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/events:0

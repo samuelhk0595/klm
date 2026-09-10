@@ -1,0 +1,123 @@
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - navigation "Projects" [ref=e4]:
+      - generic "KLM" [ref=e5]
+      - generic [ref=e8]:
+        - button "Switch to KLM" [ref=e9] [cursor=pointer]: KL
+        - button "Switch to klm-test" [ref=e10] [cursor=pointer]: KL
+      - button "Add project" [ref=e11] [cursor=pointer]
+      - button "Switch to light theme" [ref=e14] [cursor=pointer]
+    - complementary "Sessions" [ref=e21]:
+      - generic [ref=e23]:
+        - strong [ref=e24]: KLM
+        - generic [ref=e25]: Harness
+      - paragraph [ref=e26]: C:\Users\Samuel\Documents\Projects\Personal\klm
+      - button "New Session" [ref=e28] [cursor=pointer]
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - heading "Sessions" [level=2] [ref=e32]
+          - generic [ref=e33]:
+            - button "Search sessions" [ref=e34] [cursor=pointer]
+            - button "Create session folder" [ref=e38] [cursor=pointer]
+        - generic [ref=e41]:
+          - generic [ref=e42]:
+            - button "Ungrouped" [expanded] [ref=e43] [cursor=pointer]
+            - button "New session in Ungrouped" [ref=e46] [cursor=pointer]
+          - generic [ref=e48]:
+            - button "Pi chat Pi" [ref=e49] [cursor=pointer]:
+              - generic [ref=e50]: Pi chat
+              - generic [ref=e51]: Pi
+            - button "OpenCode chat OpenCode" [ref=e52] [cursor=pointer]:
+              - generic [ref=e53]: OpenCode chat
+              - generic [ref=e54]: OpenCode
+            - button "Codex chat Codex" [ref=e55] [cursor=pointer]:
+              - generic [ref=e56]: Codex chat
+              - generic [ref=e57]: Codex
+            - button "Permission check OpenCode" [ref=e58] [cursor=pointer]:
+              - generic [ref=e59]: Permission check
+              - generic [ref=e60]: OpenCode
+            - button "Question tool OpenCode" [ref=e61] [cursor=pointer]:
+              - generic [ref=e62]: Question tool
+              - generic [ref=e63]: OpenCode
+            - button "Layout adjustement Pi" [ref=e64] [cursor=pointer]:
+              - generic [ref=e65]: Layout adjustement
+              - generic [ref=e66]: Pi
+      - generic [ref=e67]:
+        - button "Design system" [ref=e68] [cursor=pointer]
+        - button "Settings" [ref=e73] [cursor=pointer]
+    - main [ref=e77]:
+      - generic [ref=e78]:
+        - generic [ref=e79]:
+          - heading "Pi chat" [level=1] [ref=e80]
+          - generic [ref=e81]: error
+        - button "Session log" [ref=e83] [cursor=pointer]
+      - generic [ref=e87]:
+        - navigation "Session views" [ref=e88]:
+          - button "Chat" [ref=e89] [cursor=pointer]
+          - button "Design system" [ref=e90] [cursor=pointer]
+        - combobox "Move session to folder" [ref=e91] [cursor=pointer]:
+          - option "Ungrouped" [selected]
+      - log "Conversation" [ref=e92]:
+        - article "Your message" [ref=e93]:
+          - generic [ref=e94]:
+            - paragraph [ref=e95]: "Reply with exactly: Pi chat connected. Do not use tools or read files."
+            - button "Copy message" [ref=e97] [cursor=pointer]
+        - alert [ref=e101]:
+          - generic [ref=e104]:
+            - strong [ref=e105]: Harness error
+            - paragraph [ref=e106]: "402: {\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 103414. To increase, visit https://openrouter.ai/settings/credits and add more credits\",\"code\":402,\"metadata\":{\"limit_source\":\"openrouter_credits\",\"remedy_hint\":\"Add credits at https://openrouter.ai/settings/credits, or lower max_tokens / prompt size to fit your remaining balance.\",\"provider_name\":null,\"previous_errors\":[{\"code\":402,\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 113756. To increase, visit https://openrouter.ai/settings/credits and add more credits\"},{\"code\":402,\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 113756. To increase, visit https://openrouter.ai/settings/credits and add more credits\"}]}}"
+        - article "Your message" [ref=e107]:
+          - generic [ref=e108]:
+            - paragraph [ref=e109]: hi
+            - button "Copy message" [ref=e111] [cursor=pointer]
+        - alert [ref=e115]:
+          - generic [ref=e118]:
+            - strong [ref=e119]: Harness error
+            - paragraph [ref=e120]: "402: {\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 103414. To increase, visit https://openrouter.ai/settings/credits and add more credits\",\"code\":402,\"metadata\":{\"limit_source\":\"openrouter_credits\",\"remedy_hint\":\"Add credits at https://openrouter.ai/settings/credits, or lower max_tokens / prompt size to fit your remaining balance.\",\"provider_name\":null,\"previous_errors\":[{\"code\":402,\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 113756. To increase, visit https://openrouter.ai/settings/credits and add more credits\"},{\"code\":402,\"message\":\"This request requires more credits, or fewer max_tokens. You requested up to 128000 tokens, but can only afford 113756. To increase, visit https://openrouter.ai/settings/credits and add more credits\"}]}}"
+      - generic [ref=e121]:
+        - form "Message composer" [ref=e122]:
+          - textbox "Message the agent" [ref=e123]
+          - generic [ref=e125]:
+            - generic [ref=e126]:
+              - button "Choose model" [ref=e128] [cursor=pointer]:
+                - img "Pi" [ref=e129]
+                - generic [ref=e131]: "OpenAI: GPT-5.6 Terra"
+              - button "Choose effort" [expanded] [ref=e163] [cursor=pointer]: Medium
+            - button "Send message" [disabled] [ref=e134]
+        - generic "Session statistics" [ref=e137]:
+          - generic [ref=e138]: 1 turn · 1 step
+          - generic [ref=e139]: LLM 1s
+          - generic [ref=e140]: Cache hit 99%
+          - 'generic "Context: 19 / 1,050,000 tokens · 0% used" [ref=e141]': 19 / 1.1M · 0%
+          - 'generic "Session input: 0 tokens (including cache). Output: 0 tokens (including reported reasoning)." [ref=e142]': Input 0 tok · Output 0 tok
+    - complementary "Session details" [ref=e143]:
+      - generic [ref=e144]:
+        - heading "KLM" [level=2] [ref=e145]
+        - generic [ref=e146]:
+          - heading "Session" [level=2] [ref=e147]
+          - generic [ref=e149]:
+            - generic [ref=e150]: Pi chat
+            - generic [ref=e151]: Pi
+            - generic [ref=e152]: Error
+        - generic [ref=e154]:
+          - heading "Activity" [level=2] [ref=e155]
+          - generic [ref=e157]:
+            - generic [ref=e158]: 2 messages sent
+            - generic [ref=e159]: 0 tool calls
+      - generic [ref=e160]:
+        - code [ref=e161]: C:\Users\Samuel\Documents\Projects\Personal\klm
+        - text: KLM Engine
+  - dialog "Thinking effort" [ref=e1684]:
+    - generic [ref=e1685]:
+      - generic [ref=e1686]:
+        - generic [ref=e1687]: Thinking effort
+        - status [ref=e1688]: Medium
+      - slider "Thinking effort" [active] [ref=e1689] [cursor=pointer]: "2"
+      - generic [aria-hidden] [ref=e1690]:
+        - generic [ref=e1691]: "Off"
+        - generic [ref=e1692]: Low
+        - generic [ref=e1693]: Medium
+        - generic [ref=e1694]: High
+        - generic [ref=e1695]: Extra high
+        - generic [ref=e1696]: Max
+    - button "Use default" [ref=e1698] [cursor=pointer]

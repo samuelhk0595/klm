@@ -1,0 +1,306 @@
+<!DOCTYPE html><html lang="en" style=""><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>DeepSeek Harness UI Clone</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<style data-purpose="custom-fonts">
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #e5e7eb; /* Fallback background */
+    }
+    
+    /* Simulate the slightly rounded window of the app */
+    .app-container {
+      box-shadow: 0 0 20px rgba(0,0,0,0.1);
+    }
+  </style>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" data-snapdom="injected-import"></head>
+<body class="h-screen w-screen flex items-center justify-center bg-blue-100 overflow-hidden bg-cover bg-center" style="background-image: url(&quot;https://lh3.googleusercontent.com/aida-public/AB6AXuDktdDAM3fjZl7e_0-Ov-eE7H35ZsJTLDJhTTLrK6JVY-qqoYan0N0g7ofCp_yKCPjZWv-tGSxhO7_xRGJ1iEIDdPswIRXPJ3L9JcZp64Pfj2KhNsVAhC6lhFZMvnzcDOO1nVYqGinonRrXVzv8lz4TdEwf-SJiOgw3ZfMQ2MKBoQCsA5eKZgK8oKTaGEaiwZYJlKv2hS3e4nDEz1S63L1nmMiXFVNCyxDdZrGOMphXymWMFC-VX6WE&quot;);" data-mode="connect">
+<!-- BEGIN: Main App Container -->
+<div class="app-container w-full h-full max-w-[1600px] max-h-[1100px] bg-white rounded-xl sm:m-4 flex flex-col md:flex-row overflow-hidden border border-gray-200">
+<!-- BEGIN: Left Sidebar -->
+<aside class="w-64 bg-[#f8f9fa] border-r border-gray-200 flex flex-col h-full shrink-0">
+<!-- Top Logo Area -->
+<div class="p-4 flex items-center justify-between">
+<div class="flex items-center gap-2">
+<!-- Approximate DeepSeek Logo -->
+<svg fill="none" height="24" viewBox="0 0 24 24" width="24" xmlns="http://www.w3.org/2000/svg">
+<path d="M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 18C8.69 18 6 15.31 6 12C6 8.69 8.69 6 12 6C15.31 6 18 8.69 18 12C18 15.31 15.31 18 12 18Z" fill="#111827"></path>
+<path d="M12 8C9.79 8 8 9.79 8 12C8 14.21 9.79 16 12 16C14.21 16 16 14.21 16 12C16 9.79 14.21 8 12 8Z" fill="#111827"></path>
+</svg>
+<span class="font-bold text-gray-900 text-lg tracking-tight">deepseek</span>
+<span class="bg-gray-800 text-white text-[10px] font-bold px-1.5 py-0.5 rounded uppercase ml-1 tracking-wider">Harness</span>
+</div>
+<button class="text-gray-500 hover:text-gray-700">
+<i class="fa-regular fa-square"></i>
+</button>
+</div>
+<!-- New Session Button -->
+<div class="px-4 pb-4">
+<button class="w-full flex items-center justify-center gap-2 border border-gray-300 rounded-lg py-2 hover:bg-gray-50 transition-colors text-sm font-medium text-gray-700">
+<i class="fa-solid fa-plus text-xs"></i>
+          New Session
+        </button>
+</div>
+<!-- Workspaces Section -->
+<div class="flex-1 overflow-y-auto px-2">
+<div class="flex items-center justify-between px-2 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+<span class="">Workspaces</span>
+<div class="flex items-center gap-2">
+<button class="hover:text-gray-700"><i class="fa-solid fa-magnifying-glass"></i></button>
+<button class="hover:text-gray-700"><i class="fa-solid fa-sliders"></i></button>
+<button class="hover:text-gray-700"><i class="fa-regular fa-square-plus"></i></button>
+</div>
+</div>
+<!-- Folder: demo -->
+<div class="mt-1">
+<button class="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+<i class="fa-regular fa-folder text-blue-500"></i>
+<span class="font-medium">demo</span>
+</button>
+<div class="pl-4 pr-1 py-1">
+<div class="flex items-center justify-between px-2 py-1.5 bg-gray-200/60 rounded-md text-sm text-gray-800">
+<span class="truncate">Hi</span>
+<span class="text-xs text-gray-500 shrink-0">now</span>
+</div>
+</div>
+</div>
+<!-- Folder: writing -->
+<div class="mt-1">
+<button class="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+<i class="fa-regular fa-folder text-gray-400"></i>
+<span class="">writing</span>
+</button>
+</div>
+<!-- Folder: Ungrouped -->
+<div class="mt-1">
+<button class="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-100 rounded-md">
+<i class="fa-regular fa-folder text-gray-400"></i>
+<span class="">Ungrouped</span>
+</button>
+<div class="pl-4 pr-1 py-1">
+<div class="flex items-center justify-between px-2 py-1.5 hover:bg-gray-100 rounded-md text-sm text-gray-600">
+<span class="truncate">Hi</span>
+<span class="text-xs text-gray-400 shrink-0">3min</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Settings -->
+<div class="p-4 mt-auto">
+<button class="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 w-full px-2 py-1.5 rounded-md hover:bg-gray-100">
+<i class="fa-solid fa-gear"></i>
+          Settings
+        </button>
+</div>
+</aside>
+<!-- END: Left Sidebar -->
+<!-- BEGIN: Main Content Area -->
+<main class="flex-1 flex flex-col min-w-0 bg-white relative">
+<!-- BEGIN: Top Navigation -->
+<header class="flex items-center justify-between px-6 border-b border-gray-100 h-14 shrink-0">
+<div class="flex items-center gap-6 h-full">
+<div class="flex items-center gap-4 h-full border-b-2 border-transparent">
+<span class="font-medium text-gray-800">Hi</span>
+<button class="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 border border-gray-200 px-2 py-1 rounded-md">
+<i class="fa-solid fa-code-branch"></i>
+               Standard mode
+             </button>
+</div>
+</div>
+<button class="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 border border-gray-200 px-3 py-1.5 rounded-full hover:bg-gray-50 transition-colors">
+          Session log
+          <i class="fa-solid fa-download text-xs"></i>
+</button>
+</header>
+<!-- Tabs -->
+<div class="flex px-6 border-b border-gray-100">
+<button class="px-4 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600 -mb-px">
+          Chat
+        </button>
+<button class="px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700">Graph</button>
+</div>
+<!-- END: Top Navigation -->
+<!-- BEGIN: Chat History Area -->
+<div class="flex-1 overflow-y-auto p-6 md:p-8 lg:px-24 flex flex-col gap-6">
+<!-- User Message -->
+<div class="flex justify-end group">
+<div class="max-w-[80%]">
+<div class="bg-gray-100 text-gray-800 px-4 py-3 rounded-2xl rounded-tr-sm text-[15px]">
+               hi
+             </div>
+<div class="flex justify-end mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+<button class="text-gray-400 hover:text-gray-600 p-1"><i class="fa-regular fa-copy text-xs"></i></button>
+</div>
+</div>
+</div>
+<!-- Agent Response -->
+<div class="flex justify-start max-w-3xl">
+<div class="flex flex-col gap-3 w-full">
+<!-- Context Injections -->
+<div class="flex flex-col gap-2 text-[13px] text-gray-500">
+<div class="flex items-center gap-2">
+<i class="fa-regular fa-file-lines text-gray-400"></i>
+<span class="">Context injection</span>
+<span class="text-gray-300">·</span>
+<span class="text-gray-600">AGENTS.md</span>
+</div>
+<div class="flex items-center gap-2">
+<i class="fa-regular fa-file-lines text-gray-400"></i>
+<span class="">Context injection</span>
+<span class="text-gray-300">·</span>
+<span class="text-gray-600">@deepseek-ai/dsh-system-prompt</span>
+</div>
+<div class="flex items-center gap-2">
+<i class="fa-regular fa-file-lines text-gray-400"></i>
+<span class="">Context injection</span>
+<span class="text-gray-300">·</span>
+<span class="text-gray-600">skill-catalog</span>
+</div>
+</div>
+<!-- Think Block -->
+<div class="flex items-start gap-2 text-[13px] text-gray-500 mt-2">
+<i class="fa-solid fa-atom text-gray-400 mt-0.5"></i>
+<div class="flex items-center gap-2">
+<span class="font-medium text-gray-600">Think</span>
+<span class="text-gray-300">·</span>
+<span class="truncate max-w-[500px]">The user just said "hi". The workspace instruction says to answer in English. I should respond in Englis...</span>
+</div>
+</div>
+<!-- Message Text -->
+<div class="text-[15px] text-gray-800 leading-relaxed mt-2">
+              Hi! I'm your coding agent, ready to help. What would you like to work on?
+            </div>
+<!-- Action Buttons -->
+<div class="flex items-center gap-3 mt-1">
+<button class="text-gray-400 hover:text-gray-600"><i class="fa-regular fa-copy text-sm"></i></button>
+<button class="text-gray-400 hover:text-gray-600"><i class="fa-regular fa-thumbs-up text-sm"></i></button>
+<button class="text-gray-400 hover:text-gray-600"><i class="fa-regular fa-thumbs-down text-sm"></i></button>
+<button class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-arrow-rotate-right text-sm"></i></button>
+</div>
+</div>
+</div>
+</div>
+<!-- END: Chat History Area -->
+<!-- BEGIN: Input Area -->
+<div class="px-6 md:px-8 lg:px-24 pb-4">
+<div class="relative bg-white border border-gray-200 rounded-[24px] shadow-sm flex flex-col focus-within:ring-1 focus-within:ring-gray-300 transition-all">
+<!-- Textarea -->
+<textarea class="w-full bg-transparent border-0 resize-none py-4 px-4 text-[15px] focus:ring-0 placeholder-gray-400" placeholder="Message the agent" rows="1" style="min-height: 56px;"></textarea>
+<!-- Bottom Controls -->
+<div class="flex items-center justify-between px-3 pb-3">
+<div class="flex items-center gap-2">
+<button class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 text-gray-500 transition-colors">
+<i class="fa-solid fa-plus"></i>
+</button>
+<button class="flex items-center gap-1.5 text-[13px] text-gray-600 hover:text-gray-900 border border-transparent hover:border-gray-200 px-2 py-1 rounded-md transition-colors">
+<i class="fa-solid fa-shield-halved text-gray-400"></i>
+                Workspace Write
+                <i class="fa-solid fa-chevron-down text-[10px] ml-0.5 text-gray-400"></i>
+</button>
+</div>
+<div class="flex items-center gap-3">
+<button class="flex items-center gap-1.5 text-[13px] text-gray-600 hover:bg-gray-50 px-2 py-1 rounded-md transition-colors border border-transparent">
+<span class="font-medium text-gray-700">DeepSeek-V4-Flash</span>
+<span class="text-gray-400">High</span>
+<i class="fa-solid fa-chevron-down text-[10px] ml-0.5 text-gray-400"></i>
+</button>
+<button class="text-gray-400 hover:text-gray-600 transition-colors">
+<i class="fa-solid fa-arrow-rotate-right text-[13px]"></i>
+</button>
+<button class="w-8 h-8 flex items-center justify-center rounded-full bg-blue-100 text-blue-500 hover:bg-blue-200 transition-colors">
+<i class="fa-solid fa-arrow-up"></i>
+</button>
+</div>
+</div>
+</div>
+<!-- Footer Stats -->
+<div class="flex justify-center items-center gap-3 mt-3 text-[11px] text-gray-400">
+<span class="">1 turns · 1 steps</span>
+<span class="text-gray-300">|</span>
+<span class="">LLM 1s</span>
+<span class="text-gray-300">|</span>
+<span class="">TTFT avg 0.6s · 116 tok/s</span>
+<span class="text-gray-300">|</span>
+<span class="">Cache hit 99%</span>
+<span class="text-gray-300">|</span>
+<span class="">Input 8.1K tok · Output 51 tok</span>
+</div>
+</div>
+<!-- END: Input Area -->
+</main>
+<!-- END: Main Content Area -->
+<aside class="w-72 bg-[#f8f9fa] text-gray-700 border-l border-gray-200 flex flex-col h-full shrink-0 overflow-y-auto">
+<div class="p-4 flex flex-col gap-6">
+<!-- Header -->
+<section>
+<h2 class="text-sm font-semibold text-gray-900 leading-tight">Configurações do Embedded Signup da Meta</h2>
+</section>
+<!-- Context -->
+<section>
+<h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Context</h3>
+<div class="flex flex-col gap-1 text-sm">
+<div class="flex justify-between"><span class="">208.777 tokens</span></div>
+<div class="flex justify-between"><span class="">42% used</span></div>
+<div class="flex justify-between"><span class="">$0.00 spent</span></div>
+</div>
+</section>
+<!-- MCP -->
+<section>
+<h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+<i class="fa-solid fa-chevron-down text-[10px]"></i> MCP
+      </h3>
+<ul class="flex flex-col gap-1.5 text-sm">
+<li class="flex items-center justify-between">
+<div class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>agentdeck</div>
+<span class="text-xs text-gray-500">Connected</span>
+</li>
+<li class="flex items-center justify-between">
+<div class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>ai-memory</div>
+<span class="text-xs text-gray-500">Connected</span>
+</li>
+<li class="flex items-center justify-between">
+<div class="flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>playwright</div>
+<span class="text-xs text-gray-500">Connected</span>
+</li>
+</ul>
+</section>
+<!-- Todo -->
+<section>
+<h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-2">
+<i class="fa-solid fa-chevron-down text-[10px]"></i> Todo
+      </h3>
+<div class="flex flex-col gap-3 text-[13px] leading-snug">
+<div class="flex gap-2 text-orange-400">
+<span class="shrink-0">[•]</span>
+<span class="">Implementar writer de agenda e consumer CONTACTS da #234</span>
+</div>
+<div class="flex gap-2 text-gray-500">
+<span class="shrink-0">[ ]</span>
+<span class="">Cobrir CAS, tombstone, precedência de nome e sync progress</span>
+</div>
+<div class="flex gap-2 text-gray-500">
+<span class="shrink-0">[ ]</span>
+<span class="">Validar, revisar, publicar PR e integrar a #234</span>
+</div>
+</div>
+</section>
+</div>
+<!-- System Info Footer -->
+<div class="mt-auto p-4 border-t border-gray-200 bg-gray-100/50">
+<div class="text-[11px] font-mono text-gray-500 break-all">
+<div class="mb-1">~\Documents\Projects\Hermes\</div>
+<div class="text-gray-600">cubiq_workspace:fix/<span class="text-gray-900 font-semibold">sanitize-gateway-access-logs</span></div>
+</div>
+<div class="mt-4 flex items-center gap-2 text-[11px] text-gray-500">
+<span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+      KLM 1.0.0
+    </div>
+</div>
+</aside></div>
+<!-- END: Main App Container -->
+
+
+</body></html>

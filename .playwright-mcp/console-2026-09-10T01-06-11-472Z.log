@@ -1,0 +1,5 @@
+[     137ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:20102
+[   62004ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/events:0
+[ 2863985ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/events:0
+[ 3036025ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/events:0
+[ 3199621ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/events:0

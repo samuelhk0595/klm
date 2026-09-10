@@ -1,0 +1,26 @@
+[     180ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:20102
+[     322ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5173/favicon.ico:0
+[ 1029081ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/events:0
+[21770919ms] TypeError: Cannot read properties of undefined (reading 'usage')
+    at SessionStats (http://127.0.0.1:5173/src/features/chat/SessionStats.tsx?t=1789001419246:10:25)
+    at Object.react_stack_bottom_frame (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:18509:20)
+    at renderWithHooks (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:5654:24)
+    at updateFunctionComponent (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:7475:21)
+    at beginWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:8525:20)
+    at runWithFiberInDEV (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:997:72)
+    at performUnitOfWork (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:12561:98)
+    at workLoopSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:12424:43)
+    at renderRootSync (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:12408:13)
+    at performWorkOnRoot (http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:11827:37)
+[21770918ms] [WARNING] %s
+
+%s
+ An error occurred in the <SessionStats> component. Consider adding an error boundary to your tree to customize error handling behavior.
+Visit https://react.dev/link/error-boundaries to learn more about error boundaries. @ http://127.0.0.1:5173/node_modules/.vite/deps/react-dom_client.js?v=324bc888:6965
+[21808052ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/models:0
+[21808052ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/quota:0
+[21808053ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/models:0
+[21808054ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/quota:0
+[21808173ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/models:0
+[21848113ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/events:0
+[22529303ms] [ERROR] Failed to load resource: net::ERR_CONNECTION_RESET @ http://127.0.0.1:7331/api/sessions/96d9e082d18562d6ccd084258894cd3b/events:0

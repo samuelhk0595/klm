@@ -1,0 +1,11 @@
+- generic [ref=f4e3]:
+  - navigation "Projects" [ref=f4e4]:
+    - generic "KLM" [ref=f4e5]
+    - button "Add project" [ref=f4e9] [cursor=pointer]
+    - button "Switch to light theme" [ref=f4e12] [cursor=pointer]
+  - main [ref=f4e19]:
+    - heading "KLM" [level=1] [ref=f4e22]
+    - navigation "Session views" [ref=f4e24]:
+      - button "Chat" [ref=f4e25] [cursor=pointer]
+      - button "Design system" [ref=f4e26] [cursor=pointer]
+    - heading "Connecting to engine..." [level=2] [ref=f4e28]
