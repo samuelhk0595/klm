@@ -221,7 +221,7 @@ export function App() {
     setCreatingSession({ projectId: project.id, workspace: folder });
     setSidebarOpen(false);
   }
-  async function updateSession(target: Session, action: 'messages' | 'stop' | 'move' | 'harness', body: { text: string; sources?: SourceReference[] } | { workspace: string } | { harness: Harness['id'] } | Record<string, never>) {
+  async function updateSession(target: Session, action: 'messages' | 'stop' | 'move' | 'harness', body: (ComposerDraft & { sources?: SourceReference[] }) | { workspace: string } | { harness: Harness['id'] } | Record<string, never>) {
     const id = target.id;
     if (pending.current.has(id)) return false;
     pending.current.add(id);
@@ -253,9 +253,9 @@ export function App() {
     } catch (error) { setSessionErrors(current => ({ ...current, [id]: errorMessage(error) })); return false; }
     finally { pending.current.delete(id); setPendingSessions(current => ({ ...current, [id]: false })); }
   }
-  async function send(text: string) {
-    if (!session || session.status === 'running' || !text.trim()) return false;
-    return updateSession(session, 'messages', { text });
+  async function send(draft: ComposerDraft) {
+    if (!session || session.status === 'running' || !draft.text.trim()) return false;
+    return updateSession(session, 'messages', draft);
   }
   function receiveSession(snapshot: Session) {
     setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [snapshot]) }));
@@ -273,11 +273,11 @@ export function App() {
     setSideSources(current => ({ ...current, [session.id]: [...(current[session.id] ?? []), { sessionId: session.id, messageId, passage }] }));
     setSideOpen(true); setSidebarOpen(false);
   }
-  async function sendSide(text: string) {
+  async function sendSide(draft: ComposerDraft) {
     if (!sideSession || sideSession.status === 'running') return false;
     const mainId = activeId;
     const sources = sideSources[mainId] ?? [];
-    const accepted = await updateSession(sideSession, 'messages', { text, sources });
+    const accepted = await updateSession(sideSession, 'messages', { ...draft, sources });
     if (accepted) setSideSources(current => ({ ...current, [mainId]: (current[mainId] ?? []).filter(source => !sources.includes(source)) }));
     return accepted;
   }
@@ -412,13 +412,13 @@ export function App() {
             {session.permissions?.map(permission => <PermissionCard key={permission.id} permission={permission} sessionId={session.id} projectName={project.name} onResolved={snapshot => setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [snapshot]) }))} />)}
             {session.questions?.map(question => <QuestionCard key={question.id} question={question} sessionId={session.id} onResolved={snapshot => setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [snapshot]) }))} />)}
           </div>}
-          <MessageComposer key={session.id} draft={drafts[session.id] ?? { text: '', files: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} disabled={!!connectionError || pendingSessions[session.id] || session.status === 'running' || awaitingPermission || awaitingQuestion} running={session.status === 'running'} onStop={() => void updateSession(session, 'stop', {})} modelControl={<ModelPicker key={session.id} session={session} disabled={!!connectionError || !!pendingSessions[session.id] || working} onSave={(model, effort) => applyModelSettings(session, model, effort)} />} />
+          <MessageComposer key={session.id} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} disabled={!!connectionError || pendingSessions[session.id] || session.status === 'running' || awaitingPermission || awaitingQuestion} running={session.status === 'running'} onStop={() => void updateSession(session, 'stop', {})} modelControl={<ModelPicker key={session.id} session={session} disabled={!!connectionError || !!pendingSessions[session.id] || working} onSave={(model, effort) => applyModelSettings(session, model, effort)} />} />
           <SessionStatusBar session={session} />
         </div>
       </>}
     </main>
     {sideVisible && project && session && <SideChatPanel key={session.id} session={sideSession} project={project} harnesses={harnesses}
-      draft={drafts[`side:${session.id}`] ?? { text: '', files: [] }} sources={sideSources[session.id] ?? []}
+      draft={drafts[`side:${session.id}`] ?? { text: '', mentions: [] }} sources={sideSources[session.id] ?? []}
       error={sideSession ? sessionErrors[sideSession.id] ?? '' : sideErrors[session.id] ?? ''} disconnected={!!connectionError} pending={!!sideSession && !!pendingSessions[sideSession.id]}
       onClose={() => setSideOpen(false)} onRetry={() => void ensureSide(session)} onSnapshot={receiveSession}
       onDraftChange={draft => setDrafts(current => ({ ...current, [`side:${session.id}`]: draft }))}

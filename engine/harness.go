@@ -214,7 +214,9 @@ func (l *jsonLines) flush() error {
 	return nil
 }
 
-func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd, text string) {
+const linkedPromptPrefix = "KLM linked-agent tools are available: linked_discover, linked_read, linked_ask, linked_answer. When the user refers to work in the linked main agent or side agent conversation, retrieve it or consult that agent before continuing. For linked_ask, action=continue means the result is ready: use the answer to respond to the user or continue their task now. Only action=yield means it is still pending: finish the turn so KLM can resume you automatically. A KLM continuation already contains the result and requires no further wait or user follow-up. Do not poll or repeat a pending question.\n\n"
+
+func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd string, payload submission) {
 	defer a.wg.Done()
 	defer t.cancel()
 	p := &adapter{app: a, turn: t, id: s.ID, harness: s.Harness,
@@ -240,14 +242,14 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd, t
 		err = bridgeErr
 	} else {
 		p.bridge = bridge
-		text = "KLM linked-agent tools are available: linked_discover, linked_read, linked_ask, linked_answer. When the user refers to work in the linked main agent or side agent conversation, retrieve it or consult that agent before continuing. For linked_ask, action=continue means the result is ready: use the answer to respond to the user or continue their task now. Only action=yield means it is still pending: finish the turn so KLM can resume you automatically. A KLM continuation already contains the result and requires no further wait or user follow-up. Do not poll or repeat a pending question.\n\n" + text
+		payload.Text = linkedPromptPrefix + payload.Text
 		switch s.Harness {
 		case "opencode":
-			err = p.runOpenCode(b, cwd, text)
+			err = p.runOpenCode(b, cwd, payload)
 		case "pi":
-			err = p.runPi(b, cwd, text)
+			err = p.runPi(b, cwd, payload.piText())
 		case "codex":
-			err = p.runCodex(b, cwd, text)
+			err = p.runCodex(b, cwd, payload)
 		default:
 			err = errors.New("Unsupported harness.")
 		}

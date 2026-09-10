@@ -142,7 +142,7 @@ func openCodeEvents(ctx context.Context, body io.Reader, events chan<- map[strin
 	}
 }
 
-func (p *adapter) runOpenCode(b binary, cwd, text string) error {
+func (p *adapter) runOpenCode(b binary, cwd string, payload submission) error {
 	p.app.mu.Lock()
 	s := *p.app.state.session(p.id)
 	native := p.app.state.Native[p.id]
@@ -586,7 +586,7 @@ func (p *adapter) runOpenCode(b binary, cwd, text string) error {
 		return p.put("opencode/"+messageID+"/"+partID, kind, title, body, status, false, raw)
 	}
 
-	prompt := map[string]any{"parts": []any{map[string]any{"type": "text", "text": text}}}
+	prompt := map[string]any{"parts": payload.openCodeParts()}
 	if p.model != "" {
 		provider, model, ok := strings.Cut(p.model, "/")
 		if !ok || provider == "" || model == "" {

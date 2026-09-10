@@ -1,7 +1,7 @@
 # KLM Engine
 
 Small standalone Go HTTP engine for real projects, sessions, and delegated harness
-execution. Standard library only; Go 1.24.2. Includes a private linked-agent MCP
+execution. Go 1.24.2, with `go-gitignore` for project path discovery. Includes a private linked-agent MCP
 bridge; no frontend or general-purpose engine MCP interface is bundled.
 
 ## Run
@@ -47,6 +47,7 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 | PATCH | `/api/projects/{id}` | `{name?,icon?}` -> 200 Project |
 | DELETE | `/api/projects/{id}` | `{removed:true}`; hides the project, preserving its files and saved history; 409 while a session is running |
 | POST | `/api/projects/{id}/folders` | `{name}` -> 201 Project |
+| GET | `/api/projects/{id}/paths?q=...` | `{paths:[{path,kind:"file"\|"directory"}],partial:boolean}`; project-relative paths |
 | POST | `/api/sessions` | `{projectId,title,workspace,harness,model?}` -> 201 Session |
 | POST | `/api/sessions/{id}/side` | `{harness?}` -> existing or newly created side Session; one per main, serialized atomically |
 | PATCH | `/api/sessions/{id}/harness` | `{harness}` -> side Session; only before its first turn |
@@ -55,7 +56,7 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 | GET | `/api/sessions/{id}/models` | Harness model catalog; `?refresh=true` bypasses the two-minute cache |
 | PATCH | `/api/sessions/{id}/settings` | `{model:string,effort:string}` -> Session; empty strings select harness defaults |
 | GET | `/api/sessions/{id}/quota` | `{quota:QuotaSnapshot\|null}`; null for unsupported/unverified connections |
-| POST | `/api/sessions/{id}/messages` | `{text,sources?:[{sessionId,messageId,passage}]}` -> 202 Session, already containing the durable user event |
+| POST | `/api/sessions/{id}/messages` | `{text,mentions?:[{id,path,kind,start,end}],sources?:[{sessionId,messageId,passage}]}` -> 202 Session, already containing the durable user event |
 | GET | `/api/sessions/{id}/events` | SSE, initial and subsequent full Session JSON snapshots |
 | POST | `/api/sessions/{id}/stop` | 200 Session after cancellation completes; idle sessions are unchanged |
 | POST | `/api/sessions/{id}/permissions/{permissionID}` | `{decision:"once"\|"session"\|"always"\|"reject"}` -> Session |
@@ -117,6 +118,99 @@ type Harness = {
   error?: string
 }
 ```
+
+### File and folder mentions
+
+Both composers use confirmed `@path` selections (`@path/` for directories).
+`mentions` is optional for backward compatibility. Each occurrence has its own
+opaque `id`, normalized slash-separated project-relative `path`, `kind` (`file`
+or `directory`), and half-open `[start,end)` **UTF-16 code-unit offsets** into the
+exact untrimmed `text`. The range must match the full token. Offsets are not UTF-8
+bytes and are unrelated to Codex `text_elements`. Ordinary text is never scanned
+to implicitly attach paths.
+
+Discovery works before harness startup and during active turns. An empty query
+lists root entries. Name/prefix, path, substring, then simple subsequence matches
+are ranked, with at most 40 results. Traversal is bounded to 20,000 entries, 64
+directory levels, and a cooperative 300 ms deadline per request (individual OS
+I/O calls can take longer). Reaching a traversal or result limit sets `partial`.
+Nested `.gitignore` rules are parsed through `go-gitignore`, without requiring Git
+or a repository. Ignore files are limited to 128 KiB; unreadable/oversized rules
+skip that subtree and mark discovery partial. `.git` metadata is excluded.
+Contained links may be selected, but directory links are not traversed during
+discovery. The client debounces queries and discards obsolete responses.
+
+At submission the engine derives the root from the session's project, resolves
+links/junctions, checks containment and types, and opens through `os.Root` for
+bounded reads. Absolute paths, traversal, Windows devices/alternate streams,
+external links, and nonregular files are rejected. Up to eight unique canonical
+paths and 256 occurrences are accepted, with case-insensitive canonical path
+deduplication on Windows. All occurrences remain in `Event.data.mentions`.
+
+Only UTF-8 text files and directories are supported; binary data, images, and PDFs
+produce explicit errors. Text validation inspects the bounded prefix that can be
+attached, not the unread tail of an oversized file. Empty files/directories work.
+Files are read when sending, never by the frontend or during autocomplete. A retry
+reads again; multiple files are not an atomic filesystem snapshot.
+
+| Harness | Delivery |
+| --- | --- |
+| OpenCode | One text part plus deduplicated native `file:` parts (`text/plain` or `application/x-directory`) in `prompt_async`. OpenCode does materialization; no duplicate Go-expanded content. |
+| Pi | The prepared JSON attachment block is appended to the same RPC `prompt.message`. |
+| Codex | The prepared JSON attachment block is a second `type: "text"` item in `turn/start.input`; both items use `text_elements: []`. |
+
+Pi/Codex preparation limits are 2,000 lines and 50 KiB per file, 2,000 Unicode
+characters per line, and 2,000 immediate entries/50 KiB per directory. Individual
+directory names are JSON-quoted, subdirectories end in `/`, and links are marked
+`[link]`. Directory attachments include real children even if ignored in discovery;
+no recursive content is read. Oversized directories contain a sorted bounded
+subset of the OS enumeration, with truncation indicated. Blocks use JSON-escaped
+paths/content plus a `truncated` flag. The entire serialized context, including
+escaping and framing, is limited to 200 KiB; exceeding it rejects the submission
+instead of dropping attachments. OpenCode retains its native Read limits and
+reports native preparation errors through the existing harness error flow.
+
+`Event.text` remains the original message. `Event.data.mentionPreparation` holds
+`{path,kind,mode,bytes?,truncated?}` per unique reference. `mode: "prepared"` records
+Go preparation, not delivery success. `mode: "native"` makes no claim about native
+materialization size or success. Sources coexist with both fields. Native histories
+hold the expanded context; KLM state does not duplicate large attachment snapshots.
+The chat renders reference badges inline with the text, showing only file/folder
+names. The editor keeps badges atomic and maps their DOM positions to the full
+canonical token's UTF-16 offsets. Deleting a badge removes the reference. Known
+truncation is marked on its badge; expanded content stays in native history.
+
+Preparation runs outside the application lock and precedes acceptance. The engine
+rechecks session/project/harness and the absence of a running turn before committing.
+The existing 128 KiB user-text, 512 KiB HTTP body, and 2 MiB transport/frame limits
+remain; the final escaped prompt (including side-chat sources and linked-tool
+prefix) is checked with 16 KiB reserved for protocol envelopes and metadata.
+Preparation errors preserve the draft and do not start a turn. Native failures
+after acceptance remain visible as harness errors. Subsequent linked consultations
+and continuations do not reattach earlier files. Tool permissions are unchanged.
+
+#### Manual acceptance checklist
+
+Run in main and side chats with Pi, OpenCode, and Codex:
+
+1. Attach a small file with a unique marker. Inspect the native prompt/history to
+   confirm the content was present before any model-decided Read call.
+2. Attach a directory containing files and a subdirectory; confirm immediate names,
+   including ignored children, without recursive file contents.
+3. Mix multiple files/folders, repeat a reference, and combine side-chat passages.
+   Confirm one content inclusion per canonical path and all visible occurrences.
+4. Exercise spaces, accents, emoji/Unicode before references, mid-text edits,
+   replacing/removing tokens, keyboard/click selection, IME, and session switching.
+   Enter with suggestions open selects and never sends; Shift+Enter/Ctrl+J insert
+   newlines; Escape closes suggestions.
+5. Try empty files/folders, truncation, an oversized aggregate, removed files, and
+   binary files. Confirm explicit errors/truncation and preserved drafts on rejection.
+6. Reopen history and check references and sources, then send plain text and linked
+   consultations/continuations. Confirm ordinary permissions still work.
+
+Implementation validation uses an engine build to temporary output and the desktop
+production build. Native turn behavior and installed-harness compatibility still
+require the manual checks above; builds alone do not establish them.
 
 ### Model selection and account quotas
 

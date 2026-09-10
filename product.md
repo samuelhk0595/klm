@@ -57,6 +57,35 @@ tool supports it. Answers are returned to the waiting tool, not sent as a separa
 chat turn, and never become remembered permission grants. Users can dismiss a
 question or stop the turn.
 
+## File and Folder References
+
+In both main and side chats, typing `@` opens project file/folder suggestions.
+Confirming a suggestion attaches that reference to the draft. Plain paths and
+unconfirmed `@` text remain ordinary message text. Selected references remain
+visible as inline badges in the draft and persisted chat history. Badges show only
+the file/folder name; full project-relative paths remain in the message metadata.
+They are atomic selections in the editor: deleting a badge removes its reference.
+Failed submission preserves the draft.
+
+UTF-8 text files contribute bounded content to the model's initial message.
+Folders contribute their immediate children, including subfolder names, without
+recursively attaching file contents. Empty files and folders are valid. References
+must resolve inside the conversation's project; binary files, images, and PDFs are
+not supported in this slice. Discovery respects nested `.gitignore` rules and
+excludes `.git` metadata. Explicit folder attachments list real children, including
+ignored entries.
+
+KLM accepts up to eight unique paths per message and deduplicates their content.
+OpenCode materializes native file parts with its own Read limits. For Pi and Codex,
+the engine prepares user-message context: up to 2,000 lines and 50 KiB per file,
+2,000 characters per line, or 2,000 entries and 50 KiB per directory. Truncation is
+recorded and included in the attached context. The prepared JSON context is capped
+at 200 KiB; oversized submissions require fewer/smaller attachments.
+
+The engine persists references and preparation metadata, while the harness owns
+the native message content, history, compaction, and subsequent tool execution.
+Selecting context does not change tool permissions or sandbox settings.
+
 ## Linked Side Agent Conversation
 
 Each main chat can have one persistent side conversation, attached to that chat

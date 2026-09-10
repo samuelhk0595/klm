@@ -23,7 +23,7 @@ export type EngineEvent = {
   title?: string;
   status?: string;
   createdAt: string;
-  data?: Record<string, unknown>;
+  data?: Record<string, unknown> & { mentions?: FileMention[]; mentionPreparation?: MentionPreparation[] };
 };
 
 export type SessionUsage = {
@@ -54,6 +54,13 @@ export type Session = {
 };
 
 export type SourceReference = { sessionId: string; messageId: string; passage: string };
+
+export type ProjectPath = { path: string; kind: 'file' | 'directory' };
+// Offsets use UTF-16 units in canonical message text (full @path), not UTF-8 bytes
+// or the visible length of the editor's basename-only badges.
+export type FileMention = ProjectPath & { id: string; start: number; end: number };
+export type MentionPreparation = ProjectPath & { mode: 'native' | 'prepared'; bytes?: number; truncated?: boolean };
+export type MessageSubmission = { text: string; mentions: FileMention[]; sources?: SourceReference[] };
 
 export type PermissionDecision = 'once' | 'session' | 'always' | 'reject';
 export type QuestionItem = {

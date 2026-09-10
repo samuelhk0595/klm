@@ -22,7 +22,7 @@ type codexInteractive struct {
 	requests map[string]*atomic.Bool
 }
 
-func (p *adapter) runCodex(b binary, cwd, text string) error {
+func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 	p.app.mu.Lock()
 	native := p.app.state.Native[p.id]
 	sessionModel := p.model
@@ -265,7 +265,7 @@ func (p *adapter) runCodex(b binary, cwd, text string) error {
 			}
 			phase = "klm-turn"
 			turnParams := map[string]any{
-				"threadId": c.threadID, "input": []any{map[string]any{"type": "text", "text": text, "text_elements": []any{}}},
+				"threadId": c.threadID, "input": payload.codexInput(),
 			}
 			if p.effort != "" {
 				turnParams["effort"] = p.effort

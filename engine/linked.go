@@ -302,7 +302,7 @@ func (a *app) scheduleLinkedLocked() {
 		t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{}), consultationID: request.ID, delivery: delivery}
 		a.runs[id] = t
 		a.wg.Add(1)
-		go a.execute(t, *a.state.session(id), a.state.Native[id], b, cwd, text)
+		go a.execute(t, *a.state.session(id), a.state.Native[id], b, cwd, submission{Text: text})
 	}
 }
 

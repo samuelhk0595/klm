@@ -17,7 +17,7 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, err
   session?: Session; project: Project; harnesses: Harness[]; draft: ComposerDraft; sources: SourceReference[];
   error: string; disconnected: boolean; pending: boolean; onClose: () => void; onRetry: () => void;
   onSnapshot: (session: Session) => void; onDraftChange: (draft: ComposerDraft) => void;
-  onRemoveSource: (index: number) => void; onSend: (text: string) => Promise<boolean>; onStop: () => void;
+  onRemoveSource: (index: number) => void; onSend: (draft: ComposerDraft) => Promise<boolean>; onStop: () => void;
   onHarness: (harness: Harness['id']) => void; onModel: (model: string, effort: string) => Promise<boolean>;
 }) {
   const panel = useRef<HTMLElement>(null);
@@ -51,9 +51,11 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, err
     const previous = document.activeElement as HTMLElement | null;
     const siblings = Array.from(target.parentElement?.children ?? []).filter((item): item is HTMLElement => item instanceof HTMLElement && item !== target && !item.matches('dialog'));
     siblings.forEach(item => { item.inert = true; });
-    const focusable = () => Array.from(target.querySelectorAll<HTMLElement>('button:not(:disabled), textarea, input, select:not(:disabled), summary, [tabindex="0"]')).filter(item => item.getClientRects().length > 0);
+    const focusable = () => Array.from(target.querySelectorAll<HTMLElement>('button:not(:disabled), [contenteditable="true"], input, select:not(:disabled), summary, [tabindex="0"]')).filter(item => item.getClientRects().length > 0);
     focusable()[0]?.focus();
     const keydown = (event: KeyboardEvent) => {
+      // The composer's suggestions own these keys before the panel focus trap.
+      if (event.target instanceof HTMLElement && event.target.closest('.composer-editor')?.getAttribute('aria-expanded') === 'true' && (event.key === 'Escape' || (event.key === 'Tab' && !event.shiftKey))) return;
       if (event.key === 'Escape') { event.preventDefault(); onClose(); }
       if (event.key !== 'Tab') return;
       const items = focusable(); const first = items[0]; const last = items[items.length - 1];
@@ -64,7 +66,7 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, err
     return () => { siblings.forEach(item => { item.inert = false; }); target.removeEventListener('keydown', keydown); previous?.focus(); };
   }, [narrow]);
   useEffect(() => { history.current?.scrollTo({ top: history.current.scrollHeight }); }, [session?.updatedAt]);
-  useEffect(() => { if (sources.length) panel.current?.querySelector('textarea')?.focus(); }, [sources.length, session?.id]);
+  useEffect(() => { if (sources.length) panel.current?.querySelector<HTMLElement>('.composer-editor')?.focus(); }, [sources.length, session?.id]);
   const running = session?.status === 'running';
   const permissions = !!session?.permissions?.length;
   const questions = !!session?.questions?.length;
@@ -101,7 +103,7 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, err
             {!harness.available && <small>Not installed</small>}
           </label>)}
         </fieldset>}
-        <MessageComposer key={session.id} placeholder="Message the side agent" draft={draft} onDraftChange={onDraftChange} onSend={onSend} onStop={onStop} disabled={disabled} running={running}
+        <MessageComposer key={session.id} projectId={session.projectId} placeholder="Message the side agent" draft={draft} onDraftChange={onDraftChange} onSend={onSend} onStop={onStop} disabled={disabled} running={running}
           modelControl={<ModelPicker key={`${session.id}/${session.harness}`} session={session} disabled={disabled} onSave={onModel} />} />
         <SessionStatusBar session={session} side />
       </div>}

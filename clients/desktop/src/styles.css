@@ -87,10 +87,24 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
 .thought-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 500px; flex: 1; }
 .thought p { padding: 12px 0 0 24px; line-height: 1.6; }
 .composer-area { padding: 0 clamp(24px, 6vw, 96px) 16px; }
-.composer { border: 1px solid var(--color-border); border-radius: var(--radius-composer); background: var(--color-elevated); box-shadow: var(--shadow-sm); }
-.composer textarea { display: block; width: 100%; padding: 16px; border: 0; border-radius: 24px 24px 0 0; resize: none; overflow-y: hidden; background: transparent; color: var(--color-text); font-size: 15px; line-height: 1.5; }
-.composer textarea:focus { outline: none; }
-.composer textarea::placeholder { color: var(--color-faint); }
+.composer { position: relative; border: 1px solid var(--color-border); border-radius: var(--radius-composer); background: var(--color-elevated); box-shadow: var(--shadow-sm); }
+.mention-picker { position: absolute; z-index: 20; bottom: calc(100% + 8px); left: 0; right: 0; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-elevated); box-shadow: var(--shadow-menu); overflow: hidden; }
+.mention-picker ul { list-style: none; margin: 0; padding: 4px; max-height: min(280px, 35vh); overflow-y: auto; }
+.mention-picker li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.mention-picker li.is-active { background: var(--color-selected); }
+.mention-picker li > svg { width: 16px; height: 16px; flex-shrink: 0; color: var(--color-muted); }
+.mention-picker li > span:not(.sr-only) { min-width: 0; }
+.mention-picker strong, .mention-picker small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mention-picker strong { font-size: 13px; font-weight: 500; }
+.mention-picker small, .mention-search-status { font-size: 12px; color: var(--color-muted); }
+.mention-search-status:not(:empty) { padding: 8px 14px; }
+.mention-badge { display: inline-block; max-width: 100%; padding: 0 6px; border-radius: var(--radius-sm); background: var(--color-accent-soft); color: var(--color-accent); font-size: .875em; font-weight: 500; line-height: 1.5; vertical-align: baseline; white-space: nowrap; overflow-wrap: normal; }
+.mention-badge::before { content: ''; display: inline-block; width: 13px; height: 13px; margin-right: 4px; vertical-align: -2px; background: currentColor; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z'/%3E%3Cpath d='M14 2v6h6M8 13h8M8 17h6'/%3E%3C/svg%3E") center / contain no-repeat; }
+.mention-badge[data-kind="directory"]::before { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 20H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2Z'/%3E%3C/svg%3E"); }
+.mention-badge[data-truncated="true"] { text-decoration: underline dotted var(--color-warning); text-underline-offset: 3px; }
+.composer-editor { display: block; width: 100%; min-height: calc(1.5em + 32px); max-height: calc(15em + 32px); padding: 16px; border: 0; border-radius: 24px 24px 0 0; overflow-y: auto; background: transparent; color: var(--color-text); font-size: 15px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; cursor: text; }
+.composer-editor:focus { outline: none; }
+.composer-editor[data-empty="true"]::before { content: attr(data-placeholder); color: var(--color-faint); pointer-events: none; position: absolute; }
 .composer-preview { padding: 0 16px 8px; font-size: 10px; color: var(--color-muted); }
 .composer-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; padding: 0 12px 12px; }
 .composer-model-controls { display: flex; align-items: center; gap: 4px; min-width: 0; margin-left: auto; }

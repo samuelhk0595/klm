@@ -72,6 +72,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("PATCH /api/projects/{id}", a.updateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", a.removeProject)
 	mux.HandleFunc("POST /api/projects/{id}/folders", a.createFolder)
+	mux.HandleFunc("GET /api/projects/{id}/paths", a.projectPaths)
 	mux.HandleFunc("POST /api/sessions", a.createSession)
 	mux.HandleFunc("POST /api/sessions/{id}/side", a.sideConversation)
 	mux.HandleFunc("PATCH /api/sessions/{id}/harness", a.sideHarness)
@@ -459,8 +460,9 @@ func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) message(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Text    string
-		Sources []SourceReference `json:"sources"`
+		Text     string
+		Sources  []SourceReference `json:"sources"`
+		Mentions []Mention         `json:"mentions"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -497,28 +499,66 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "Harness is not installed.")
 		return
 	}
-	cwd, err := existingDirectory(a.state.project(s.ProjectID).Folder)
+	id, projectID, harness := s.ID, s.ProjectID, s.Harness
+	folder := a.state.project(projectID).Folder
+	a.mu.Unlock()
+	// Filesystem I/O never holds the application mutex. Recheck ownership and
+	// turn state after preparation, before accepting a durable user message.
+	cwd, err := existingDirectory(folder)
 	if err != nil {
-		a.mu.Unlock()
 		fail(w, 400, err.Error())
 		return
 	}
-	id := s.ID
+	payload, err := prepareMentions(r.Context(), cwd, harness, body.Text, body.Mentions)
+	if err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	a.mu.Lock()
+	s = a.state.session(id)
+	p := a.state.project(projectID)
+	if s == nil || p == nil || p.Removed || s.ProjectID != projectID || p.Folder != folder || s.Harness != harness {
+		a.mu.Unlock()
+		fail(w, 409, "Conversation or project changed. Retry the message.")
+		return
+	}
+	if a.closing || a.storageErr != nil || r.Context().Err() != nil {
+		a.mu.Unlock()
+		fail(w, 503, "Submission interrupted or engine unavailable. Retry the message.")
+		return
+	}
+	if a.runs[id] != nil {
+		a.mu.Unlock()
+		fail(w, 409, "Session already has a running turn.")
+		return
+	}
 	prompt, err := a.focusedPrompt(s, body.Text, body.Sources)
 	if err != nil {
 		a.mu.Unlock()
 		fail(w, 400, err.Error())
 		return
 	}
+	payload.Text = linkedPromptPrefix + prompt
+	if err := validateSubmissionSize(payload, harness); err != nil {
+		a.mu.Unlock()
+		fail(w, 400, err.Error())
+		return
+	}
+	payload.Text = prompt
 	if err := a.commitLocked(func(d *diskState) {
 		s := d.session(id)
 		s.Status, s.UpdatedAt = "running", now()
 		s.Permissions = nil
 		s.Questions = nil
 		e := event("user", body.Text)
+		e.Data = map[string]any{}
 		if len(body.Sources) > 0 {
-			e.Data = map[string]any{"sources": body.Sources}
+			e.Data["sources"] = body.Sources
 			s.Sources = append(s.Sources, body.Sources...)
+		}
+		if len(body.Mentions) > 0 {
+			e.Data["mentions"] = body.Mentions
+			e.Data["mentionPreparation"] = payload.Preparation
 		}
 		s.Events = append(s.Events, e)
 	}); err != nil {
@@ -533,7 +573,7 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 	a.runs[id] = t
 	a.wg.Add(1)
 	a.mu.Unlock()
-	go a.execute(t, snapshot, native, b, cwd, prompt)
+	go a.execute(t, snapshot, native, b, cwd, payload)
 	respond(w, 202, snapshot)
 }
 

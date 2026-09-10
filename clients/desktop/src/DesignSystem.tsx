@@ -39,7 +39,7 @@ const markdownExample = [
 export function DesignSystem() {
   const [tab, setTab] = useState('chat');
   const [notice, setNotice] = useState('');
-  const [draft, setDraft] = useState<ComposerDraft>({ text: '', files: [] });
+  const [draft, setDraft] = useState<ComposerDraft>({ text: '', mentions: [] });
   const [menuOpen, setMenuOpen] = useState(false);
   const [level, setLevel] = useState(40);
   return <div className="design-system">
@@ -54,7 +54,7 @@ export function DesignSystem() {
     <Section title="Menu and slider"><div className="component-row"><Menu label="Example menu" open={menuOpen} onOpenChange={setMenuOpen} trigger={props => <Button {...props}>Open menu</Button>}>{['Rename', 'Duplicate', 'Archive'].map(action => <MenuItem key={action} onClick={() => { setNotice(`${action} selected`); setMenuOpen(false); }}>{action}</MenuItem>)}</Menu><div style={{ width: 240 }}><Slider label="Level" value={level} valueText={`${level}%`} step={10} onValueChange={setLevel} marks={[{ value: 0, label: '0' }, { value: 50, label: '50' }, { value: 100, label: '100' }]} /></div></div></Section>
     <Section title="Messages"><div className="message-examples">{initialSessions[0].messages.map(message => <ChatMessage key={message.id} message={message} />)}</div></Section>
     <Section title="Markdown"><ChatMessage message={{ id: 'markdown-example', role: 'assistant', text: markdownExample }} /></Section>
-    <Section title="Composer"><MessageComposer draft={draft} onDraftChange={setDraft} onSend={text => setNotice(`Example message: ${text}`)} /></Section>
+    <Section title="Composer"><MessageComposer draft={draft} onDraftChange={setDraft} onSend={draft => setNotice(`Example message: ${draft.text}`)} /></Section>
     <p role="status" className="gallery-notice">{notice}</p>
   </div>;
 }

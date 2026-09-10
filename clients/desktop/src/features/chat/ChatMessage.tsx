@@ -4,6 +4,7 @@ import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { IconButton } from '../../design-system/Button';
 import type { Message } from '../workspace/demo';
+import { MentionText } from './MentionText';
 
 const markdownPlugins = [remarkGfm];
 const markdownComponents: Components = {
@@ -26,7 +27,7 @@ export function ChatMessage({ message }: { message: Message }) {
     <div className="message-body">
       {message.context && <div className="context-injections">{message.context.map(file => <div key={file}><FileText /><span>Context injection</span><span aria-hidden="true">·</span><span className="context-file">{file}</span></div>)}</div>}
       {message.thought && <details className="thought"><summary><Atom /><strong>Think</strong><span>·</span><span className="thought-preview">{message.thought}</span></summary><p>{message.thought}</p></details>}
-      {message.role === 'assistant' ? <div className="message-text markdown-body"><Markdown remarkPlugins={markdownPlugins} components={markdownComponents} skipHtml>{message.text}</Markdown></div> : <p className="message-text">{message.text}</p>}
+      {message.role === 'assistant' ? <div className="message-text markdown-body"><Markdown remarkPlugins={markdownPlugins} components={markdownComponents} skipHtml>{message.text}</Markdown></div> : <p className="message-text"><MentionText text={message.text} mentions={message.mentions} preparation={message.mentionPreparation} /></p>}
       <div className="message-actions"><IconButton label={copied ? 'Copied' : 'Copy message'} onClick={copy}>{copied ? <Check /> : <Copy />}</IconButton>{message.role === 'assistant' && <><IconButton label="Helpful response" aria-pressed={feedback === 'up'} onClick={() => setFeedback(feedback === 'up' ? null : 'up')}><ThumbsUp /></IconButton><IconButton label="Unhelpful response" aria-pressed={feedback === 'down'} onClick={() => setFeedback(feedback === 'down' ? null : 'down')}><ThumbsDown /></IconButton></>}</div>
       {copyError && <p role="status" className="small muted">Clipboard unavailable. Select the message to copy it.</p>}
     </div>
