@@ -116,6 +116,19 @@ unsafe URL schemes are filtered, and Markdown images appear as links rather than
 automatically fetching remote resources. The Design system gallery includes a
 Markdown example for visual validation. Syntax highlighting is not included yet.
 
+Mermaid `flowchart` and `graph` blocks render inline between paragraphs in both
+chats, with a preview capped at 320px high. **Expand** opens a modal with zoom,
+**Fit**, scrolling, and Escape to close. The renderer loads on demand and uses
+the current theme. It accepts `mermaid` fences, unlabelled flowchart code blocks,
+and standalone flowchart headers followed by contiguous recognizable statements
+without fences. Explicit `mermaid` fences are recommended for complex syntax.
+Incomplete, invalid, or unsupported diagrams retain their source. Rendering is
+debounced during streaming; copying a message keeps its original text. Generated
+SVG is displayed as an isolated image, with HTML labels, agent configuration
+directives, and remote image resources disabled. Other Mermaid diagram types are
+not included in this slice. The Design system gallery has a **Flowcharts** example
+for checking inline layout and expansion without running a harness.
+
 The composer grows up to ten visible lines before scrolling. Enter sends;
 Shift+Enter and Ctrl+J insert a newline. Project/session data and native harness
 continuity survive restart; drafts are browser-memory-only. Feedback on message

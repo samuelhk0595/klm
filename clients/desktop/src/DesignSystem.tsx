@@ -36,6 +36,19 @@ const markdownExample = [
   '[Markdown reference](https://commonmark.org/help/)',
 ].join('\n');
 
+const flowchartExample = [
+  'Each step routes work according to its outcome:',
+  '',
+  'flowchart LR',
+  '    A["A · Evaluate request"] -->|Ready to execute| B["B · Implement"]',
+  '    A -->|Missing information| C["C · Clarify with user"]',
+  '    C -->|Information received| A',
+  '    B -->|Ready for review| D["D · Review"]',
+  '    D -->|Request changes| B',
+  '    D -->|Approve| E["Complete"]',
+  'Evaluation hands work to implementation or clarification. Review can send it back for changes.',
+].join('\n');
+
 export function DesignSystem() {
   const [tab, setTab] = useState('chat');
   const [notice, setNotice] = useState('');
@@ -54,6 +67,7 @@ export function DesignSystem() {
     <Section title="Menu and slider"><div className="component-row"><Menu label="Example menu" open={menuOpen} onOpenChange={setMenuOpen} trigger={props => <Button {...props}>Open menu</Button>}>{['Rename', 'Duplicate', 'Archive'].map(action => <MenuItem key={action} onClick={() => { setNotice(`${action} selected`); setMenuOpen(false); }}>{action}</MenuItem>)}</Menu><div style={{ width: 240 }}><Slider label="Level" value={level} valueText={`${level}%`} step={10} onValueChange={setLevel} marks={[{ value: 0, label: '0' }, { value: 50, label: '50' }, { value: 100, label: '100' }]} /></div></div></Section>
     <Section title="Messages"><div className="message-examples">{initialSessions[0].messages.map(message => <ChatMessage key={message.id} message={message} />)}</div></Section>
     <Section title="Markdown"><ChatMessage message={{ id: 'markdown-example', role: 'assistant', text: markdownExample }} /></Section>
+    <Section title="Flowcharts"><ChatMessage message={{ id: 'flowchart-example', role: 'assistant', text: flowchartExample }} /></Section>
     <Section title="Composer"><MessageComposer draft={draft} onDraftChange={setDraft} onSend={draft => setNotice(`Example message: ${draft.text}`)} /></Section>
     <p role="status" className="gallery-notice">{notice}</p>
   </div>;

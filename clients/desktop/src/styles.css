@@ -71,6 +71,20 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
 .markdown-body hr { border: 0; border-top: 1px solid var(--color-border); margin: 20px 0; }
 .markdown-body .contains-task-list { list-style: none; padding-left: 4px; }
 .markdown-body .task-list-item input { margin-right: 8px; accent-color: var(--color-accent); }
+.flowchart-block { min-width: 0; margin: 12px 0 24px; }
+.flowchart-inline-toolbar { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+.flowchart-preview { display: block; width: 100%; height: auto; max-height: 320px; object-fit: contain; }
+.markdown-body .flowchart-error { margin-bottom: 8px; color: var(--color-muted); font-size: var(--text-sm); }
+.flowchart-render-target { position: fixed; top: 0; left: -100000px; pointer-events: none; visibility: hidden; }
+.settings-dialog.flowchart-dialog { width: calc(100vw - 32px); max-width: 1440px; height: calc(100dvh - 48px); max-height: 1000px; padding: 0; overflow: hidden; }
+.flowchart-dialog[open] { display: flex; flex-direction: column; }
+.flowchart-toolbar { flex: none; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
+.flowchart-toolbar h2 { margin: 0; font-size: var(--text-lg); }
+.flowchart-controls { display: flex; align-items: center; gap: 4px; }
+.flowchart-zoom { min-width: 42px; text-align: center; font-size: var(--text-sm); color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.flowchart-viewport { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; background: var(--color-surface); }
+.flowchart-canvas { display: flex; align-items: center; justify-content: center; width: max-content; min-width: 100%; min-height: 100%; padding: 16px; }
+.flowchart-canvas img { display: block; flex: none; max-width: none; }
 .message-actions { display: flex; gap: 3px; margin-top: 6px; }
 .message-actions .icon-button { color: var(--color-faint); width: 28px; height: 28px; min-height: 28px; }
 .message-actions svg { width: 14px; height: 14px; }
