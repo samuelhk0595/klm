@@ -12,6 +12,7 @@ import { CreateSessionDialog } from './features/workspace/CreateSessionDialog';
 import { ConversationEvents } from './features/chat/ConversationEvents';
 import { SessionStatusBar } from './features/chat/SessionStatusBar';
 import { ModelPicker } from './features/chat/ModelPicker';
+import { GraphPicker } from './features/chat/GraphPicker';
 import { PermissionCard } from './features/chat/PermissionCard';
 import { QuestionCard } from './features/chat/QuestionCard';
 import { MessageComposer, type ComposerDraft } from './features/chat/MessageComposer';
@@ -89,6 +90,7 @@ export function App() {
   const [view, setView] = useState<'chat' | 'design' | 'agents' | 'graphs'>('chat');
   const [projectAgents, setProjectAgents] = useState<Record<string, Agent[]>>({});
   const [projectGraphs, setProjectGraphs] = useState<Record<string, Graph[]>>({});
+  const [selectedGraphs, setSelectedGraphs] = useState<Record<string, string>>({});
   const [agentsVisit, setAgentsVisit] = useState(0);
   const [graphsVisit, setGraphsVisit] = useState(0);
   const [creatingGraph, setCreatingGraph] = useState(false);
@@ -381,6 +383,9 @@ export function App() {
       if (previous.name !== next?.name) changedNames.set(previous.name, next?.name);
     }
     setProjectGraphs(current => ({ ...current, [projectId]: graphs }));
+    const projectSessionIds = new Set(projectSessions.map(session => session.id));
+    const availableGraphIds = new Set(graphs.filter(graph => graph.enabled).map(graph => graph.id));
+    setSelectedGraphs(current => Object.fromEntries(Object.entries(current).filter(([sessionId, graphId]) => !projectSessionIds.has(sessionId) || availableGraphIds.has(graphId))));
     // Keep the existing simulated agent references consistent with renamed/deleted graphs.
     if (changedNames.size) setProjectAgents(current => ({ ...current, [projectId]: (current[projectId] ?? initialAgents).map(agent => ({
       ...agent,
@@ -441,7 +446,7 @@ export function App() {
             {session.permissions?.map(permission => <PermissionCard key={permission.id} permission={permission} sessionId={session.id} projectName={project.name} onResolved={snapshot => setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [snapshot]) }))} />)}
             {session.questions?.map(question => <QuestionCard key={question.id} question={question} sessionId={session.id} onResolved={snapshot => setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [snapshot]) }))} />)}
           </div>}
-          <MessageComposer key={session.id} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} disabled={!!connectionError || pendingSessions[session.id] || session.status === 'running' || awaitingPermission || awaitingQuestion} running={session.status === 'running'} onStop={() => void updateSession(session, 'stop', {})} modelControl={<ModelPicker key={session.id} session={session} disabled={!!connectionError || !!pendingSessions[session.id] || working} onSave={(model, effort) => applyModelSettings(session, model, effort)} />} />
+          <MessageComposer key={session.id} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} disabled={!!connectionError || pendingSessions[session.id] || session.status === 'running' || awaitingPermission || awaitingQuestion} running={session.status === 'running'} onStop={() => void updateSession(session, 'stop', {})} graphControl={<GraphPicker key={session.id} graphs={projectGraphs[session.projectId] ?? initialGraphs} value={selectedGraphs[session.id] ?? ''} onChange={graphId => setSelectedGraphs(current => ({ ...current, [session.id]: graphId }))} />} modelControl={<ModelPicker key={session.id} session={session} disabled={!!connectionError || !!pendingSessions[session.id] || working} onSave={(model, effort) => applyModelSettings(session, model, effort)} />} />
           <SessionStatusBar session={session} />
         </div>
       </>}

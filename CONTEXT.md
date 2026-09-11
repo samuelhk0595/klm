@@ -20,6 +20,10 @@ One execution of a graph for a submitted input, with its own activity and sessio
 history.
 _Avoid_: Graph (when referring to one execution).
 
+**Selected graph**:
+The graph chosen for a chat from its project's catalog, intended as the target
+of a future graph invocation. Selection alone does not start a graph run.
+
 **Agent node**:
 A graph activity that references a reusable agent and may override its harness,
 model, and effort. Multiple nodes can reference the same agent while remaining

@@ -69,6 +69,22 @@ Worktree and branch settings describe intended execution; there are no Git
 operations, shell command execution, graph runs or harness submissions here.
 Integration, synchronization and execution contracts remain under refinement.
 
+The main chat composer shows a graph picker at bottom left, opposite the model
+and effort controls. It uses the selected project's graph fixtures/local list.
+All graphs are listed; disabled ones cannot be selected. Up to five graph rows
+are visible, with search only when the catalog has more than five graphs. None
+clears the selection. Selection is kept per chat in browser memory until reload;
+renames retain the selected ID, while disabling/deleting a graph clears its
+selections in that project. It is not sent to the engine or used by Send yet.
+The gallery's Composer example has six graphs to demonstrate search and scrolling.
+Model and graph search inputs omit the thick external focus outline.
+The graph menu aligns its left edge with the picker and extends rightward to
+avoid covering the sessions sidebar. Other menus keep their existing alignment.
+
+The next prototype is graph-run tracking in the chat timeline with a read-only
+canvas. It has not been implemented; run activation and the tracking layout still
+need refinement with the user.
+
 ## Behavior
 
 Project creation persists name, absolute directory, and a resized PNG icon through

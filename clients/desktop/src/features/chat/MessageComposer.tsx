@@ -7,11 +7,12 @@ import { MentionEditor, type MentionEditorHandle } from './MentionEditor';
 
 export type ComposerDraft = { text: string; mentions: FileMention[] };
 
-export function MessageComposer({ onSend, draft, onDraftChange, projectId, disabled = false, running = false, onStop, modelControl, placeholder = 'Message the agent' }: {
+export function MessageComposer({ onSend, draft, onDraftChange, projectId, disabled = false, running = false, onStop, modelControl, graphControl, placeholder = 'Message the agent' }: {
   onSend: (draft: ComposerDraft) => void | Promise<boolean | void>; draft: ComposerDraft; onDraftChange: (draft: ComposerDraft) => void;
   projectId?: string;
   disabled?: boolean; running?: boolean; onStop?: () => void;
   modelControl?: ReactNode;
+  graphControl?: ReactNode;
   placeholder?: string;
 }) {
   const { text, mentions } = draft;
@@ -91,6 +92,6 @@ export function MessageComposer({ onSend, draft, onDraftChange, projectId, disab
       } else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); }
     }} />
     {error && <p role="alert" className="form-error composer-error">{error}</p>}
-    <div className="composer-controls"><div className="composer-model-controls">{modelControl}{running && onStop ? <IconButton label="Stop response" variant="outline" onClick={onStop}><Square /></IconButton> : <IconButton label="Send message" variant="soft" type="submit" disabled={!text.trim() || disabled || submitting} className="send-button"><ArrowUp /></IconButton>}</div></div>
+    <div className="composer-controls">{graphControl && <div className="composer-graph-control">{graphControl}</div>}<div className="composer-model-controls">{modelControl}{running && onStop ? <IconButton label="Stop response" variant="outline" onClick={onStop}><Square /></IconButton> : <IconButton label="Send message" variant="soft" type="submit" disabled={!text.trim() || disabled || submitting} className="send-button"><ArrowUp /></IconButton>}</div></div>
   </form>;
 }

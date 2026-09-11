@@ -16,7 +16,16 @@ import { SearchSelect } from './design-system/SearchSelect';
 import { ListTile } from './design-system/ListTile';
 import { MessageComposer, type ComposerDraft } from './features/chat/MessageComposer';
 import { ChatMessage } from './features/chat/ChatMessage';
+import { GraphPicker } from './features/chat/GraphPicker';
+import { initialGraphs } from './features/graphs/demo';
 import { initialSessions } from './features/workspace/demo';
+
+const graphPickerExamples = [
+  ...initialGraphs,
+  { id: 'docs-update', name: 'Documentation update', description: 'Update documentation and verify examples.', enabled: true },
+  { id: 'dependency-upgrade', name: 'Dependency upgrade', description: 'Upgrade packages and check compatibility.', enabled: true },
+  { id: 'release-preparation', name: 'Release preparation', description: 'Prepare release notes and final checks.', enabled: true },
+];
 
 const markdownExample = [
   '## Session summary',
@@ -64,6 +73,7 @@ export function DesignSystem() {
   const [level, setLevel] = useState(40);
   const [harness, setHarness] = useState<string>();
   const [model, setModel] = useState('');
+  const [graph, setGraph] = useState('');
   const [required, setRequired] = useState(true);
   const [template, setTemplate] = useState('Review {{choice.findings}} for {{run.input.task}}.');
   return <div className="design-system">
@@ -85,7 +95,7 @@ export function DesignSystem() {
     <Section title="Messages"><div className="message-examples">{initialSessions[0].messages.map(message => <ChatMessage key={message.id} message={message} />)}</div></Section>
     <Section title="Markdown"><ChatMessage message={{ id: 'markdown-example', role: 'assistant', text: markdownExample }} /></Section>
     <Section title="Flowcharts"><ChatMessage message={{ id: 'flowchart-example', role: 'assistant', text: flowchartExample }} /></Section>
-    <Section title="Composer"><MessageComposer draft={draft} onDraftChange={setDraft} onSend={draft => setNotice(`Example message: ${draft.text}`)} /></Section>
+    <Section title="Composer"><MessageComposer draft={draft} onDraftChange={setDraft} onSend={draft => setNotice(`Example message: ${draft.text}`)} graphControl={<GraphPicker graphs={graphPickerExamples} value={graph} onChange={setGraph} />} /></Section>
     <p role="status" className="gallery-notice">{notice}</p>
   </div>;
 }

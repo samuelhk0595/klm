@@ -125,5 +125,17 @@ counts. Quota, skills, and MCP indicators belong only to the main status bar.
 This feature does not imply simultaneous turns inside one native session or
 automatic switching between harnesses during a task.
 
-These decisions will be made as features are discussed and validated by the
+## Graph Selection in Chat
+
+The main chat composer has a graph selector at the bottom left, opposite model
+and effort controls. It shows graphs belonging to the selected project and the
+selected graph's name. Lists longer than five graphs enable search and scrolling.
+This slice is selection UI only: graph invocation, execution and its relationship
+to sending a chat message still need definition.
+
+The next UI slice will prototype graph-run tracking in the chat timeline and a
+read-only graph canvas using fictional run data. It does not yet define or
+implement graph execution, activation controls, or the detailed tracking layout.
+
+Further decisions will be made as features are discussed and validated by the
 user. They must not be treated as already approved requirements.

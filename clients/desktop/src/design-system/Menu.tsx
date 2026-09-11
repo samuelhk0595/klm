@@ -4,7 +4,7 @@ import { Button } from './Button';
 
 const focusableSelector = 'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]';
 
-export function Menu({ label, open, onOpenChange, trigger, children, className = '', side = 'top', position, role = 'dialog' }: {
+export function Menu({ label, open, onOpenChange, trigger, children, className = '', side = 'top', align = 'end', position, role = 'dialog' }: {
   label: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -12,6 +12,7 @@ export function Menu({ label, open, onOpenChange, trigger, children, className =
   children: ReactNode;
   className?: string;
   side?: 'top' | 'bottom';
+  align?: 'start' | 'end';
   position?: { x: number; y: number };
   role?: 'dialog' | 'menu';
 }) {
@@ -39,7 +40,7 @@ export function Menu({ label, open, onOpenChange, trigger, children, className =
       const above = rect.top - bounds.height - gap;
       const below = rect.bottom + gap;
       const preferAbove = side === 'top' ? above >= 8 || below + bounds.height > innerHeight - 8 : below + bounds.height > innerHeight - 8 && above >= 8;
-      element.style.left = `${Math.max(8, Math.min(position?.x ?? rect.right - bounds.width, innerWidth - bounds.width - 8))}px`;
+      element.style.left = `${Math.max(8, Math.min(position?.x ?? (align === 'start' ? rect.left : rect.right - bounds.width), innerWidth - bounds.width - 8))}px`;
       element.style.top = `${Math.max(8, Math.min(position?.y ?? (preferAbove ? above : below), innerHeight - bounds.height - 8))}px`;
       element.style.visibility = 'visible';
     };
@@ -85,7 +86,7 @@ export function Menu({ label, open, onOpenChange, trigger, children, className =
       document.removeEventListener('keydown', keyboard, true);
       if (element.contains(document.activeElement)) triggerButton?.focus();
     };
-  }, [open, side, position?.x, position?.y, role, portalTarget]);
+  }, [open, side, align, position?.x, position?.y, role, portalTarget]);
 
   return <>
     <span ref={anchor} className="menu-anchor">{trigger({
