@@ -1,14 +1,17 @@
-import { Folder, FolderPlus, PanelLeftClose, Plus, Search, Settings, Shapes, X } from 'lucide-react';
+import { Bot, Folder, FolderPlus, PanelLeftClose, Plus, Search, Settings, Workflow, X } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '../../design-system/Badge';
 import { Button, IconButton } from '../../design-system/Button';
 import { ProjectActionsMenu } from '../projects/ProjectActionsMenu';
 import type { Session, Project } from '../../engine';
 
-export function WorkspaceSidebar({ project, sessions, activeId, onSelect, onNew, onCreateFolder, onClose, onDesignSystem, onSettings, onEditProject, onRemoveProject }: {
+export function WorkspaceSidebar({ project, sessions, activeId, activeSection, onSelect, onNew, onCreateFolder, onClose, onAgents, onGraphs, onEditProject, onRemoveProject }: {
   project: Project; sessions: Session[]; activeId: string; onSelect: (id: string) => void; onNew: (folder?: string) => void;
   onCreateFolder: (name: string) => Promise<string | null>;
-  onClose: () => void; onDesignSystem: () => void; onSettings: () => void;
+  onClose: () => void;
+  activeSection: 'chat' | 'design' | 'agents' | 'graphs';
+  onAgents: () => void;
+  onGraphs: () => void;
   onEditProject: (project: Project) => void;
   onRemoveProject: (project: Project) => Promise<string | null>;
 }) {
@@ -45,6 +48,6 @@ export function WorkspaceSidebar({ project, sessions, activeId, onSelect, onNew,
         </div>;
       })}
     </div>
-    <div className="sidebar-footer"><Button variant="ghost" onClick={onDesignSystem}><Shapes />Design system</Button><Button variant="ghost" onClick={onSettings}><Settings />Settings</Button></div>
+    <div className="sidebar-footer"><Button variant="ghost" aria-current={activeSection === 'agents' ? 'page' : undefined} onClick={onAgents}><Bot />Agents</Button><Button variant="ghost" aria-current={activeSection === 'graphs' ? 'page' : undefined} onClick={onGraphs}><Workflow />Graphs</Button></div>
   </aside>;
 }

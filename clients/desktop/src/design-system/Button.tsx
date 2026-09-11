@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'outline' | 'ghost' | 'primary' | 'soft';
+  variant?: 'outline' | 'ghost' | 'primary' | 'soft' | 'danger-soft';
   size?: 'sm' | 'md';
 };
 

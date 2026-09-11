@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, type ButtonHTMLAttributes, type ComponentProps, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type ComponentProps, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from './Button';
 
@@ -18,8 +18,13 @@ export function Menu({ label, open, onOpenChange, trigger, children, className =
   const id = useId();
   const anchor = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLDivElement>(null);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   const change = useRef(onOpenChange);
   change.current = onOpenChange;
+
+  useLayoutEffect(() => {
+    if (open) setPortalTarget(anchor.current?.closest<HTMLDialogElement>('dialog[open]') ?? document.body);
+  }, [open]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -64,7 +69,8 @@ export function Menu({ label, open, onOpenChange, trigger, children, className =
         if (!atBoundary) return;
         event.preventDefault(); change.current(false);
         if (event.shiftKey) { triggerButton?.focus(); return; }
-        const outsideItems = [...document.querySelectorAll<HTMLElement>(focusableSelector)].filter(item => !element.contains(item) && !item.closest('[inert]') && item.getClientRects().length > 0);
+        const scope = element.closest('dialog[open]') ?? document;
+        const outsideItems = [...scope.querySelectorAll<HTMLElement>(focusableSelector)].filter(item => !element.contains(item) && !item.closest('[inert]') && item.getClientRects().length > 0);
         const index = outsideItems.indexOf(triggerButton as HTMLElement);
         (outsideItems[index + 1] ?? triggerButton)?.focus();
       }
@@ -79,16 +85,16 @@ export function Menu({ label, open, onOpenChange, trigger, children, className =
       document.removeEventListener('keydown', keyboard, true);
       if (element.contains(document.activeElement)) triggerButton?.focus();
     };
-  }, [open, side, position?.x, position?.y, role]);
+  }, [open, side, position?.x, position?.y, role, portalTarget]);
 
   return <>
     <span ref={anchor} className="menu-anchor">{trigger({
       type: 'button', 'aria-haspopup': role, 'aria-expanded': open, 'aria-controls': open ? id : undefined,
       onClick: () => onOpenChange(!open),
     })}</span>
-    {open && createPortal(<div ref={panel} id={id} role={role} aria-label={label} tabIndex={-1} className={`menu ${className}`} style={{ visibility: 'hidden' }}>
+    {open && portalTarget && createPortal(<div ref={panel} id={id} role={role} aria-label={label} tabIndex={-1} className={`menu ${className}`} style={{ visibility: 'hidden' }}>
       {children}
-    </div>, document.body)}
+    </div>, portalTarget)}
   </>;
 }
 

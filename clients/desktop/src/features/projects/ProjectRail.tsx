@@ -1,12 +1,13 @@
-import { Moon, Plus, Sun } from 'lucide-react';
+import { Moon, Plus, Settings, Sun } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { IconButton } from '../../design-system/Button';
 import { ProjectActionsMenu } from './ProjectActionsMenu';
 import type { Project } from '../../engine';
 
-export function ProjectRail({ projects, activeId, onSelect, onEdit, onRemove, onAdd, adding = false }: {
+export function ProjectRail({ projects, activeId, onSelect, onEdit, onRemove, onAdd, onSettings, adding = false }: {
   projects: Project[]; activeId: string; onSelect: (project: Project) => void; onEdit: (project: Project) => void; onAdd: () => void; adding?: boolean;
   onRemove: (project: Project) => Promise<string | null>;
+  onSettings: () => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
@@ -37,6 +38,6 @@ export function ProjectRail({ projects, activeId, onSelect, onEdit, onRemove, on
       }}
     >{project.icon ? <img src={project.icon} alt="" /> : <span>{project.name.slice(0, 2).toUpperCase()}</span>}</button>} />)}</div>
     <IconButton label={adding ? 'Choosing project directory' : 'Add project'} className="add-project-button" disabled={adding} onClick={onAdd}><Plus /></IconButton>
-    <div className="project-rail-footer"><IconButton label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun /> : <Moon />}</IconButton></div>
+    <div className="project-rail-footer"><IconButton label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'} onClick={() => setTheme(current => current === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun /> : <Moon />}</IconButton><IconButton label="Settings" onClick={onSettings}><Settings /></IconButton></div>
   </nav>;
 }

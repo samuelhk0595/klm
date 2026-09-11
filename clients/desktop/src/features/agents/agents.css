@@ -1,0 +1,32 @@
+.agents-page { flex: 1; min-height: 0; overflow-y: auto; padding: 24px; }
+.agents-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.agents-toolbar .input { max-width: 320px; }
+.agents-toolbar .button { flex-shrink: 0; }
+.agents-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.agents-empty { padding: 32px 0; text-align: center; color: var(--color-muted); }
+.agent-model { overflow-wrap: anywhere; }
+.agent-effort, .agent-harness { border-left: 1px solid var(--color-border); padding-left: 12px; }
+.agent-harness { display: inline-flex; align-items: center; gap: 6px; }
+.agent-harness > span[aria-hidden="true"] { display: inline-flex; }
+.agent-actions-menu { width: 160px; }
+.agent-actions-menu .menu-item { justify-content: flex-start; }
+.agent-actions-menu .agent-delete-action { color: var(--color-danger); }
+.agent-actions-menu .agent-delete-action:hover { color: var(--color-danger); background: var(--color-danger-soft); }
+.agent-delete-dialog p { overflow-wrap: anywhere; }
+.agent-in-use-dialog p { overflow-wrap: anywhere; }
+.agent-graph-references { margin: 0; padding-left: 20px; display: grid; gap: 8px; overflow-wrap: anywhere; }
+.agent-disabled-status { color: var(--color-muted); background: var(--color-subtle); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 2px 6px; font-size: var(--text-sm); }
+.settings-dialog.agent-editor-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); }
+.agent-editor { display: flex; flex-direction: column; gap: 24px; width: 100%; }
+.agent-editor-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.agent-editor-header h2 { font-size: var(--text-lg); font-weight: 500; }
+.agent-editor-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.agent-editor-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.agent-editor-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.agent-editor-field > label { font-size: var(--text-sm); font-weight: 500; }
+.agent-editor-wide { grid-column: 1 / -1; min-width: 0; }
+@media (max-width: 760px) {
+  .agents-page { padding: 16px; }
+  .agents-toolbar { gap: 8px; }
+  .agent-editor-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+}
