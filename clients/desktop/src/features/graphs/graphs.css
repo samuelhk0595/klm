@@ -1,0 +1,20 @@
+.graphs-page { flex: 1; min-height: 0; overflow-y: auto; padding: 24px; }
+.graphs-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+.graphs-toolbar .input { max-width: 320px; }
+.graphs-toolbar .button { flex-shrink: 0; }
+.graphs-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.graphs-empty { padding: 32px 0; text-align: center; color: var(--color-muted); }
+.graph-actions-menu { width: 160px; }
+.graph-actions-menu .menu-item { justify-content: flex-start; }
+.graph-actions-menu .graph-delete-action { color: var(--color-danger); }
+.graph-actions-menu .graph-delete-action:hover { color: var(--color-danger); background: var(--color-danger-soft); }
+.graph-disabled-status { color: var(--color-muted); background: var(--color-subtle); border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 2px 6px; font-size: var(--text-sm); }
+.graph-delete-dialog p { overflow-wrap: anywhere; }
+.graph-details-form { display: grid; gap: 20px; }
+.graph-details-field { display: grid; gap: 8px; }
+.graph-details-field > label { font-size: var(--text-sm); font-weight: 500; }
+.graph-details-actions { display: flex; justify-content: flex-end; gap: 8px; }
+@media (max-width: 760px) {
+  .graphs-page { padding: 16px; }
+  .graphs-toolbar { gap: 8px; }
+}

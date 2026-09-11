@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Download, PanelLeft, PanelRight, X } from 'lucide-react';
+import { ArrowLeft, Download, PanelLeft, PanelRight, X } from 'lucide-react';
 import { Button, IconButton } from './design-system/Button';
 import { TabNav } from './design-system/TabNav';
 import { WorkspaceSidebar } from './features/workspace/WorkspaceSidebar';
 import { AgentsPage } from './features/agents/AgentsPage';
-import { initialAgents, type Agent } from './features/agents/demo';
+import { initialAgents, mockAgentGraphReferences, type Agent } from './features/agents/demo';
+import { GraphsPage } from './features/graphs/GraphsPage';
+import { initialGraphs, type Graph } from './features/graphs/demo';
 import { SideChatPanel } from './features/chat/SideChatPanel';
 import { CreateSessionDialog } from './features/workspace/CreateSessionDialog';
 import { ConversationEvents } from './features/chat/ConversationEvents';
@@ -86,7 +88,10 @@ export function App() {
   const createProject = projects.find(item => item.id === creatingSession?.projectId);
   const [view, setView] = useState<'chat' | 'design' | 'agents' | 'graphs'>('chat');
   const [projectAgents, setProjectAgents] = useState<Record<string, Agent[]>>({});
+  const [projectGraphs, setProjectGraphs] = useState<Record<string, Graph[]>>({});
   const [agentsVisit, setAgentsVisit] = useState(0);
+  const [graphsVisit, setGraphsVisit] = useState(0);
+  const [creatingGraph, setCreatingGraph] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sideOpen = openSideSessions.includes(activeId);
   const sideVisible = sideOpen && view === 'chat' && !sidebarOpen && !creatingSession && !editingProject && !pickingDirectory && addingProject === null;
@@ -367,6 +372,26 @@ export function App() {
       return null;
     } catch (error) { return errorMessage(error); }
   }
+  function updateGraphs(graphs: Graph[]) {
+    if (!project) return;
+    const projectId = project.id;
+    const changedNames = new Map<string, string | undefined>();
+    for (const previous of projectGraphs[projectId] ?? initialGraphs) {
+      const next = graphs.find(graph => graph.id === previous.id);
+      if (previous.name !== next?.name) changedNames.set(previous.name, next?.name);
+    }
+    setProjectGraphs(current => ({ ...current, [projectId]: graphs }));
+    // Keep the existing simulated agent references consistent with renamed/deleted graphs.
+    if (changedNames.size) setProjectAgents(current => ({ ...current, [projectId]: (current[projectId] ?? initialAgents).map(agent => ({
+      ...agent,
+      graphReferences: (agent.graphReferences ?? mockAgentGraphReferences[agent.id] ?? []).flatMap(name => {
+        if (!changedNames.has(name)) return [name];
+        const nextName = changedNames.get(name);
+        return nextName ? [nextName] : [];
+      }),
+    })) }));
+  }
+
   return <div ref={shell} className={`app-shell ${sidebarOpen ? 'sidebar-open' : ''} ${sideVisible && session ? 'side-agent-open' : ''}`}
     onPointerDown={event => {
       const target = event.target as HTMLElement;
@@ -399,13 +424,13 @@ export function App() {
   >
     <ProjectRail projects={projects} activeId={project?.id ?? ''} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); settings.current?.showModal(); }} adding={pickingDirectory} />
     {sidebarOpen && <button className="panel-backdrop" aria-label="Close side panel" onClick={() => setSidebarOpen(false)} />}
-    {project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} onNew={newSession} onCreateFolder={createFolder} onSelect={id => { navigation.current += 1; setWorkspaceNavigation(current => ({ ...current, selectedSessions: { ...current.selectedSessions, [project.id]: id } })); setView('chat'); setSidebarOpen(false); }} onClose={() => setSidebarOpen(false)} onAgents={() => { navigation.current += 1; setAgentsVisit(current => current + 1); setView('agents'); setSidebarOpen(false); }} onGraphs={() => { navigation.current += 1; setView('graphs'); setSidebarOpen(false); }} onEditProject={openProjectEditor} onRemoveProject={target => removeProject(target.id)} />}
+    {project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} onNew={newSession} onCreateFolder={createFolder} onSelect={id => { navigation.current += 1; setWorkspaceNavigation(current => ({ ...current, selectedSessions: { ...current.selectedSessions, [project.id]: id } })); setView('chat'); setSidebarOpen(false); }} onClose={() => setSidebarOpen(false)} onAgents={() => { navigation.current += 1; setAgentsVisit(current => current + 1); setView('agents'); setSidebarOpen(false); }} onGraphs={() => { navigation.current += 1; setGraphsVisit(current => current + 1); setCreatingGraph(false); setView('graphs'); setSidebarOpen(false); }} onEditProject={openProjectEditor} onRemoveProject={target => removeProject(target.id)} />}
     <main className="main-panel">
-      <header className="session-header"><div className="header-leading">{project && <IconButton label="Open sessions" className="mobile-nav" onClick={() => setSidebarOpen(true)}><PanelLeft /></IconButton>}<h1>{view === 'design' ? 'Design system' : view === 'agents' ? 'Agents' : view === 'graphs' ? 'Graphs' : session?.title ?? project?.name ?? 'KLM'}</h1>{view === 'chat' && session && <span className="mode-label">{session.status}</span>}</div><div className="header-actions">{session && view === 'chat' && <><Button size="sm" className="export-button" onClick={exportSession}>Session log<Download /></Button><IconButton label={sideOpen ? 'Close side agent' : 'Open side agent'} aria-expanded={sideOpen} onClick={() => { setSideOpen(!sideOpen); setSidebarOpen(false); }}><PanelRight /></IconButton></>}</div></header>
+      <header className="session-header"><div className="header-leading">{project && <IconButton label="Open sessions" className="mobile-nav" onClick={() => setSidebarOpen(true)}><PanelLeft /></IconButton>}{view === 'graphs' && creatingGraph && project ? <Button onClick={() => setCreatingGraph(false)}><ArrowLeft />Back to graphs</Button> : <h1>{view === 'design' ? 'Design system' : view === 'agents' ? 'Agents' : view === 'graphs' ? 'Graphs' : session?.title ?? project?.name ?? 'KLM'}</h1>}{view === 'chat' && session && <span className="mode-label">{session.status}</span>}</div><div className="header-actions">{session && view === 'chat' && <><Button size="sm" className="export-button" onClick={exportSession}>Session log<Download /></Button><IconButton label={sideOpen ? 'Close side agent' : 'Open side agent'} aria-expanded={sideOpen} onClick={() => { setSideOpen(!sideOpen); setSidebarOpen(false); }}><PanelRight /></IconButton></>}</div></header>
       {connectionError && <div role="alert" className="storage-error">{connectionError} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}
       {actionError && <div role="alert" className="storage-error">{actionError} <Button size="sm" disabled={pickingDirectory} onClick={() => void openProjectPicker()}>Retry</Button></div>}
-      {view !== 'agents' && <div className="session-navigation"><TabNav value={view} onChange={setView} items={[{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <Select label="Move session to folder" value={session.workspace} disabled={pendingSessions[session.id] || !!connectionError} onChange={event => void updateSession(session, 'move', { workspace: event.target.value })}>{[...project.folders, 'Ungrouped'].map(folder => <option key={folder} value={folder}>{folder}</option>)}</Select>}</div>}
-      {view === 'design' ? <DesignSystem /> : view === 'agents' && project ? <AgentsPage key={`${project.id}:${agentsVisit}`} agents={projectAgents[project.id] ?? initialAgents} onChange={agents => setProjectAgents(current => ({ ...current, [project.id]: agents }))} /> : view === 'graphs' ? <section className="empty-chat" aria-label="Graphs" /> : !loaded ? <div className="empty-chat"><h2>{connectionError ? 'Engine disconnected' : 'Connecting to engine...'}</h2></div> : !project ? <div className="empty-chat"><h2>Add a project</h2><Button onClick={() => void openProjectPicker()} disabled={pickingDirectory}>{pickingDirectory ? 'Choosing directory...' : 'Add project'}</Button></div> : !session ? <div className="empty-chat"><h2>Create a session</h2><Button onClick={() => newSession()} disabled={!!connectionError}>Create session</Button></div> : <>
+      {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav value={view} onChange={setView} items={[{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <Select label="Move session to folder" value={session.workspace} disabled={pendingSessions[session.id] || !!connectionError} onChange={event => void updateSession(session, 'move', { workspace: event.target.value })}>{[...project.folders, 'Ungrouped'].map(folder => <option key={folder} value={folder}>{folder}</option>)}</Select>}</div>}
+      {view === 'design' ? <DesignSystem /> : view === 'agents' && project ? <AgentsPage key={`${project.id}:${agentsVisit}`} agents={projectAgents[project.id] ?? initialAgents} onChange={agents => setProjectAgents(current => ({ ...current, [project.id]: agents }))} /> : view === 'graphs' && project ? <GraphsPage key={`${project.id}:${graphsVisit}`} graphs={projectGraphs[project.id] ?? initialGraphs} agents={projectAgents[project.id] ?? initialAgents} onChange={updateGraphs} creating={creatingGraph} onCreate={() => setCreatingGraph(true)} /> : !loaded ? <div className="empty-chat"><h2>{connectionError ? 'Engine disconnected' : 'Connecting to engine...'}</h2></div> : !project ? <div className="empty-chat"><h2>Add a project</h2><Button onClick={() => void openProjectPicker()} disabled={pickingDirectory}>{pickingDirectory ? 'Choosing directory...' : 'Add project'}</Button></div> : !session ? <div className="empty-chat"><h2>Create a session</h2><Button onClick={() => newSession()} disabled={!!connectionError}>Create session</Button></div> : <>
         <div className="chat-history" ref={history} role="log" aria-label="Conversation" aria-live="polite">
           {session.events.length ? <ConversationEvents key={session.id} session={session} onSnapshot={receiveSession} onAskSide={askSide} /> : !working ? <div className="empty-chat"><h2>What would you like to work on?</h2></div> : null}
           {working && <div className="chat-working" role="status">{awaitingPermission ? 'Waiting for approval' : awaitingQuestion ? 'Waiting for your answer' : <><span className="working-spinner" aria-hidden="true" />Working</>}</div>}
