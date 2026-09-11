@@ -16,6 +16,7 @@
 .graph-ai-agent-heading { justify-content: space-between; color: var(--color-muted); font-size: var(--text-sm); }
 .graph-ai-agent-card > strong { color: var(--color-heading); font-weight: 500; overflow-wrap: anywhere; }
 .graph-ai-agent-model { font-size: var(--text-sm); color: var(--color-muted); overflow-wrap: anywhere; }
+.graph-ai-agent-name { font-size: var(--text-sm); color: var(--color-text); overflow-wrap: anywhere; }
 .graph-ai-agent-metadata, .graph-ai-agent-metadata > span, .graph-ai-agent-metadata > span > span { display: flex; align-items: center; gap: 6px; }
 .graph-ai-agent-metadata { justify-content: space-between; color: var(--color-muted); font-size: var(--text-sm); }
 .graph-agent-panel-position { display: flex; width: 360px; max-width: calc(100% - 24px); max-height: calc(100% - 24px); }
@@ -71,3 +72,7 @@
 .graph-fork-destination > strong { font-weight: 400; text-align: right; overflow-wrap: anywhere; }
 .graph-fork-workspace { display: grid; gap: 12px; padding-top: 16px; border-top: 1px solid var(--color-border); }
 .graph-fork-worktree-label { display: block; margin-top: 4px; font-size: var(--text-xs); color: var(--color-accent); }
+.graph-optional-label { margin-left: 6px; color: var(--color-muted); font-weight: 400; font-size: var(--text-xs); }
+.graph-join-output-branch { color: var(--color-accent); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.graph-terminal-command-input { font-family: var(--font-mono); font-size: var(--text-sm); }
+.graph-terminal-command-preview { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-muted); font-family: var(--font-mono); font-size: var(--text-sm); }

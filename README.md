@@ -54,8 +54,21 @@ network: it is a trusted-local-user API without remote authentication.
   correlated continuation after the requesting turn finishes.
 
 Old browser mock projects are left untouched in localStorage but are not imported:
-their folder labels were not reliable absolute paths. The live app starts with
-engine data only. Static fixtures remain isolated in the design-system gallery.
+their folder labels were not reliable absolute paths. Projects and chat sessions
+use engine data. The Agents and Graphs screens use static fixtures and local
+in-memory state, alongside the examples in the design-system gallery.
+
+## Authoring Prototypes
+
+Agents and Graphs are UI prototypes available inside a selected project. Agent
+models, harness compatibility and graph references are simulated, not live catalog
+or topology checks. List changes last until reload.
+
+New graph opens a temporary canvas with AI agent, Choice, Terminal command, Fork
+and Join elements. Apply updates that canvas only; it does not add a graph to the
+list or save YAML/layout. Leaving the canvas discards its topology. Existing graph
+tiles edit name/description, not topology. Command execution, worktrees, integration
+and graph runs remain unimplemented. See the [desktop README](clients/desktop/README.md#authoring-prototypes).
 
 ## Boundaries
 

@@ -1,6 +1,7 @@
 import { useEffect, useId } from 'react';
 import { RotateCcw, X } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
+import { Input } from '../../design-system/Input';
 import { RadioGroup } from '../../design-system/RadioGroup';
 import { SearchSelect } from '../../design-system/SearchSelect';
 import { Slider } from '../../design-system/Slider';
@@ -9,10 +10,12 @@ import { mockAgentSettings, type Agent } from '../agents/demo';
 import type { Harness } from '../../engine';
 import { effortLabel, resolveAgentNode, type AgentNodeOverrides } from './agent-node';
 
-export function AgentNodePanel({ agents, agentId, overrides, onSelectAgent, onOverridesChange, onClose }: {
+export function AgentNodePanel({ agents, name, agentId, overrides, onNameChange, onSelectAgent, onOverridesChange, onClose }: {
   agents: Agent[];
+  name: string;
   agentId: string;
   overrides: AgentNodeOverrides;
+  onNameChange: (name: string) => void;
   onSelectAgent: (id: string) => void;
   onOverridesChange: (overrides: AgentNodeOverrides) => void;
   onClose: () => void;
@@ -22,12 +25,13 @@ export function AgentNodePanel({ agents, agentId, overrides, onSelectAgent, onOv
   const agent = available.find(item => item.id === agentId);
   const settings = agent ? resolveAgentNode(agent, overrides) : undefined;
   const hasOverrides = Object.values(overrides).some(value => value !== undefined);
-  useEffect(() => { document.getElementById(`${id}-agent`)?.focus(); }, [id]);
+  useEffect(() => { document.getElementById(`${id}-name`)?.focus(); }, [id]);
 
   return <aside className="graph-agent-panel nodrag nopan nowheel" role="dialog" aria-labelledby={`${id}-title`} onKeyDown={event => {
     if (event.key === 'Escape' && !event.defaultPrevented) { event.stopPropagation(); onClose(); }
   }}>
     <div className="graph-agent-panel-header"><h2 id={`${id}-title`}>AI agent</h2><IconButton label="Close node settings" onClick={onClose}><X /></IconButton></div>
+    <div className="graph-agent-panel-field"><label htmlFor={`${id}-name`}>Name</label><Input id={`${id}-name`} maxLength={80} placeholder="Node name" value={name} onChange={event => onNameChange(event.target.value)} /></div>
     <div className="graph-agent-panel-field"><label htmlFor={`${id}-agent`}>Agent</label><SearchSelect id={`${id}-agent`} label="Agent" value={agentId} options={available.map(item => ({ value: item.id, label: item.name, description: item.description }))} onChange={onSelectAgent} placeholder="Select agent" searchPlaceholder="Search agents" emptyMessage={available.length ? 'No agents found' : 'No enabled agents available'} /></div>
     {agent && settings && <div className="graph-agent-overrides">
       <div className="graph-agent-overrides-header"><h3>Overrides</h3>{hasOverrides && <Button size="sm" variant="ghost" onClick={() => onOverridesChange({})}><RotateCcw />Reset</Button>}</div>

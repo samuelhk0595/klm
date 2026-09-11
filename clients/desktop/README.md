@@ -26,6 +26,8 @@ src/
   features/projects/    Project rail and creation form
   features/workspace/   Sessions sidebar and creation dialog
   features/chat/        Main/side chats, composers, consultation activity, harness events
+  features/agents/      Agent catalog and editor with static fixtures
+  features/graphs/      Graph list and temporary authoring canvas
   App.tsx               Engine state, SSE subscriptions, and application composition
   DesignSystem.tsx      Interactive gallery with isolated static examples
 ```
@@ -34,6 +36,38 @@ src/
 dimensions. Primitive styles are in `design-system/styles.css`; app layout is in
 `styles.css`. Import components directly and keep service calls outside generic
 UI primitives. Inter fonts and Lucide icons are bundled without CDN dependencies.
+
+## Authoring Prototypes
+
+Agents and Graphs use static fixtures in the main application, not only in the
+design-system gallery. The agent catalog, models, harness compatibility and graph
+references are simulated. Agent deletion/disable checks use those reference
+fixtures; they do not inspect canvas topology. Agent and graph lists are held in
+memory per project until reload.
+
+New graph opens a temporary canvas. Existing graph tiles edit their list metadata,
+not topology. Apply saves node settings in the current canvas only; there is no
+action to create a list record from that canvas or persist YAML/layout. Leaving
+the canvas discards it. AI agent settings update immediately; other node panels
+use Apply/Cancel. Cancelling configuration of a newly added node leaves its
+initial draft on the canvas.
+
+The initial node can be AI agent or Terminal command. The canvas catalog also
+includes Choice, Fork and Join. AI agent and Join nodes connect to Choices.
+Choice session policy is shown only for an AI agent or Join destination and is
+cleared when its outgoing connection or destination is removed. Choice input/output
+and Fork output field names use the same normalization as Choice names: lowercase,
+spaces converted to underscores, accents folded, other symbols removed, and
+edge underscores stripped on blur/apply. Payload values retain their text.
+Form and connection checks support visual editing,
+not validation of an executable graph: drafts may have unselected agents or
+unconnected destinations. Fork output fields currently validate names only;
+the variable picker offers run.input.task, without reference resolution or a
+payload preview. The Choice preview has its own local validation and interpolation.
+
+Worktree and branch settings describe intended execution; there are no Git
+operations, shell command execution, graph runs or harness submissions here.
+Integration, synchronization and execution contracts remain under refinement.
 
 ## Behavior
 

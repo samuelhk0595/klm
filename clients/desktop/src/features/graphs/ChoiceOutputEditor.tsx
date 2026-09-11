@@ -4,7 +4,7 @@ import { Button, IconButton } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import { TokenTextarea } from '../../design-system/TokenTextarea';
 import { Menu, MenuItem } from '../../design-system/Menu';
-import type { ChoiceOutputField } from './choice';
+import { normalizeChoiceName, type ChoiceOutputField } from './choice';
 
 function OutputField({ field, variables, onChange, onRemove }: {
   field: ChoiceOutputField;
@@ -30,7 +30,7 @@ function OutputField({ field, variables, onChange, onRemove }: {
 
   return <div className="graph-choice-output-field">
     <div className="graph-choice-output-heading">
-      <Input aria-label="Output field name" placeholder="Field name" required maxLength={80} value={field.name} onChange={event => onChange({ ...field, name: event.target.value })} />
+      <Input aria-label="Output field name" placeholder="Field name" required maxLength={80} pattern="[a-z0-9_]+" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={field.name} onChange={event => onChange({ ...field, name: normalizeChoiceName(event.target.value) })} onBlur={() => onChange({ ...field, name: normalizeChoiceName(field.name, true) })} />
       <Menu label="Variables" role="menu" className="graph-choice-variable-menu" side="bottom" open={menuOpen} onOpenChange={setMenuOpen} trigger={props => <IconButton {...props} label="Insert variable"><Braces /></IconButton>}>
         {variables.map(variable => <MenuItem key={variable} role="menuitem" onClick={() => insertVariable(variable)}><code>{`{{${variable}}}`}</code></MenuItem>)}
       </Menu>

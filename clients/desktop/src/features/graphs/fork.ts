@@ -1,4 +1,4 @@
-import type { ChoiceOutputField } from './choice';
+import { normalizeChoiceName, type ChoiceOutputField } from './choice';
 
 export type ForkBranch = {
   id: string;
@@ -23,7 +23,7 @@ export function createFork(): ForkDefinition {
 }
 
 export function forkOutputError(fields: ForkBranch['outputFields']): string {
-  const names = fields.map(field => field.name.trim());
+  const names = fields.map(field => normalizeChoiceName(field.name, true));
   if (names.some(name => !name)) return 'Each output field needs a name.';
   if (new Set(names).size !== names.length) return 'Each output field needs a unique name.';
   return '';

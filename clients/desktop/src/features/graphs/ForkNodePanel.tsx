@@ -3,6 +3,7 @@ import { ChevronDown, GitFork, Plus, Trash2, X } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import { ChoiceOutputEditor } from './ChoiceOutputEditor';
+import { normalizeChoiceName } from './choice';
 import { createForkBranch, forkOutputError, gitBranchNameError, type ForkBranch, type ForkDefinition } from './fork';
 
 export function ForkNodePanel({ fork, destinations, onSave, onClose }: {
@@ -29,7 +30,7 @@ export function ForkNodePanel({ fork, destinations, onSave, onClose }: {
   }}>
     <form className="graph-choice-form" onSubmit={event => {
       event.preventDefault();
-      if (valid) onSave({ name: draft.name.trim(), branches: draft.branches.map(branch => ({ ...branch, name: branch.name.trim(), outputFields: branch.outputFields.map(field => ({ ...field, name: field.name.trim() })) })) });
+      if (valid) onSave({ name: draft.name.trim(), branches: draft.branches.map(branch => ({ ...branch, name: branch.name.trim(), outputFields: branch.outputFields.map(field => ({ ...field, name: normalizeChoiceName(field.name, true) })) })) });
     }}>
       <div className="graph-agent-panel-header"><h2 id={`${id}-title`}>Fork</h2><IconButton label="Close fork settings" onClick={onClose}><X /></IconButton></div>
       <div className="graph-agent-panel-field"><label htmlFor={`${id}-name`}>Name</label><Input id={`${id}-name`} autoFocus required maxLength={80} value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} /></div>
