@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { addEdge, Background, Handle, MarkerType, Panel, Position, ReactFlow, useEdgesState, useNodesState, useOnViewportChange, useReactFlow, useUpdateNodeInternals, type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance, type XYPosition } from '@xyflow/react';
 import { Bot, Diamond, GitFork, GitMerge, Maximize, Minus, Plus, Settings2, Terminal, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
+import { Badge } from '../../design-system/Badge';
 import { Menu, MenuItem } from '../../design-system/Menu';
 import { HarnessIcon } from '../chat/HarnessIcon';
 import type { Agent } from '../agents/demo';
@@ -17,9 +18,17 @@ import type { ChoiceDefinition } from './choice';
 import { RemoveNodeDialog } from './RemoveNodeDialog';
 import { effortLabel, harnessNames, resolveAgentNode, type AgentNodeOverrides } from './agent-node';
 import '@xyflow/react/dist/style.css';
+import './graph-shimmer.css';
+import './graph-running-led.css';
 import './graph-canvas.css';
 
 type CanvasNodeData = {
+  readOnly?: boolean;
+  running?: boolean;
+  activityStatus?: 'pending' | 'running' | 'completed';
+  inspecting?: boolean;
+  inspectionMode?: 'activity' | 'configuration';
+  onInspect?: () => void;
   terminal?: TerminalDefinition;
   name?: string;
   join?: JoinDefinition;
@@ -35,7 +44,7 @@ type CanvasNodeData = {
   settings?: ReturnType<typeof resolveAgentNode>;
   configuring?: boolean;
 };
-type CanvasNode = Node<CanvasNodeData>;
+export type CanvasNode = Node<CanvasNodeData>;
 type CanvasContextMenu = { x: number; y: number } & ({ kind: 'node'; nodeId: string } | { kind: 'canvas' });
 
 function InitialNodePlaceholder({ data }: NodeProps<CanvasNode>) {
@@ -48,70 +57,88 @@ function InitialNodePlaceholder({ data }: NodeProps<CanvasNode>) {
   </Menu>;
 }
 
+function NodeInspectionButton({ data }: { data: CanvasNodeData }) {
+  if (!data.readOnly || !data.onInspect) return null;
+  const name = data.name ?? data.choice?.name ?? data.fork?.name ?? data.terminal?.name ?? `Join · ${data.agent?.name ?? 'Integration'}`;
+  const label = data.inspectionMode === 'configuration' ? `View configuration for ${name}` : `View activity for ${name}, ${data.activityStatus ?? 'pending'}`;
+  return <button type="button" className="graph-node-inspect-button nodrag nopan" aria-label={label} aria-expanded={data.inspecting} onClick={data.onInspect} />;
+}
+
 function AgentNodeCard({ data }: NodeProps<CanvasNode>) {
-  return <div className={`graph-ai-agent-card ${data.configuring ? 'is-configuring' : ''}`}>
+  return <div className={`graph-ai-agent-card ${data.configuring ? 'is-configuring' : ''} ${data.running ? 'graph-node--running' : ''}`}>
     <Handle type="target" position={Position.Left} id="input" isConnectableStart={false} aria-label="Agent input" />
-    <div className="graph-ai-agent-heading"><span><Bot />AI agent</span><IconButton label="Configure agent node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton></div>
+    <div className="graph-ai-agent-heading"><span><Bot />AI agent</span><span className="graph-node-heading-meta">
+      {data.initial && <Badge>Start</Badge>}
+      {data.running && <span className="graph-node-running-label"><i aria-hidden="true" />Running</span>}
+      {data.activityStatus === 'completed' && <span className="graph-run-status graph-run-status--completed">Completed</span>}
+      {!data.readOnly && <IconButton label="Configure agent node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton>}
+    </span></div>
     <strong>{data.name?.trim() || 'New agent node'}</strong>
     <span className="graph-ai-agent-name" title="Agent">{data.agent?.name ?? 'Select agent'}</span>
     {data.agent && <span className="graph-ai-agent-model">{data.settings?.model?.name ?? 'Select model'}{data.settings?.effort && <> · {effortLabel(data.settings.effort)}</>}</span>}
     {data.settings && <div className="graph-ai-agent-metadata"><span><span aria-hidden="true"><HarnessIcon harness={data.settings.harness} /></span>{harnessNames[data.settings.harness]}</span></div>}
     <Handle type="source" position={Position.Right} id="choices" aria-label="Connect to a choice" />
+    <NodeInspectionButton data={data} />
   </div>;
 }
 
 function ChoiceNodeCard({ data }: NodeProps<CanvasNode>) {
-  return <div className={`graph-choice-node ${data.configuring ? 'is-configuring' : ''}`}>
+  return <div className={`graph-choice-node ${data.configuring ? 'is-configuring' : ''} ${data.running ? 'graph-node--running' : ''}`}>
     <Handle type="target" position={Position.Left} id="sources" isConnectableStart={false} aria-label="Expose this choice to a node" />
-    <Button variant="ghost" className="graph-choice-content nopan" onClick={data.onConfigure} aria-label={`Configure choice: ${data.choice?.name || 'New choice'}`}>
+    {data.readOnly ? <div className="graph-choice-content graph-choice-content--readonly"><strong>{data.choice?.name || 'New choice'}</strong></div> : <Button variant="ghost" className="graph-choice-content nopan" onClick={data.onConfigure} aria-label={`Configure choice: ${data.choice?.name || 'New choice'}`}>
       <strong>{data.choice?.name || 'New choice'}</strong>
-    </Button>
+    </Button>}
     {!data.choice?.terminal && <Handle type="source" position={Position.Right} id="destination" aria-label="Choice destination" />}
+    <NodeInspectionButton data={data} />
   </div>;
 }
 
 function ForkNodeCard({ id, data }: NodeProps<CanvasNode>) {
   const updateNodeInternals = useUpdateNodeInternals();
   useEffect(() => { updateNodeInternals(id); }, [id, data.fork, updateNodeInternals]);
-  return <div className={`graph-fork-card ${data.configuring ? 'is-configuring' : ''}`}>
+  return <div className={`graph-fork-card ${data.configuring ? 'is-configuring' : ''} ${data.running ? 'graph-node--running' : ''}`}>
     <Handle type="target" position={Position.Left} id="input" isConnectableStart={false} aria-label="Fork input" />
-    <div className="graph-ai-agent-heading"><span><GitFork />Fork</span><IconButton label="Configure fork node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton></div>
+    <div className="graph-ai-agent-heading"><span><GitFork />Fork</span>{!data.readOnly && <IconButton label="Configure fork node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton>}</div>
     <strong>{data.fork?.name || 'Fork'}</strong>
     <div className="graph-fork-outputs">{data.fork?.branches.map(branch => <div key={branch.id} className="graph-fork-output">
       <span>{branch.name}</span><span className="graph-fork-worktree-label">{branch.gitBranch || 'Worktree'}</span><Handle type="source" position={Position.Right} id={branch.id} aria-label={`Branch output: ${branch.name}`} />
     </div>)}</div>
+    <NodeInspectionButton data={data} />
   </div>;
 }
 
 function JoinNodeCard({ data }: NodeProps<CanvasNode>) {
-  return <div className={`graph-ai-agent-card ${data.configuring ? 'is-configuring' : ''}`}>
+  return <div className={`graph-ai-agent-card ${data.configuring ? 'is-configuring' : ''} ${data.running ? 'graph-node--running' : ''}`}>
     <Handle type="target" position={Position.Left} id="branches" isConnectableStart={false} aria-label="Join branch inputs" />
-    <div className="graph-ai-agent-heading"><span><GitMerge />Join</span><IconButton label="Configure join node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton></div>
+    <div className="graph-ai-agent-heading"><span><GitMerge />Join</span>{!data.readOnly && <IconButton label="Configure join node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton>}</div>
     <strong>{data.agent?.name ?? 'Select agent'}</strong>
     {data.agent && <span className="graph-ai-agent-model">{data.settings?.model?.name ?? 'Select model'}{data.settings?.effort && <> · {effortLabel(data.settings.effort)}</>}</span>}
     {data.join?.outputBranch && <span className="graph-join-output-branch" title="Output Git branch">{data.join.outputBranch}</span>}
     <Handle type="source" position={Position.Right} id="choices" aria-label="Connect join to a choice" />
+    <NodeInspectionButton data={data} />
   </div>;
 }
 
 function TerminalNodeCard({ data }: NodeProps<CanvasNode>) {
-  return <div className={`graph-ai-agent-card ${data.configuring ? 'is-configuring' : ''}`}>
+  return <div className={`graph-ai-agent-card ${data.configuring ? 'is-configuring' : ''} ${data.running ? 'graph-node--running' : ''}`}>
     <Handle type="target" position={Position.Left} id="input" isConnectableStart={false} aria-label="Terminal command input" />
-    <div className="graph-ai-agent-heading"><span><Terminal />Terminal command</span><IconButton label="Configure terminal node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton></div>
+    <div className="graph-ai-agent-heading"><span><Terminal />Terminal command</span><span className="graph-node-heading-meta">{data.initial && <Badge>Start</Badge>}{!data.readOnly && <IconButton label="Configure terminal node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton>}</span></div>
     <strong>{data.terminal?.name || 'New terminal node'}</strong>
     {data.terminal?.command && <code className="graph-terminal-command-preview" title={data.terminal.command}>{data.terminal.command}</code>}
     <Handle type="source" position={Position.Right} id="output" aria-label="Terminal command destination" />
+    <NodeInspectionButton data={data} />
   </div>;
 }
 
-const nodeTypes = { initialPlaceholder: InitialNodePlaceholder, aiAgent: AgentNodeCard, choice: ChoiceNodeCard, fork: ForkNodeCard, join: JoinNodeCard, terminal: TerminalNodeCard };
+export const graphViewNodeTypes = { aiAgent: AgentNodeCard, choice: ChoiceNodeCard, fork: ForkNodeCard, join: JoinNodeCard, terminal: TerminalNodeCard };
+const nodeTypes = { ...graphViewNodeTypes, initialPlaceholder: InitialNodePlaceholder };
 // Presentation only; this placeholder is not an executable graph node.
 const initialNodes: CanvasNode[] = [{
   id: 'initial-node-placeholder', type: 'initialPlaceholder', position: { x: 0, y: 0 }, data: {},
   draggable: false, selectable: false, connectable: false, deletable: false, focusable: false,
 }];
 
-function CanvasControls() {
+export function CanvasControls() {
   const { zoomIn, zoomOut, fitView } = useReactFlow();
   return <Panel position="bottom-left" className="graph-canvas-toolbar">
     <IconButton label="Zoom in" onClick={() => void zoomIn()}><Plus /></IconButton>

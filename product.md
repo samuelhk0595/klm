@@ -130,12 +130,51 @@ automatic switching between harnesses during a task.
 The main chat composer has a graph selector at the bottom left, opposite model
 and effort controls. It shows graphs belonging to the selected project and the
 selected graph's name. Lists longer than five graphs enable search and scrolling.
-This slice is selection UI only: graph invocation, execution and its relationship
-to sending a chat message still need definition.
+Selecting a graph adds a **Graph** tab beside **Chat**, below the session title.
+The tab displays the selected graph in a read-only canvas with pan, zoom and reset
+view controls. Nodes, connections and settings cannot be edited there. The composer
+and its status bar are visible only in Chat; Graph uses that space for its canvas.
+Selecting **None** hides Graph and returns to Chat if
+needed; selecting a graph makes the tab available without opening it automatically.
 
-The next UI slice will prototype graph-run tracking in the chat timeline and a
-read-only graph canvas using fictional run data. It does not yet define or
-implement graph execution, activation controls, or the detailed tracking layout.
+The current canvas uses fictional drawings for the three catalog examples. Graph
+invocation, execution and its relationship to sending a chat message still need
+definition. In the current CSV export visual experiment, a vertical pink-to-blue
+shimmer sweeps back and forth
+across the active card's body instead of animating its border. The small Running indicator switches directly between gray
+without glow and blue with glow. While a graph run is active, clicking any agent,
+Choice, Fork, Join or terminal card opens the same floating panel with **Run**, **Input** and
+**Output** tabs in its existing header. Run contains concise logs; Input shows the
+received JSON; Output remains empty until that element completes. Agent output
+identifies the selected Choice and the payload submitted to it. A Choice shows its
+received input separately from the output assembled for its destination.
+
+The fictional simulation completes Plan CSV export after 24 seconds, passes through
+ready and starts Implement export after 27 seconds. Completed records remain
+available when inspecting other cards and returning. Implementation activity loops;
+later elements remain pending with empty tabs. This is not a full-run simulator.
+Node sizes and positions stay unchanged. None of these events execute or enter chat history.
+A matching LED appears beside the Graph tab label only while a graph run is active,
+including while Chat is selected. The current CSV simulation starts on first opening
+Graph and continues across Chat/Graph switches; selecting a graph alone does not
+start it or light the indicator. Removing the selection clears this local preview.
+While a run is active, the graph icon to the left of the selected name in the
+composer is replaced by the same blinking LED used for Running. The name stays
+plain text. With no active run, the graph icon is shown normally.
+Graph-run tracking in the timeline and real execution controls remain pending.
+
+The initial agent or terminal node carries a small **Start** badge inside its header.
+All node cards have the same moderate resting shadow, independent of the active
+card's shimmer. Reduced-motion preferences disable the shimmer.
+
+When no graph run is active, clicking a card opens a right-side configuration panel
+in the same visual style as the authoring panels. Values appear as text, not disabled
+form controls. It includes agent execution settings and their inherited/override
+source, Choice contracts and output templates, Fork branch/worktree settings, Join
+settings and terminal commands as applicable. There are no editing actions.
+Required/Optional is shown as text in this first version; its final presentation
+still needs user validation. The idle Bug fix and Code review fixtures demonstrate
+this mode; CSV export continues to demonstrate run activity.
 
 Further decisions will be made as features are discussed and validated by the
 user. They must not be treated as already approved requirements.

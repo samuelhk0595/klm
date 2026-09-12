@@ -50,6 +50,7 @@
   --radius-pill: 999px;
   --shadow-window: 0 8px 40px #24344b16;
   --shadow-sm: 0 1px 3px #11182708;
+  --shadow-card: 0 4px 12px #11182714;
   --shadow-menu: 0 8px 24px #11182720;
   --transition-fast: 150ms ease;
   --sidebar-width: 256px;
@@ -89,5 +90,6 @@
   --gradient-canvas: radial-gradient(ellipse at 15% 15%, #1a2a46 0%, transparent 55%), radial-gradient(ellipse at 85% 85%, #302844 0%, transparent 55%), linear-gradient(135deg, #101522, #1c2637 50%, #171a28);
   --shadow-window: 0 16px 64px #00000066;
   --shadow-sm: 0 1px 3px #00000026;
+  --shadow-card: 0 4px 12px #00000038;
   --shadow-menu: 0 8px 24px #00000050;
 }

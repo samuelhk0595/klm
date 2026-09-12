@@ -70,6 +70,20 @@ list or save YAML/layout. Leaving the canvas discards its topology. Existing gra
 tiles edit name/description, not topology. Command execution, worktrees, integration
 and graph runs remain unimplemented. See the [desktop README](clients/desktop/README.md#authoring-prototypes).
 
+In chat, selecting a graph adds a **Graph** tab beside **Chat**. It displays that
+catalog example's fictional drawing in a read-only canvas with pan, zoom and Reset
+view. The composer is visible only in Chat. **None** hides the tab. This view reuses
+the authoring cards but offers no node, connection or settings editing. In CSV
+export, the active element has a shimmer sweeping across its body and a small blinking Running
+indicator (blue with glow / gray without glow). Clicking any card opens compact
+Run, Input and Output tabs. The local simulation advances from planning through
+ready to implementation, retaining completed outputs for inspection without executing tools.
+A matching LED beside the Graph tab name appears only during an active run and stays
+visible in Chat. The simulation continues when switching between Chat and Graph.
+The initial node is marked **Start**, and all cards share a moderate resting shadow
+separate from the shimmer. In graphs without a run (Bug fix and Code review),
+clicking a card opens its configuration as read-only text in a right-side panel.
+
 ## Boundaries
 
 The **Session Status Bar** (`clients/desktop/src/features/chat/SessionStatusBar.tsx`)

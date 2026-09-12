@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Download, PanelLeft, PanelRight, X } from 'lucide-react';
 import { Button, IconButton } from './design-system/Button';
 import { TabNav } from './design-system/TabNav';
@@ -21,6 +21,8 @@ import { ProjectRail } from './features/projects/ProjectRail';
 import { ProjectDialog } from './features/projects/ProjectDialog';
 import { ENGINE_URL, pickDirectory, request, type EngineState, type Harness, type Project, type Session, type SourceReference } from './engine';
 import { Select } from './design-system/Select';
+
+const GraphView = lazy(() => import('./features/graphs/GraphView').then(module => ({ default: module.GraphView })));
 
 function mergeSessions(current: Session[], incoming: Session[]): Session[] {
   // Preserve nanosecond precision and normalize Go's variable fractional digits.
@@ -91,6 +93,14 @@ export function App() {
   const [projectAgents, setProjectAgents] = useState<Record<string, Agent[]>>({});
   const [projectGraphs, setProjectGraphs] = useState<Record<string, Graph[]>>({});
   const [selectedGraphs, setSelectedGraphs] = useState<Record<string, string>>({});
+  const [sessionTabs, setSessionTabs] = useState<Record<string, 'chat' | 'graph'>>({});
+  const selectedGraph = (projectGraphs[project?.id ?? ''] ?? initialGraphs).find(graph => graph.id === selectedGraphs[activeId] && graph.enabled);
+  const chatTab = selectedGraph ? sessionTabs[activeId] ?? 'chat' : 'chat';
+  const [graphRun, setGraphRun] = useState<{ sessionId: string; graphId?: string; running: boolean } | null>(null);
+  const graphRunInProgress = graphRun?.sessionId === activeId && graphRun.graphId === selectedGraph?.id && graphRun.running;
+  const onGraphRunChange = useCallback((running: boolean) => {
+    setGraphRun({ sessionId: activeId, graphId: selectedGraph?.id, running });
+  }, [activeId, selectedGraph?.id]);
   const [agentsVisit, setAgentsVisit] = useState(0);
   const [graphsVisit, setGraphsVisit] = useState(0);
   const [creatingGraph, setCreatingGraph] = useState(false);
@@ -386,6 +396,7 @@ export function App() {
     const projectSessionIds = new Set(projectSessions.map(session => session.id));
     const availableGraphIds = new Set(graphs.filter(graph => graph.enabled).map(graph => graph.id));
     setSelectedGraphs(current => Object.fromEntries(Object.entries(current).filter(([sessionId, graphId]) => !projectSessionIds.has(sessionId) || availableGraphIds.has(graphId))));
+    setSessionTabs(current => Object.fromEntries(Object.entries(current).filter(([sessionId]) => !projectSessionIds.has(sessionId) || availableGraphIds.has(selectedGraphs[sessionId]))));
     // Keep the existing simulated agent references consistent with renamed/deleted graphs.
     if (changedNames.size) setProjectAgents(current => ({ ...current, [projectId]: (current[projectId] ?? initialAgents).map(agent => ({
       ...agent,
@@ -434,19 +445,23 @@ export function App() {
       <header className="session-header"><div className="header-leading">{project && <IconButton label="Open sessions" className="mobile-nav" onClick={() => setSidebarOpen(true)}><PanelLeft /></IconButton>}{view === 'graphs' && creatingGraph && project ? <Button onClick={() => setCreatingGraph(false)}><ArrowLeft />Back to graphs</Button> : <h1>{view === 'design' ? 'Design system' : view === 'agents' ? 'Agents' : view === 'graphs' ? 'Graphs' : session?.title ?? project?.name ?? 'KLM'}</h1>}{view === 'chat' && session && <span className="mode-label">{session.status}</span>}</div><div className="header-actions">{session && view === 'chat' && <><Button size="sm" className="export-button" onClick={exportSession}>Session log<Download /></Button><IconButton label={sideOpen ? 'Close side agent' : 'Open side agent'} aria-expanded={sideOpen} onClick={() => { setSideOpen(!sideOpen); setSidebarOpen(false); }}><PanelRight /></IconButton></>}</div></header>
       {connectionError && <div role="alert" className="storage-error">{connectionError} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}
       {actionError && <div role="alert" className="storage-error">{actionError} <Button size="sm" disabled={pickingDirectory} onClick={() => void openProjectPicker()}>Retry</Button></div>}
-      {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav value={view} onChange={setView} items={[{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <Select label="Move session to folder" value={session.workspace} disabled={pendingSessions[session.id] || !!connectionError} onChange={event => void updateSession(session, 'move', { workspace: event.target.value })}>{[...project.folders, 'Ungrouped'].map(folder => <option key={folder} value={folder}>{folder}</option>)}</Select>}</div>}
+      {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav<'chat' | 'graph'> value={view === 'design' ? 'chat' : chatTab} onChange={tab => { setView('chat'); setSessionTabs(current => ({ ...current, [activeId]: tab })); }} items={view === 'chat' && selectedGraph ? [{ value: 'chat', label: 'Chat' }, { value: 'graph', label: <span className="graph-tab-label">Graph{graphRunInProgress && <span className="graph-tab-run-indicator" role="img" aria-label="Graph run in progress" title="Graph run in progress" />}</span> }] : [{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <Select label="Move session to folder" value={session.workspace} disabled={pendingSessions[session.id] || !!connectionError} onChange={event => void updateSession(session, 'move', { workspace: event.target.value })}>{[...project.folders, 'Ungrouped'].map(folder => <option key={folder} value={folder}>{folder}</option>)}</Select>}</div>}
       {view === 'design' ? <DesignSystem /> : view === 'agents' && project ? <AgentsPage key={`${project.id}:${agentsVisit}`} agents={projectAgents[project.id] ?? initialAgents} onChange={agents => setProjectAgents(current => ({ ...current, [project.id]: agents }))} /> : view === 'graphs' && project ? <GraphsPage key={`${project.id}:${graphsVisit}`} graphs={projectGraphs[project.id] ?? initialGraphs} agents={projectAgents[project.id] ?? initialAgents} onChange={updateGraphs} creating={creatingGraph} onCreate={() => setCreatingGraph(true)} /> : !loaded ? <div className="empty-chat"><h2>{connectionError ? 'Engine disconnected' : 'Connecting to engine...'}</h2></div> : !project ? <div className="empty-chat"><h2>Add a project</h2><Button onClick={() => void openProjectPicker()} disabled={pickingDirectory}>{pickingDirectory ? 'Choosing directory...' : 'Add project'}</Button></div> : !session ? <div className="empty-chat"><h2>Create a session</h2><Button onClick={() => newSession()} disabled={!!connectionError}>Create session</Button></div> : <>
-        <div className="chat-history" ref={history} role="log" aria-label="Conversation" aria-live="polite">
+        <div className="chat-history" hidden={chatTab === 'graph'} ref={history} role="log" aria-label="Conversation" aria-live="polite">
           {session.events.length ? <ConversationEvents key={session.id} session={session} onSnapshot={receiveSession} onAskSide={askSide} /> : !working ? <div className="empty-chat"><h2>What would you like to work on?</h2></div> : null}
           {working && <div className="chat-working" role="status">{awaitingPermission ? 'Waiting for approval' : awaitingQuestion ? 'Waiting for your answer' : <><span className="working-spinner" aria-hidden="true" />Working</>}</div>}
         </div>
+        {selectedGraph && <Suspense fallback={chatTab === 'graph' ? <section className="graph-view-loading" aria-label="Loading graph canvas" aria-busy="true" /> : null}><GraphView key={`${session.id}:${selectedGraph.id}`} graph={selectedGraph} agents={projectAgents[project.id] ?? initialAgents} visible={chatTab === 'graph'} onRunningChange={onGraphRunChange} /></Suspense>}
         {sessionErrors[session.id] && <div role="alert" className="storage-error">{sessionErrors[session.id]}</div>}
-        <div className="composer-area">
+        <div className="composer-area" hidden={chatTab !== 'chat'}>
           {(awaitingPermission || awaitingQuestion) && <div className="permission-queue">
             {session.permissions?.map(permission => <PermissionCard key={permission.id} permission={permission} sessionId={session.id} projectName={project.name} onResolved={snapshot => setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [snapshot]) }))} />)}
             {session.questions?.map(question => <QuestionCard key={question.id} question={question} sessionId={session.id} onResolved={snapshot => setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [snapshot]) }))} />)}
           </div>}
-          <MessageComposer key={session.id} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} disabled={!!connectionError || pendingSessions[session.id] || session.status === 'running' || awaitingPermission || awaitingQuestion} running={session.status === 'running'} onStop={() => void updateSession(session, 'stop', {})} graphControl={<GraphPicker key={session.id} graphs={projectGraphs[session.projectId] ?? initialGraphs} value={selectedGraphs[session.id] ?? ''} onChange={graphId => setSelectedGraphs(current => ({ ...current, [session.id]: graphId }))} />} modelControl={<ModelPicker key={session.id} session={session} disabled={!!connectionError || !!pendingSessions[session.id] || working} onSave={(model, effort) => applyModelSettings(session, model, effort)} />} />
+          <MessageComposer key={session.id} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} disabled={!!connectionError || pendingSessions[session.id] || session.status === 'running' || awaitingPermission || awaitingQuestion} running={session.status === 'running'} onStop={() => void updateSession(session, 'stop', {})} graphControl={<GraphPicker key={session.id} graphs={projectGraphs[session.projectId] ?? initialGraphs} value={selectedGraphs[session.id] ?? ''} running={!!graphRunInProgress} onChange={graphId => {
+            setSelectedGraphs(current => ({ ...current, [session.id]: graphId }));
+            if (!graphId) setSessionTabs(current => ({ ...current, [session.id]: 'chat' }));
+          }} />} modelControl={<ModelPicker key={session.id} session={session} disabled={!!connectionError || !!pendingSessions[session.id] || working} onSave={(model, effort) => applyModelSettings(session, model, effort)} />} />
           <SessionStatusBar session={session} />
         </div>
       </>}

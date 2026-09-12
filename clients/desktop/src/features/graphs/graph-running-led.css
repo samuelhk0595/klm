@@ -1,0 +1,3 @@
+.graph-node-running-label > i, .graph-run-status--running::before, .graph-tab-run-indicator, .graph-picker-run-indicator::before { content: ''; display: inline-block; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--color-accent); box-shadow: 0 0 6px var(--color-accent); animation: graph-running-dot 1s steps(1, end) infinite; }
+@keyframes graph-running-dot { 0%, 100% { background: var(--color-accent); box-shadow: 0 0 6px var(--color-accent); } 50% { background: var(--color-faint); box-shadow: none; } }
+@media (prefers-reduced-motion: reduce) { .graph-node-running-label > i, .graph-run-status--running::before, .graph-tab-run-indicator, .graph-picker-run-indicator::before { animation: none; } }

@@ -1,4 +1,4 @@
-// UI-only graph records. Topology and execution will be configured in the graph builder.
+// UI-only graph records. Read-only drawings live in graph-view-demo.ts; execution is not implemented.
 export type Graph = { id: string; name: string; description: string; enabled: boolean };
 
 export const initialGraphs: Graph[] = [

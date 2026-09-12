@@ -81,9 +81,74 @@ Model and graph search inputs omit the thick external focus outline.
 The graph menu aligns its left edge with the picker and extends rightward to
 avoid covering the sessions sidebar. Other menus keep their existing alignment.
 
-The next prototype is graph-run tracking in the chat timeline with a read-only
-canvas. It has not been implemented; run activation and the tracking layout still
-need refinement with the user.
+Selecting a graph adds a **Graph** tab beside **Chat** below the session title,
+without switching tabs automatically. Graph shows a read-only React Flow canvas
+using the authoring cards, with pan, zoom and Reset view. Nodes cannot be moved,
+connected, removed or edited, and the authoring catalog is not exposed.
+The composer and Session Status Bar appear only in Chat, preserving the draft while
+Graph is open. None hides Graph and returns to Chat; deleting
+or disabling the selected graph also removes the tab. Tab selection is local to
+each chat. Changing graphs while viewing Graph loads the new drawing and fits it.
+
+`features/graphs/graph-view-demo.ts` provides distinct fictional drawings keyed by
+the three catalog graph IDs. Renaming a graph retains its drawing. These are not
+saved builder canvases or executable definitions; New graph still has no save
+action.
+
+CSV export opens focused on its first activities. The current visual experiment
+replaces the active element's LED border with a vertical pink-to-blue shimmer across
+the card body, without tilt. It travels back and forth, taking 4.5 seconds per direction
+with ease-in-out motion. The overlay follows
+the card's corners and does not intercept clicks or clip connection handles.
+Reduced-motion preferences disable the shimmer. The small dot beside Running
+blinks in discrete steps: 500ms blue with glow, 500ms gray without glow. This applies
+to the card and panel indicators. Reduced-motion preferences keep them steady.
+All graph cards share the moderate `--shadow-card` resting shadow, including Choice
+and Fork. The animated shimmer remains separate from that shadow. An explicit
+initial-node flag displays **Start** in the agent or terminal header, in both the
+authoring canvas and catalog drawings; it is not inferred from node position.
+While a graph run is active, clicking any agent, Choice, Fork, Join or terminal card
+(also keyboard-accessible) opens a floating panel above the canvas controls without resizing or moving nodes.
+Close or Escape dismisses it and returns focus to that card. Reset view fits the
+whole graph.
+
+The panel has **Run**, **Input** and **Output** tabs in the same 54px header, replacing
+the agent subtitle. The body remains 200px high. Run shows concise, non-expandable
+logs, following new entries unless the user scrolls up. Input displays received JSON.
+Output is blank while pending/running; a completed agent shows its selected Choice
+and submitted payload. The Choice has its own input and transformed destination
+output, rather than treating those two payloads as interchangeable.
+
+`graph-run-demo.ts` provides fictional snapshots driven locally by `GraphView.tsx`:
+Plan CSV export completes at 24 seconds, ready processes its payload, and Implement
+export starts at 27 seconds. Planning/Choice results remain available when selecting
+other cards and returning. Implementation logs loop while later elements remain
+pending with empty tabs. Opening Graph for the first time starts the local CSV
+simulation; selecting a graph alone does not. The clock, canvas viewport and inspected
+activity remain mounted across Chat/Graph switches, with the canvas hidden in Chat.
+A blinking LED beside the Graph tab label follows the preview's running state and
+remains visible in Chat. During a run, the graph picker replaces its left graph icon
+with the same blinking LED as the nodes; its name is always plain text. Idle/None
+selections show the usual graph icon. Shared LED styles live in `graph-running-led.css`
+and respect reduced-motion preferences. The text-shimmer experiment was removed;
+the card keeps its pastel shimmer in `graph-shimmer.css`.
+Changing/clearing the graph selection or leaving the session
+view unmounts the preview and clears its running indicator. This is not a complete simulation of Fork/Join or graph
+execution contracts. It runs no tools, writes no files and does not affect engine
+state or persisted chat history. Timeline tracking and real execution remain pending.
+
+Without an active graph run, clicking a card opens `NodeConfigurationPanel.tsx` in
+the same right-side floating position and shell as the authoring panels. It renders
+labels/values rather than disabled controls: agent name, selected agent and effective
+harness/model/effort with inherited/override provenance; Choice description, outcome,
+input fields, output templates, destination and eligible session policy; Fork branch
+names, destinations, worktrees, Git branches, base revision and output fields; Join
+agent, additional prompt and output Git branch; terminal name and command.
+There are no Apply/Cancel, edit, add/remove or preview-editing actions. Close and
+Escape return focus to the card. Required/Optional is provisional plain text rather
+than a toggle. Bug fix's request_changes and Code review's outcomes include fictional
+contract fields to demonstrate this view. CSV export remains the active-run example,
+where even pending nodes open the bottom activity panel rather than configuration.
 
 ## Behavior
 

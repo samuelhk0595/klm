@@ -3,10 +3,12 @@ import { Check, ChevronDown, Workflow } from 'lucide-react';
 import { Button } from '../../design-system/Button';
 import { Menu, MenuItem } from '../../design-system/Menu';
 import type { Graph } from '../graphs/demo';
+import '../graphs/graph-running-led.css';
 
-export function GraphPicker({ graphs, value, onChange }: {
+export function GraphPicker({ graphs, value, running = false, onChange }: {
   graphs: Graph[];
   value: string;
+  running?: boolean;
   onChange: (graphId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -41,7 +43,7 @@ export function GraphPicker({ graphs, value, onChange }: {
   }
 
   return <Menu label="Graphs" className="model-menu graph-picker-menu" align="start" open={open} onOpenChange={next => { setSearch(''); setOpen(next); }} trigger={props => <Button {...props} variant="ghost" size="sm" className="model-picker-trigger graph-picker-trigger" aria-label={`Choose graph: ${selected?.name ?? 'None'}`} title={selected?.name}>
-    <Workflow /><span className="graph-picker-name">{selected?.name ?? 'Select graph'}</span><ChevronDown />
+    {running && selected ? <span className="graph-picker-run-indicator" role="img" aria-label="Graph run in progress" title="Graph run in progress" /> : <Workflow />}<span className="graph-picker-name">{selected?.name ?? 'Select graph'}</span><ChevronDown />
   </Button>}>
     <div ref={options} onKeyDown={navigate}>
       {searchable && <div className="model-menu-search"><input data-menu-autofocus type="search" aria-label="Search graphs" placeholder="Search graphs" value={search} onChange={event => { setSearch(event.target.value); list.current?.scrollTo({ top: 0 }); }} /></div>}

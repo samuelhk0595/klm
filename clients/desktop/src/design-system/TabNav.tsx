@@ -1,5 +1,7 @@
+import type { ReactNode } from 'react';
+
 export function TabNav<T extends string>({ items, value, onChange }: {
-  items: readonly { value: T; label: string }[];
+  items: readonly { value: T; label: ReactNode }[];
   value: T;
   onChange: (value: T) => void;
 }) {
