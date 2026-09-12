@@ -1,6 +1,5 @@
-import { Bot, Folder, FolderPlus, PanelLeftClose, Plus, Search, Settings, Workflow, X } from 'lucide-react';
+import { Bot, Folder, FolderPlus, PanelLeftClose, Plus, Search, Settings, SquarePen, Workflow, X } from 'lucide-react';
 import { useState } from 'react';
-import { Badge } from '../../design-system/Badge';
 import { Button, IconButton } from '../../design-system/Button';
 import { ProjectActionsMenu } from '../projects/ProjectActionsMenu';
 import type { Session, Project } from '../../engine';
@@ -23,9 +22,13 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, o
   const [folderError, setFolderError] = useState('');
   const [savingFolder, setSavingFolder] = useState(false);
   return <aside className="workspace-sidebar" aria-label="Sessions">
-    <div className="brand-row"><div className="project-sidebar-heading"><strong title={project.name}>{project.name}</strong><Badge>Harness</Badge><ProjectActionsMenu project={project} onEdit={onEditProject} onRemove={onRemoveProject} open={projectMenuOpen} onOpenChange={setProjectMenuOpen} side="bottom" trigger={props => <IconButton {...props} label="Project settings" className="project-settings-button"><Settings /></IconButton>} /></div><IconButton label="Close sessions" onClick={onClose}><PanelLeftClose /></IconButton></div>
+    <div className="brand-row"><div className="project-sidebar-heading"><strong title={project.name}>{project.name}</strong><ProjectActionsMenu project={project} onEdit={onEditProject} onRemove={onRemoveProject} open={projectMenuOpen} onOpenChange={setProjectMenuOpen} side="bottom" trigger={props => <IconButton {...props} label="Project settings" className="project-settings-button"><Settings /></IconButton>} /></div><IconButton label="Close sessions" onClick={onClose}><PanelLeftClose /></IconButton></div>
     <p className="project-folder-label" title={project.folder}><bdi dir="ltr">{project.folder}</bdi></p>
-    <div className="new-session"><Button onClick={() => onNew()}><Plus />New Session</Button></div>
+    <nav className="sidebar-navigation" aria-label="Project navigation">
+      <Button variant="ghost" size="sm" onClick={() => onNew()}><SquarePen />New session</Button>
+      <Button variant="ghost" size="sm" aria-current={activeSection === 'agents' ? 'page' : undefined} onClick={onAgents}><Bot />Agents</Button>
+      <Button variant="ghost" size="sm" aria-current={activeSection === 'graphs' ? 'page' : undefined} onClick={onGraphs}><Workflow />Graphs</Button>
+    </nav>
     <div className="workspace-list">
       <div className="workspace-heading"><h2>Sessions</h2><div className="workspace-heading-actions"><IconButton label="Search sessions" aria-expanded={search !== null} onClick={() => setSearch(search === null ? '' : null)}><Search /></IconButton><IconButton label="Create session folder" aria-expanded={addingFolder} onClick={() => setAddingFolder(!addingFolder)}><FolderPlus /></IconButton></div></div>
       {addingFolder && <form className="new-folder-form" onSubmit={async event => {
@@ -48,6 +51,5 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, o
         </div>;
       })}
     </div>
-    <div className="sidebar-footer"><Button variant="ghost" aria-current={activeSection === 'agents' ? 'page' : undefined} onClick={onAgents}><Bot />Agents</Button><Button variant="ghost" aria-current={activeSection === 'graphs' ? 'page' : undefined} onClick={onGraphs}><Workflow />Graphs</Button></div>
   </aside>;
 }

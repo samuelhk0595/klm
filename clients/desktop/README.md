@@ -155,6 +155,13 @@ where even pending nodes open the bottom activity panel rather than configuratio
 Project creation persists name, absolute directory, and a resized PNG icon through
 the engine. The sidebar contains only the selected project's sessions, optionally
 grouped into topic folders. Each real session chooses its harness at creation.
+Below the project heading/path, compact icon-and-text rows show **New session**,
+**Agents** and **Graphs**, before the Sessions list. New session uses a compose icon
+and opens the existing creation dialog; it replaces the former large button.
+The sidebar heading shows only the project name beside its settings button. The
+Harness badge is reused in the empty main chat, below a KLM wordmark and above
+“What would you like to work on?”. Both logo rows share the same compact width,
+with tightly spaced KLM letters and 2px horizontal padding on the badge.
 The composer has independent model and effort menus immediately left of Send.
 The harness icon appears beside the model name; there is no lower-left harness label.
 Clicking the model opens an anchored search menu with five model rows visible at a

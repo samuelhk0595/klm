@@ -27,7 +27,8 @@ network: it is a trusted-local-user API without remote authentication.
 - Add a project using the rail's plus button. The engine opens a native Windows
   directory picker; choose its name and icon, then save. Directory is read-only
   with a Change directory button. Icons are optional and stored locally.
-- Create a session under **Sessions** and choose Pi, OpenCode, or Codex. Select a
+- Use the compact **New session** shortcut at the top of the sidebar and choose
+  Pi, OpenCode, or Codex. Select a
   model and supported effort/variant in the composer picker left of Send. Existing
   CLI credentials and model configuration are used; authenticate in the CLI first
   if necessary. Changes apply to the next turn.
@@ -57,6 +58,11 @@ Old browser mock projects are left untouched in localStorage but are not importe
 their folder labels were not reliable absolute paths. Projects and chat sessions
 use engine data. The Agents and Graphs screens use static fixtures and local
 in-memory state, alongside the examples in the design-system gallery.
+
+The sidebar places **New session**, **Agents** and **Graphs** above the Sessions
+list. Its heading shows the project name beside settings. Empty chats display a
+compact **KLM / HARNESS** mark above “What would you like to work on?”, with both
+logo rows aligned to the same width.
 
 ## Authoring Prototypes
 
