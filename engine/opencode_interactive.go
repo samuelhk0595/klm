@@ -107,7 +107,7 @@ func openCodeEvents(ctx context.Context, body io.Reader, events chan<- map[strin
 		line := scanner.Bytes()
 		frameBytes += len(line) + 1
 		if frameBytes > openCodeFrameLimit {
-			err = errors.New("OpenCode event frame exceeded the 2 MiB limit.")
+			err = errors.New("OpenCode event frame exceeded KLM's 2 MiB limit.")
 			break
 		}
 		if len(line) == 0 {
@@ -133,8 +133,12 @@ func openCodeEvents(ctx context.Context, body io.Reader, events chan<- map[strin
 			data = append(data, value...)
 		}
 	}
-	if scanner.Err() != nil {
-		err = errors.New("OpenCode event stream could not be read or exceeded the 2 MiB frame limit.")
+	if scanErr := scanner.Err(); scanErr != nil {
+		if errors.Is(scanErr, bufio.ErrTooLong) {
+			err = fmt.Errorf("OpenCode event frame exceeded KLM's 2 MiB limit: %w", scanErr)
+		} else {
+			err = fmt.Errorf("Could not read the OpenCode event stream: %w", scanErr)
+		}
 	}
 	select {
 	case failed <- err:
