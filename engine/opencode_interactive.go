@@ -46,10 +46,13 @@ func (h *openCodeHTTP) request(ctx context.Context, method, path string, body an
 			return nil, errors.New("OpenCode request exceeded the 32 MiB limit.")
 		}
 	}
-	req, err := http.NewRequestWithContext(ctx, method, h.base+path+"?directory="+url.QueryEscape(h.directory), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, method, h.base+path, bytes.NewReader(data))
 	if err != nil {
 		return nil, errors.New("Could not construct the OpenCode request.")
 	}
+	query := req.URL.Query()
+	query.Set("directory", h.directory)
+	req.URL.RawQuery = query.Encode()
 	req.SetBasicAuth("opencode", h.password)
 	req.Header.Set("Accept", "application/json")
 	if path == "/event" {
@@ -74,26 +77,105 @@ func (h *openCodeHTTP) request(ctx context.Context, method, path string, body an
 }
 
 func (h *openCodeHTTP) json(ctx context.Context, method, path string, body, result any) error {
+	_, err := h.jsonResponse(ctx, method, path, body, result)
+	return err
+}
+
+var errOpenCodeResponseTooLarge = errors.New("response exceeded KLM's 32 MiB limit")
+
+func (h *openCodeHTTP) jsonResponse(ctx context.Context, method, path string, body, result any) (http.Header, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	// Identify the operation without including directory/query values or response bodies.
+	endpoint, _, _ := strings.Cut(path, "?")
+	failure := func(err error) (http.Header, error) {
+		return nil, fmt.Errorf("OpenCode %s %s: %w", method, endpoint, err)
+	}
 	response, err := h.request(ctx, method, path, body)
 	if err != nil {
-		return err
+		return failure(err)
 	}
 	defer response.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(response.Body, openCodeResponseLimit+1))
+	var data []byte
+	if method == http.MethodGet && strings.HasPrefix(endpoint, "/session/") && strings.HasSuffix(endpoint, "/message") && result != nil {
+		data, err = readOpenCodeHistoryJSON(response.Body)
+	} else {
+		data, err = io.ReadAll(io.LimitReader(response.Body, openCodeResponseLimit+1))
+	}
 	if err != nil {
-		return errors.New("Could not read the OpenCode response.")
+		if errors.Is(err, errOpenCodeResponseTooLarge) || errors.Is(err, errOpenCodeHistoryWireLimit) || errors.Is(err, errOpenCodeHistoryJSON) {
+			return failure(err)
+		}
+		return failure(errors.New("could not read the response"))
 	}
 	if len(data) > openCodeResponseLimit {
-		return errors.New("OpenCode response exceeded the 32 MiB limit.")
+		return failure(errOpenCodeResponseTooLarge)
 	}
 	if result != nil {
 		if err := json.Unmarshal(data, result); err != nil {
-			return errors.New("OpenCode returned an invalid JSON response.")
+			return failure(errors.New("invalid JSON response"))
 		}
 	}
-	return nil
+	return response.Header, nil
+}
+
+// OpenCode 1.18.30 returns the newest page in chronological order and supplies
+// X-Next-Cursor for older pages. Visit newest first so reconciliation can stop at
+// the pre-turn baseline. Only one page of historical message bodies is retained.
+func (h *openCodeHTTP) walkMessages(ctx context.Context, sessionID string, baseline map[string]bool, visit func(map[string]any) error) error {
+	limit, before := 64, ""
+	cursors := map[string]bool{}
+	seen := map[string]bool{}
+	for {
+		query := url.Values{"limit": {strconv.Itoa(limit)}}
+		if before != "" {
+			query.Set("before", before)
+		}
+		path := "/session/" + url.PathEscape(sessionID) + "/message?" + query.Encode()
+		var page []map[string]any
+		headers, err := h.jsonResponse(ctx, http.MethodGet, path, nil, &page)
+		if (errors.Is(err, errOpenCodeResponseTooLarge) || errors.Is(err, errOpenCodeHistoryWireLimit)) && limit > 1 {
+			limit /= 2
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		next := headers.Get("X-Next-Cursor")
+		if page == nil || len(page) > limit || (next != "" && (len(page) == 0 || cursors[next])) {
+			return errors.New("OpenCode returned an invalid or non-advancing history page.")
+		}
+		for i := len(page) - 1; i >= 0; i-- {
+			message := page[i]
+			info := object(message["info"])
+			id := str(info, "id")
+			if id == "" || str(info, "sessionID") != sessionID || seen[id] {
+				return errors.New("OpenCode history contained an invalid or repeated message.")
+			}
+			seen[id] = true
+			if baseline[id] {
+				return nil
+			}
+			parts, ok := message["parts"].([]any)
+			if !ok {
+				return errors.New("OpenCode history did not contain message parts.")
+			}
+			for _, value := range parts {
+				part := object(value)
+				if str(part, "sessionID") != sessionID || str(part, "messageID") != id {
+					return errors.New("OpenCode history contained an invalid message part.")
+				}
+			}
+			if err := visit(message); err != nil {
+				return err
+			}
+		}
+		if next == "" {
+			return nil
+		}
+		cursors[next] = true
+		before = next
+	}
 }
 
 // SSE frames, including multi-line data fields, have the same bound as CLI JSON lines.
@@ -314,11 +396,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) error {
 		return err
 	}
 	sessionPath := "/session/" + url.PathEscape(sessionID)
-	var history []map[string]any
-	if err := h.json(ctx, http.MethodGet, sessionPath+"/message", nil, &history); err != nil {
-		return err
-	}
-	baseline := make(map[string]bool, len(history))
+	baseline := map[string]bool{}
 	usage := &openCodeUsage{messages: map[string]map[string]any{}, steps: map[string]map[string]map[string]any{}, windows: map[string]*int64{}}
 	var providers struct {
 		All []struct {
@@ -340,27 +418,20 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) error {
 		}
 	}
 	metricsCancel()
-	for _, message := range history {
+	if err := h.walkMessages(ctx, sessionID, nil, func(message map[string]any) error {
 		info := object(message["info"])
-		if str(info, "sessionID") != sessionID {
-			return errors.New("OpenCode history contained a different native session.")
-		}
 		usage.message(info)
-		parts, _ := message["parts"].([]any)
-		for _, value := range parts {
-			part := object(value)
-			if str(part, "sessionID") == sessionID && str(part, "messageID") == str(info, "id") {
-				usage.part(part)
-			}
+		for _, value := range message["parts"].([]any) {
+			usage.part(object(value))
 		}
-		if id := str(info, "id"); id != "" {
-			baseline[id] = true
-		}
+		baseline[str(info, "id")] = true
+		return nil
+	}); err != nil {
+		return err
 	}
 	if err := p.setUsage(usage.snapshot()); err != nil {
 		return err
 	}
-	history = nil
 
 	stream, err := h.request(ctx, http.MethodGet, "/event", nil)
 	if err != nil {
@@ -753,12 +824,18 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) error {
 				if (typ != "session.idle" && status != "idle") || (!busy && !ownedMessage) {
 					continue
 				}
-				if err := h.json(ctx, http.MethodGet, sessionPath+"/message", nil, &history); err != nil {
+				// Retain only this turn, then reconcile oldest first for UI ordering.
+				var history []map[string]any
+				if err := h.walkMessages(ctx, sessionID, baseline, func(message map[string]any) error {
+					history = append(history, message)
+					return nil
+				}); err != nil {
 					return err
 				}
 				terminalAssistant, incomplete := false, false
 				latestCreated, latestID := float64(-1), ""
-				for _, message := range history {
+				for i := len(history) - 1; i >= 0; i-- {
+					message := history[i]
 					info := object(message["info"])
 					id := str(info, "id")
 					if id == "" || baseline[id] || str(info, "role") != "assistant" {

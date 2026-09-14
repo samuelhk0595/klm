@@ -362,7 +362,7 @@ dispatch, not arbitrary extension code or OS calls. Third-party extension discov
 remains disabled so later handlers cannot mutate arguments after approval. This
 also disables extension-provided MCP tools. No ungated print-mode fallback exists.
 
-### OpenCode 1.18.29
+### OpenCode 1.18.30
 
 ```text
 opencode.exe serve --hostname 127.0.0.1 --port 0 --mdns=false
@@ -375,6 +375,24 @@ validation. It subscribes before posting prompt_async, tracks message/part IDs,
 streams text/reasoning/tools, and reconciles final history without duplicating old
 messages. Idle completes the turn; individual step-finish events do not. Stream
 loss fails and aborts the turn rather than silently replaying actions.
+
+History is read with `limit`/`before` and the native `X-Next-Cursor` header.
+Pages start at 64 messages and shrink if a response exceeds KLM's 32 MiB bound.
+Initial hydration retains message IDs and usage metadata, discarding old message
+bodies after each page. Final reconciliation reads backwards only until the
+pre-turn baseline, then processes the current turn in chronological order.
+History JSON is projected while reading: only tool `state.metadata.diff` and
+`state.metadata.files[].patch` strings larger than 64 KiB are replaced by an
+explicit omission marker in KLM's copy. Small previews, file names, change counts,
+diagnostics, tool input/output/status and usage remain intact. The native OpenCode
+history and model context are not modified. The original bytes still travel over
+HTTP; discarded preview strings are scanned without accumulating them in memory.
+Pages retain a 32 MiB JSON bound after projection and a separate 256 MiB input
+bound; either bound reduces the page size before failing on a single message.
+HTTP JSON errors identify the method and endpoint without query values or bodies.
+This projection applies to history HTTP responses; live SSE frames retain their
+separate 2 MiB bound. Native runtime validation remains a human check. Focused
+unit tests cover pagination, metadata projection, usage totals and diagnostics.
 
 Permission asked/replied events create/remove pending cards. Positive choices
 always send native `once`; KLM owns remembered scopes. Native `always` is not used
