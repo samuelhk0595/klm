@@ -2,13 +2,16 @@ import { useId, useState } from 'react';
 import { ChevronDown, GitFork, Plus, Trash2, X } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
+import { Toggle } from '../../design-system/Toggle';
 import { ChoiceOutputEditor } from './ChoiceOutputEditor';
-import { normalizeChoiceName } from './choice';
+import { ChoiceOutputPreview } from './ChoiceOutputPreview';
+import { normalizeChoiceName, outputVariables } from './choice';
 import { createForkBranch, forkOutputError, gitBranchNameError, type ForkBranch, type ForkDefinition } from './fork';
 
-export function ForkNodePanel({ fork, destinations, onSave, onClose }: {
+export function ForkNodePanel({ fork, destinations, payloadFields = [], onSave, onClose }: {
   fork: ForkDefinition;
   destinations: Record<string, string>;
+  payloadFields?: string[];
   onSave: (fork: ForkDefinition) => void;
   onClose: () => void;
 }) {
@@ -17,9 +20,9 @@ export function ForkNodePanel({ fork, destinations, onSave, onClose }: {
   const [expandedId, setExpandedId] = useState<string | undefined>(fork.branches[0]?.id);
   const names = draft.branches.map(branch => branch.name.trim());
   const duplicate = names.some((name, index) => name && names.indexOf(name) !== index);
-  const gitBranches = draft.branches.map(branch => branch.gitBranch).filter(Boolean);
+  const gitBranches = draft.branches.filter(branch => branch.separateWorktree !== false).map(branch => branch.gitBranch).filter(Boolean);
   const duplicateGitBranches = new Set(gitBranches).size !== gitBranches.length;
-  const valid = !!draft.name.trim() && draft.branches.length >= 2 && !duplicate && !duplicateGitBranches && draft.branches.every(branch => branch.name.trim() && !forkOutputError(branch.outputFields) && !gitBranchNameError(branch.gitBranch));
+  const valid = !!draft.name.trim() && draft.branches.length >= 2 && !duplicate && !duplicateGitBranches && draft.branches.every(branch => branch.name.trim() && !forkOutputError(branch.outputFields) && (branch.separateWorktree === false || !gitBranchNameError(branch.gitBranch)));
 
   function updateBranch(branchId: string, update: Partial<ForkBranch>) {
     setDraft(current => ({ ...current, branches: current.branches.map(branch => branch.id === branchId ? { ...branch, ...update } : branch) }));
@@ -45,7 +48,8 @@ export function ForkNodePanel({ fork, destinations, onSave, onClose }: {
           const fieldId = `${id}-${branch.id}`;
           const outputError = forkOutputError(branch.outputFields);
           const nameError = branch.name.trim() ? '' : 'Enter a name.';
-          const gitNameError = gitBranchNameError(branch.gitBranch);
+          const isolated = branch.separateWorktree !== false;
+          const gitNameError = isolated ? gitBranchNameError(branch.gitBranch) : '';
           return <section key={branch.id} className="graph-fork-branch-section">
             <div className="graph-fork-branch-heading">
               <Button variant="ghost" className="graph-fork-branch-tab" aria-expanded={expanded} aria-controls={`${fieldId}-form`} onClick={() => setExpandedId(expanded ? undefined : branch.id)}>
@@ -60,12 +64,15 @@ export function ForkNodePanel({ fork, destinations, onSave, onClose }: {
               <div className="graph-agent-panel-field"><label htmlFor={`${fieldId}-name`}>Name</label><Input id={`${fieldId}-name`} autoFocus={!branch.name} required maxLength={80} value={branch.name} aria-invalid={!!nameError} aria-describedby={nameError ? `${fieldId}-name-error` : undefined} onChange={event => updateBranch(branch.id, { name: event.target.value })} />{nameError && <p id={`${fieldId}-name-error`} className="form-error" role="alert">{nameError}</p>}</div>
               <div className="graph-fork-destination"><span>Destination</span><strong>{destinations[branch.id] || 'Not connected'}</strong></div>
               <div className="graph-fork-workspace">
-                <div className="graph-fork-destination"><span>Workspace</span><strong>Separate worktree</strong></div>
+                <Toggle label="Separate worktree" checked={isolated} onCheckedChange={separateWorktree => updateBranch(branch.id, { separateWorktree })} />
+                {isolated ? <>
                   <div className="graph-agent-panel-field"><label htmlFor={`${fieldId}-git-branch`}>Git branch name</label><Input id={`${fieldId}-git-branch`} required placeholder="parallel/write-tests" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={branch.gitBranch} aria-invalid={!!gitNameError} aria-describedby={gitNameError ? `${fieldId}-git-name-error` : undefined} onChange={event => updateBranch(branch.id, { gitBranch: event.target.value })} />{gitNameError && <p id={`${fieldId}-git-name-error`} className="form-error" role="alert">{gitNameError}</p>}</div>
-                <div className="graph-fork-destination"><span>Base revision</span><strong>Incoming revision</strong></div>
+                  <div className="graph-fork-destination"><span>Base revision</span><strong>Incoming revision</strong></div>
+                </> : <div className="graph-fork-destination"><span>Workspace</span><strong>Inherited directory and Git branch</strong></div>}
               </div>
-              <ChoiceOutputEditor fields={branch.outputFields} variables={['run.input.task']} onChange={outputFields => updateBranch(branch.id, { outputFields })} />
+              <ChoiceOutputEditor fields={branch.outputFields} variables={outputVariables('fork', payloadFields)} payloadContext onChange={outputFields => updateBranch(branch.id, { outputFields })} />
               {outputError && <p className="form-error" role="alert">{outputError}</p>}
+              {!outputError && branch.outputFields.length > 0 && <ChoiceOutputPreview context="fork" inputFields={[]} outputFields={branch.outputFields} />}
             </div>}
           </section>;
         })}</div>

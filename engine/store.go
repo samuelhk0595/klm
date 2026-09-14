@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -32,24 +34,30 @@ type Event struct {
 }
 
 type Session struct {
-	ParentID       string            `json:"parentId,omitempty"`
-	Sources        []SourceReference `json:"sources,omitempty"`
-	ID             string            `json:"id"`
-	ProjectID      string            `json:"projectId"`
-	Title          string            `json:"title"`
-	Workspace      string            `json:"workspace"`
-	Harness        string            `json:"harness"`
-	Model          string            `json:"model,omitempty"`
-	Effort         string            `json:"effort,omitempty"`
-	ResolvedModel  string            `json:"resolvedModel,omitempty"`
-	ResolvedEffort string            `json:"resolvedEffort,omitempty"`
-	Status         string            `json:"status"`
-	Events         []Event           `json:"events"`
-	Permissions    []Permission      `json:"permissions,omitempty"`
-	Questions      []QuestionRequest `json:"questions,omitempty"`
-	Usage          *SessionUsage     `json:"usage,omitempty"`
-	CreatedAt      string            `json:"createdAt"`
-	UpdatedAt      string            `json:"updatedAt"`
+	Role            string                  `json:"role,omitempty"`
+	GraphRunID      string                  `json:"graphRunId,omitempty"`
+	GraphNodeID     string                  `json:"graphNodeId,omitempty"`
+	ExecutionCWD    string                  `json:"executionCwd,omitempty"`
+	SelectedGraphID string                  `json:"selectedGraphId,omitempty"`
+	Graph           *ConversationGraphState `json:"graph,omitempty"` // HTTP/SSE view only
+	ParentID        string                  `json:"parentId,omitempty"`
+	Sources         []SourceReference       `json:"sources,omitempty"`
+	ID              string                  `json:"id"`
+	ProjectID       string                  `json:"projectId"`
+	Title           string                  `json:"title"`
+	Workspace       string                  `json:"workspace"`
+	Harness         string                  `json:"harness"`
+	Model           string                  `json:"model,omitempty"`
+	Effort          string                  `json:"effort,omitempty"`
+	ResolvedModel   string                  `json:"resolvedModel,omitempty"`
+	ResolvedEffort  string                  `json:"resolvedEffort,omitempty"`
+	Status          string                  `json:"status"`
+	Events          []Event                 `json:"events"`
+	Permissions     []Permission            `json:"permissions,omitempty"`
+	Questions       []QuestionRequest       `json:"questions,omitempty"`
+	Usage           *SessionUsage           `json:"usage,omitempty"`
+	CreatedAt       string                  `json:"createdAt"`
+	UpdatedAt       string                  `json:"updatedAt"`
 }
 
 type nativeSession struct {
@@ -58,12 +66,22 @@ type nativeSession struct {
 }
 
 type diskState struct {
-	Consultations []Consultation           `json:"consultations,omitempty"`
-	Version       int                      `json:"version"`
-	Projects      []Project                `json:"projects"`
-	Sessions      []Session                `json:"sessions"`
-	Native        map[string]nativeSession `json:"native"`
-	Grants        []permissionGrant        `json:"permissionGrants,omitempty"`
+	GraphRevision       uint64                   `json:"graphRevision"`
+	GraphActivities     []GraphActivity          `json:"graphActivities,omitempty"`
+	GraphRuns           []GraphRun               `json:"graphRuns,omitempty"`
+	GraphActivations    []GraphActivation        `json:"graphActivations,omitempty"`
+	GraphDeliveries     []GraphDelivery          `json:"graphDeliveries,omitempty"`
+	GraphJoinRounds     []JoinRound              `json:"graphJoinRounds,omitempty"`
+	GraphWorkspaces     []WorkspaceRecord        `json:"graphWorkspaces,omitempty"`
+	GraphWorkspaceUses  []WorkspaceUse           `json:"graphWorkspaceUses,omitempty"`
+	GraphNotifications  []RunNotification        `json:"graphNotifications,omitempty"`
+	GraphCatalogChanges []GraphCatalogChange     `json:"graphCatalogChanges,omitempty"`
+	Consultations       []Consultation           `json:"consultations,omitempty"`
+	Version             int                      `json:"version"`
+	Projects            []Project                `json:"projects"`
+	Sessions            []Session                `json:"sessions"`
+	Native              map[string]nativeSession `json:"native"`
+	Grants              []permissionGrant        `json:"permissionGrants,omitempty"`
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
@@ -99,7 +117,7 @@ func (d *diskState) project(id string) *Project {
 }
 
 func loadState(dir string) (diskState, error) {
-	d := diskState{Version: 1, Projects: []Project{}, Sessions: []Session{}, Native: map[string]nativeSession{}}
+	d := diskState{Version: 2, Projects: []Project{}, Sessions: []Session{}, Native: map[string]nativeSession{}}
 	b, err := os.ReadFile(filepath.Join(dir, "state.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return d, nil
@@ -108,10 +126,15 @@ func loadState(dir string) (diskState, error) {
 		return d, err
 	}
 	d = diskState{}
-	if err := json.Unmarshal(b, &d); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(b))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&d); err != nil {
 		return d, fmt.Errorf("invalid state.json: %w", err)
 	}
-	if d.Version != 1 || d.Projects == nil || d.Sessions == nil || d.Native == nil {
+	if decoder.Decode(&struct{}{}) != io.EOF {
+		return d, errors.New("invalid trailing state.json content; refusing to overwrite")
+	}
+	if (d.Version != 1 && d.Version != 2) || d.Projects == nil || d.Sessions == nil || d.Native == nil {
 		return d, errors.New("unsupported or incomplete state.json; refusing to overwrite")
 	}
 	ids := map[string]bool{}
@@ -132,7 +155,7 @@ func loadState(dir string) (diskState, error) {
 	for _, s := range d.Sessions {
 		if s.ParentID != "" {
 			parent := d.session(s.ParentID)
-			if parent == nil || parent.ParentID != "" || parent.ProjectID != s.ProjectID || parents[s.ParentID] {
+			if parent == nil || parent.ParentID != "" || parent.GraphRunID != "" || s.GraphRunID != "" || parent.ProjectID != s.ProjectID || parents[s.ParentID] {
 				return d, errors.New("invalid linked conversation in state.json")
 			}
 			parents[s.ParentID] = true
@@ -158,10 +181,27 @@ func loadState(dir string) (diskState, error) {
 		}
 		ids[c.ID] = true
 	}
+	normalizeGraphWorkspaceRecords(&d)
+	if err := validateGraphRecords(&d); err != nil {
+		return d, err
+	}
+	if d.Version == 1 {
+		d.Version = 2
+		if err := saveState(dir, &d); err != nil {
+			return d, fmt.Errorf("cannot migrate state.json to v2: %w", err)
+		}
+	}
 	return d, nil
 }
 
 func saveState(dir string, d *diskState) error {
+	if d.Version != 2 {
+		return errors.New("refusing to write unsupported state version")
+	}
+	normalizeGraphWorkspaceRecords(d)
+	if err := validateGraphRecords(d); err != nil {
+		return err
+	}
 	b, err := json.Marshal(d)
 	if err != nil {
 		return err
@@ -197,11 +237,15 @@ func (a *app) commitLocked(change func(*diskState)) error {
 	}
 	if err == nil {
 		change(&next)
+		next.GraphRevision++
 		err = saveState(a.dir, &next)
 	}
 	if err != nil {
 		a.storageErr = errors.New("state persistence failed; engine is read-only until restarted")
 		for _, r := range a.runs {
+			r.cancel()
+		}
+		for _, r := range a.graphRuns {
 			r.cancel()
 		}
 		return a.storageErr

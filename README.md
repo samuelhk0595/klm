@@ -1,14 +1,34 @@
 # KLM
 
-A desktop-style React client for a separate Go engine that delegates work to
+A Windows Tauri/React client for a separate Go engine that delegates work to
 Pi, OpenCode, and Codex. Product scope is defined in [product.md](product.md).
 
-## Run Locally
+## Install on Windows
 
-Requires Go 1.24.2+ and Node.js 22.12+. Start the engine from the project root:
+Install **KLM Engine** and **KLM Desktop** independently. Engine installation adds
+`klm` to user PATH and starts the engine, including on subsequent user logins.
+Open a new terminal to use `klm start` / `klm stop`. Data is preserved in
+`%APPDATA%\klm\engine` and worker logs in `engine.log` there.
+
+The desktop's **Focus** button opens http://localhost:7332. On another device use
+`http://IP-OF-THIS-COMPUTER:7332`; both clients use the engine on the same computer,
+port 7331. Tauri must remain running: closing hides to the tray; **Open** restores
+and **Exit** stops desktop/web only. The engine is independent.
+
+The API and web listener bind all IPv4 interfaces, without network authentication
+or TLS in this approved delivery. Use Windows Firewall's normal network access
+authorization when required. Directory dialogs and commands run on the engine PC.
+
+Build instructions and installer paths: [Windows packaging](distribution/windows/README.md).
+Progress and human acceptance checklist: [delivery status](ENGINE_DESKTOP_IMPLEMENTATION_PROGRESS.md).
+
+## Develop Locally
+
+Requires Go 1.24.2+ and Node.js 22.12+. Build the engine from the project root:
 
 ```powershell
-go -C engine run .
+go -C engine build -tags dev -o klm-dev.exe .
+.\engine\klm-dev.exe start
 ```
 
 In another terminal:
@@ -18,9 +38,26 @@ npm --prefix clients/desktop install
 npm --prefix clients/desktop run dev
 ```
 
-Open http://127.0.0.1:5173. The engine listens on http://127.0.0.1:7331.
-`VITE_ENGINE_URL` overrides the client endpoint. Do not expose the engine to a
-network: it is a trusted-local-user API without remote authentication.
+Open http://127.0.0.1:5173. The development API is available at http://localhost:17331.
+`VITE_ENGINE_URL` overrides the client endpoint. For the native client, install
+Rust/MSVC prerequisites and use `npm --prefix clients/desktop run desktop:dev`.
+End the worker explicitly with `.\engine\klm-dev.exe stop`.
+
+Development uses API port **17331** and native Focus/web port **17332**; Vite HMR
+stays on **5173**. The installed release uses **7331/7332**. The `dev` build tag
+also separates engine data/logs/control into `%APPDATA%\klm\engine-dev`.
+`desktop:dev` uses a distinct application identifier, so both desktops can run
+together. Dev starts with its own empty data store; release data is not migrated.
+
+## Mobile
+
+The Flutter **KLM Harness** app in [`clients/mobile`](clients/mobile/README.md)
+provides native saved-host and Add host screens, then opens the selected frontend
+in a WebView. Tap the KLM rail logo to return to hosts. IPs without a port use 7332;
+domains receive no additional port. Names and addresses persist locally on the device.
+
+From `clients/mobile`, run `flutter run -d emulator-5554`. See its README for
+device addressing and platform setup.
 
 ## First Slice
 
@@ -44,7 +81,7 @@ network: it is a trusted-local-user API without remote authentication.
 - Agent questions appear above the composer with option buttons and custom input
   when allowed. Select choices or type an answer, then **Send answer**, or **Dismiss**
   the request. The waiting tool receives your answer and the turn continues.
-- Open **Side agent** beside Session log, or select a main-chat passage and choose
+- Open **Side agent** in the header, or select a main-chat passage and choose
   **Ask side agent**. One persistent side conversation belongs to each main chat;
   it has independent harness/model controls, drafts, scrolling, permissions, questions,
   and Stop. Closing hides it. Drag the divider, or focus it and use arrow keys,
@@ -56,39 +93,97 @@ network: it is a trusted-local-user API without remote authentication.
 
 Old browser mock projects are left untouched in localStorage but are not imported:
 their folder labels were not reliable absolute paths. Projects and chat sessions
-use engine data. The Agents and Graphs screens use static fixtures and local
-in-memory state, alongside the examples in the design-system gallery.
+use engine data. Agents and Graphs now read and write the selected project's files;
+the chat graph selector and monitor use the same real catalog and engine state.
+The design-system gallery retains isolated static examples.
 
 The sidebar places **New session**, **Agents** and **Graphs** above the Sessions
 list. Its heading shows the project name beside settings. Empty chats display a
 compact **KLM / HARNESS** mark above “What would you like to work on?”, with both
 logo rows aligned to the same width.
 
-## Authoring Prototypes
+## Agents and Graphs
 
-Agents and Graphs are UI prototypes available inside a selected project. Agent
-models, harness compatibility and graph references are simulated, not live catalog
-or topology checks. List changes last until reload.
+Agents are saved as `.klm/agents/<slug>.toml` inside the selected project. The form
+uses the real harness model catalog; effort is required only for models that support
+it. Prompt text lives in the TOML. Editing, renaming, enable/disable and deletion
+persist to files. References from saved graphs prevent agent deletion/disabling;
+agent renames update graph references.
 
-New graph opens a temporary canvas with AI agent, Choice, Terminal command, Fork
-and Join elements. Apply updates that canvas only; it does not add a graph to the
-list or save YAML/layout. Leaving the canvas discards its topology. Existing graph
-tiles edit name/description, not topology. Command execution, worktrees, integration
-and graph runs remain unimplemented. See the [desktop README](clients/desktop/README.md#authoring-prototypes).
+New graph asks for a name and optional description, then opens the canvas. Configure
+AI agent, Choice, Terminal command, Fork and Join elements. Apply commits a panel's
+settings to the canvas; close node settings, then Save to write
+`.klm/graphs/<slug>.yaml`. The first Save adds the graph to its catalog. Existing
+graph tiles reopen the saved topology; Graph details edits metadata. Enable/Disable
+and Delete are list actions.
 
-In chat, selecting a graph adds a **Graph** tab beside **Chat**. It displays that
-catalog example's fictional drawing in a read-only canvas with pan, zoom and Reset
-view. The composer is visible only in Chat. **None** hides the tab. This view reuses
-the authoring cards but offers no node, connection or settings editing. In CSV
-export, the active element has a shimmer sweeping across its body and a small blinking Running
-indicator (blue with glow / gray without glow). Clicking any card opens compact
-Run, Input and Output tabs. The local simulation advances from planning through
-ready to implementation, retaining completed outputs for inspection without executing tools.
-A matching LED beside the Graph tab name appears only during an active run and stays
-visible in Chat. The simulation continues when switching between Chat and Graph.
-The initial node is marked **Start**, and all cards share a moderate resting shadow
-separate from the shimmer. In graphs without a run (Bug fix and Code review),
-clicking a card opens its configuration as read-only text in a right-side panel.
+Node positions autosave when dragging ends, independently of Save, to the companion
+`.yaml.layout.json`. Draft layouts can exist before the first Save without creating
+a catalog entry. Definition changes still require Save. Graph execution, commands,
+worktrees and Join-agent integration are implemented in the Go engine. Terminal has
+explicit output mapping; each Fork branch can use a separate worktree (default) or
+share its inherited workspace. Save remains separate from execution preflight.
+See the [desktop README](clients/desktop/README.md#agents-and-graphs) and
+[refinement record](GRAPH_AUTHORING_REFINEMENT.md).
+
+The [graph engine implementation plan](GRAPH_ENGINE_IMPLEMENTATION_PLAN.md) maps
+the closed execution contracts and minimal active/completed-node monitor to the
+Go adapters and desktop client. Current implementation/evidence is recorded in
+[CORE](GRAPH_ENGINE_PROGRESS_CORE.md), [ADAPTER](GRAPH_ENGINE_PROGRESS_ADAPTER.md)
+and [FRONTEND](GRAPH_ENGINE_PROGRESS_FRONTEND.md); use their latest status sections
+rather than historical milestones in the plan or reports.
+
+## Graph Execution and Monitoring
+
+Choose a saved graph in the main-chat composer to expose **Graph** beside **Chat**.
+Selection persists per conversation in the engine, independently of Send. Selecting
+or opening Graph does not execute it. Ask the main-chat agent to run an explicitly
+authorized activity; its private graph tools invoke work asynchronously. Under the
+2026-09-13 decision, an omitted workspace defaults to the original project directory
+without a question or mandatory workspace-choice message reference. Explicit
+original/new-worktree choices remain available; retries involving earlier artifacts
+retain the user's fresh/reuse decision. A conversation has one active graph run,
+independent of chat turns.
+Starting a run selects its graph. The orchestrator receives its result, assesses
+success and manages authorized dependent activities or corrective attempts.
+
+The runtime captures graph/agent definitions at start, uses private node sessions,
+validates Choices before accepting them after execution shutdown, and records
+Terminal, Fork/Join and workspace activity. Questions/permissions appear in the
+existing main-chat cards with graph/node origin and answer the correct native session.
+Restart records interrupted runs without resuming them; scheduled activities and
+pending result notifications persist. Worktrees and modified files are retained.
+
+Graph shows a read-only canvas with pan, zoom and Reset view. During the matching
+active run it uses the captured graph and shows actual active/completed nodes,
+including parallel activity, revisits and a separate Collecting state for Join.
+The existing card shimmer is retained; the run LED appears only in the composer
+selector for the matching graph. **None** hides Graph without stopping work or
+removing pending requests. At completion, activity/LED clear and idle read-only
+configuration returns. The initial node keeps its **Start** badge.
+
+This minimal monitor replaces the earlier CSV timer and Run/Input/Output experiment.
+Separate run tabs, execution-history browsing and detail panels remain deferred,
+as established by section 12 of the refinement record.
+
+### Graph adapter status
+
+Windows mechanisms for **Pi, OpenCode and Codex** are implemented and admitted by
+capability preflight. All still report **`RuntimeValidated=false`**: real model
+tasks, Choice finality and native continuation require human validation.
+OpenCode requires **1.18.30**, its owned plugin handshake and native tool inventory.
+Pi uses its owned extension. Unix graph execution is not enabled.
+
+The **2026-09-13 external-MCP decision** replaces the preventive configuration ban:
+allow configured MCPs in OpenCode/Codex without a server-name allowlist or disabling
+them. Seal the node against new calls and await calls actually started before Choice
+acceptance. The guarantee covers node/tool-call lifecycle, not shutdown of shared
+MCP servers or detached tasks beyond the response. "Task started" completes the call,
+not the remote task. Missing completion evidence after error/cancellation or a lost
+callback remains uncertain finality, never proof of remote cancellation or a normal
+result. Grants/sandbox are unchanged. See refinement section 14 and
+[the documentation update](GRAPH_ENGINE_PROGRESS_EXTERNAL_MCP_DOCS.md); this decision
+does not itself establish that the updated adapter has been built or restarted.
 
 ## Boundaries
 
@@ -101,9 +196,11 @@ Unavailable token/context metrics stay hidden and appear when reported by the ha
 Reported zero values remain visible. See [CONTEXT.md](CONTEXT.md) for shared terminology.
 The side status bar shows only its own token counts and context usage.
 
-No attachments, graph execution, model-account management, or general-purpose
-engine MCP interface is included. The private linked-agent bridge is configured
-only for KLM-owned harness executions. The engine normalizes only the events the harness
+Rich graph inputs/files, nested Forks, worktree cleanup, graph stop/resume controls,
+concurrent runs in one conversation, activation limits and task timeouts are deferred.
+Model-account management and a general-purpose engine MCP interface are not included.
+The private linked/graph bridge is configured only for KLM-owned harness executions.
+The engine normalizes only the events the harness
 actually emits, so some text/reasoning arrives in completed blocks, not tokens.
 Pi runs with only an engine-owned extension, providing `ask_user`, linked-agent tools, and gating other
 agent-dispatched tool calls; third-party extensions and their MCP tools remain disabled. It is not

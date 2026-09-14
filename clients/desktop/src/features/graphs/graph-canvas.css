@@ -1,4 +1,9 @@
 .graph-canvas { flex: 1; min-height: 0; width: 100%; position: relative; --xy-background-color: var(--color-surface); --xy-attribution-background-color: var(--color-surface); }
+.graph-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.header-leading:has(.graph-editor-heading) > h1 { display: none; }
+.graph-editor-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.graph-editor-heading > button { flex-shrink: 0; }
+.graph-editor-heading > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); font-weight: 500; }
 .graph-canvas-toolbar { display: flex; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-elevated); box-shadow: var(--shadow-sm); }
 .graph-canvas .react-flow__attribution a { color: var(--color-muted); }
 .graph-initial-node-placeholder { width: 280px; height: 140px; display: flex; align-items: center; justify-content: center; padding: 24px; border: 2px dashed var(--color-faint); border-radius: var(--radius-md); background: transparent; color: var(--color-muted); text-align: center; cursor: pointer; pointer-events: auto; }
@@ -53,7 +58,7 @@
 .graph-choice-node.is-configuring { border-color: var(--color-accent); }
 .graph-choice-content { width: 100%; height: 100%; min-height: 0; padding: 4px 12px; white-space: normal; color: var(--color-heading); }
 .graph-choice-content:hover:not(:disabled) { background: transparent; }
-.graph-choice-content--readonly { display: flex; align-items: center; justify-content: center; text-align: center; }
+.graph-choice-content--readonly { display: flex; flex-direction: column; gap: 2px; align-items: center; justify-content: center; text-align: center; }
 .graph-canvas--readonly .react-flow__handle { pointer-events: none; }
 .graph-canvas--readonly :is(.graph-ai-agent-card, .graph-fork-card) { position: relative; }
 .graph-node--running { position: relative; }

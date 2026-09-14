@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	_ "embed"
 	"encoding/json"
 	"errors"
@@ -28,6 +29,43 @@ func piSamePath(a, b string) bool {
 	return a == b
 }
 
+// Pi opens a persisted JSONL session independently of the process cwd. Refuse a
+// mismatched header instead of silently continuing history in another workspace.
+func validatePiSessionDirectory(path, cwd string) error {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return errors.New("Cannot inspect the stored Pi session directory.")
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 4096), 64<<10)
+	if !scanner.Scan() {
+		return errors.New("Stored Pi session has no valid header.")
+	}
+	var header struct {
+		Type string `json:"type"`
+		Cwd  string `json:"cwd"`
+	}
+	if json.Unmarshal(scanner.Bytes(), &header) != nil || header.Type != "session" || !filepath.IsAbs(header.Cwd) {
+		return errors.New("Stored Pi session has no absolute working directory.")
+	}
+	actual, err := CanonicalGraphDirectory(header.Cwd)
+	if err != nil {
+		return err
+	}
+	wanted, err := CanonicalGraphDirectory(cwd)
+	if err != nil {
+		return err
+	}
+	if actual != wanted {
+		return errors.New("Stored Pi session belongs to a different working directory.")
+	}
+	return nil
+}
+
 func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 	ctx := p.turn.ctx
 	if err := ctx.Err(); err != nil {
@@ -44,9 +82,17 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 	if !filepath.IsAbs(native.Path) {
 		return errors.New("Pi requires an absolute persisted session file path.")
 	}
+	if native.ID != "" {
+		if _, err := os.Stat(native.Path); err != nil {
+			return errors.New("Stored Pi session file is unavailable; refusing to silently replace its history.")
+		}
+	}
 	cwd, err = filepath.Abs(cwd)
 	if err != nil {
 		return errors.New("Cannot resolve the Pi working directory.")
+	}
+	if err := validatePiSessionDirectory(native.Path, cwd); err != nil {
+		return err
 	}
 	dataDir, err = filepath.Abs(dataDir)
 	if err != nil {
@@ -59,7 +105,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 	}
 	defer os.RemoveAll(extensionDir)
 	extensionPath := filepath.Join(extensionDir, "pi-permissions.ts")
-	bridgeConfig, _ := json.Marshal(map[string]string{"url": p.bridge.url, "token": p.bridge.token})
+	bridgeConfig, _ := json.Marshal(map[string]any{"url": p.bridge.url, "token": p.bridge.token, "graphNode": p.graphNode(), "tools": p.bridgeTools()})
 	extension := strings.Replace(string(piPermissionsExtension), "/*KLM_LINKED_CONFIG*/{}", string(bridgeConfig), 1)
 	if err := os.WriteFile(extensionPath, []byte(extension), 0600); err != nil {
 		return errors.New("Cannot write the Pi permission extension.")
@@ -81,6 +127,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 		}
 		return err
 	}
+	p.processesDrained = false
 	pending := map[string]string{} // tool call ID -> native UI request ID
 	nativeQuestionPending := map[string]string{}
 	questionRequests := map[string]*atomic.Bool{}
@@ -89,6 +136,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 			live.Store(false)
 		}
 		_ = proc.Close()
+		p.processesDrained = proc.Drained()
 		for _, sourceID := range pending {
 			if dismissErr := p.dismissPermission(sourceID); err == nil {
 				err = dismissErr
@@ -188,7 +236,7 @@ reading:
 			case "klm-state":
 				data := object(raw["data"])
 				if stateReceived || str(raw, "command") != "get_state" || str(data, "sessionId") == "" ||
-					!piSamePath(str(data, "sessionFile"), native.Path) {
+					!piSamePath(str(data, "sessionFile"), native.Path) || (native.ID != "" && str(data, "sessionId") != native.ID) {
 					return errors.New("Pi returned an invalid or unexpected session state.")
 				}
 				if err := p.nativeID(str(data, "sessionId")); err != nil {
@@ -344,7 +392,7 @@ reading:
 					return err
 				}
 				value := "Deny"
-				if allow {
+				if allow && !p.graphSealed() {
 					value = "Allow"
 				}
 				return proc.Send(map[string]any{"type": "extension_ui_response", "id": sourceID, "value": value})
@@ -367,6 +415,9 @@ reading:
 			}
 			if str(raw, "type") == "tool_execution_end" {
 				toolID := str(raw, "toolCallId")
+				if str(raw, "toolName") == "graph_submit_choice" && !truth(raw, "isError") {
+					p.graphChoiceToolSettled(raw["result"])
+				}
 				if sourceID := nativeQuestionPending[toolID]; sourceID != "" {
 					questionRequests[sourceID].Store(false)
 					if err := p.dismissQuestion(sourceID); err != nil {
@@ -383,6 +434,9 @@ reading:
 			}
 			if err := p.pi(raw); err != nil {
 				return err
+			}
+			if str(raw, "type") == "agent_settled" {
+				p.nativeSettled = true
 			}
 			if p.completed {
 				if statsDeadline == nil {

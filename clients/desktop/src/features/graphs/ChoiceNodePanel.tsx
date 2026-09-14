@@ -7,7 +7,7 @@ import { Toggle } from '../../design-system/Toggle';
 import { agentSlug as choiceSlug } from '../agents/demo';
 import { ChoiceOutputEditor } from './ChoiceOutputEditor';
 import { ChoiceOutputPreview } from './ChoiceOutputPreview';
-import { choiceOutputFields, choiceVariables, normalizeChoiceName, unknownOutputVariables, type ChoiceDefinition, type ChoicePayloadField } from './choice';
+import { choiceOutputFields, choiceVariables, normalizeChoiceName, outputMappingError, type ChoiceDefinition, type ChoicePayloadField } from './choice';
 
 export function ChoiceNodePanel({ choice, otherChoices, supportsSession, onSave, onClose }: {
   choice: ChoiceDefinition;
@@ -28,9 +28,9 @@ export function ChoiceNodePanel({ choice, otherChoices, supportsSession, onSave,
   const validInput = !duplicateFields && fieldNames.every(Boolean);
   const outputNames = outputFields.map(field => field.name);
   const duplicateOutputFields = outputNames.some((name, index) => name && outputNames.indexOf(name) !== index);
-  const unknownVariables = unknownOutputVariables(outputFields, inputFields);
-  const validOutput = !duplicateOutputFields && outputNames.every(Boolean) && !unknownVariables.length;
-  const valid = !!slug && !nameError && validInput && (draft.terminal || validOutput);
+  const mappingError = outputMappingError(outputFields, 'choice', inputFields);
+  const validOutput = !duplicateOutputFields && outputNames.every(Boolean) && !mappingError;
+  const valid = !!slug && !nameError && validInput && validOutput;
   useEffect(() => { document.getElementById(`${id}-name`)?.focus(); }, [id]);
 
   function updateField(key: string, update: Partial<ChoicePayloadField>) {
@@ -44,7 +44,7 @@ export function ChoiceNodePanel({ choice, otherChoices, supportsSession, onSave,
       event.preventDefault();
       if (valid) onSave({ id: slug, name: normalizeChoiceName(draft.name, true), description: draft.description.trim(), terminal: draft.terminal, fields: inputFields,
         sessionPolicy: !draft.terminal && supportsSession && draft.sessionPolicy === 'continue_target' ? 'continue_target' : undefined,
-        outputFields: draft.terminal ? [] : outputFields,
+        outputFields,
       });
     }}>
       <div className="graph-agent-panel-header"><h2 id={`${id}-title`}>Choice</h2><IconButton label="Close choice settings" onClick={onClose}><X /></IconButton></div>
@@ -60,13 +60,13 @@ export function ChoiceNodePanel({ choice, otherChoices, supportsSession, onSave,
         </div>)}
         {duplicateFields && <p className="form-error" role="alert">Each payload field needs a unique name.</p>}
       </div>
-      {!draft.terminal && <>
+      <>
         <ChoiceOutputEditor fields={draft.outputFields} variables={choiceVariables(inputFields)} onChange={outputFields => setDraft(current => ({ ...current, outputFields }))} />
         {duplicateOutputFields && <p className="form-error" role="alert">Each output field needs a unique name.</p>}
-        {!!unknownVariables.length && <p className="form-error" role="alert">Unknown variable: {unknownVariables.map(variable => `{{${variable}}}`).join(', ')}</p>}
+        {mappingError && !duplicateOutputFields && <p className="form-error" role="alert">{mappingError}</p>}
         {validInput && validOutput && !!outputFields.length && <ChoiceOutputPreview key={JSON.stringify(inputFields.map(field => [field.name, field.required]))} inputFields={inputFields} outputFields={outputFields} />}
-        {supportsSession && <RadioGroup label="Session policy" value={draft.sessionPolicy ?? 'new'} options={[{ value: 'new', label: 'New session' }, { value: 'continue_target', label: 'Continue target' }]} onChange={value => setDraft(current => ({ ...current, sessionPolicy: value === 'continue_target' ? 'continue_target' : undefined }))} />}
-      </>}
+        {!draft.terminal && supportsSession && <RadioGroup label="Session policy" value={draft.sessionPolicy ?? 'new'} options={[{ value: 'new', label: 'New session' }, { value: 'continue_target', label: 'Continue target' }]} onChange={value => setDraft(current => ({ ...current, sessionPolicy: value === 'continue_target' ? 'continue_target' : undefined }))} />}
+      </>
       <div className="graph-choice-form-actions"><Button onClick={onClose}>Cancel</Button><Button type="submit" variant="primary" disabled={!valid}>Apply</Button></div>
     </form>
   </aside>;

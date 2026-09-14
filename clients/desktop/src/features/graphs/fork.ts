@@ -1,15 +1,16 @@
-import { normalizeChoiceName, type ChoiceOutputField } from './choice';
+import { outputMappingError, type ChoiceOutputField } from './choice';
 
 export type ForkBranch = {
   id: string;
   name: string;
   outputFields: ChoiceOutputField[];
   gitBranch: string;
+  separateWorktree?: boolean;
 };
 export type ForkDefinition = { name: string; branches: ForkBranch[] };
 
 export function createForkBranch(name = '', values: Record<string, string> = {}, gitBranch = ''): ForkBranch {
-  return { id: crypto.randomUUID(), name, outputFields: Object.entries(values).map(([name, value]) => ({ key: crypto.randomUUID(), name, value })), gitBranch };
+  return { id: crypto.randomUUID(), name, outputFields: Object.entries(values).map(([name, value]) => ({ key: crypto.randomUUID(), name, value })), gitBranch, separateWorktree: true };
 }
 
 export function createFork(): ForkDefinition {
@@ -23,10 +24,7 @@ export function createFork(): ForkDefinition {
 }
 
 export function forkOutputError(fields: ForkBranch['outputFields']): string {
-  const names = fields.map(field => normalizeChoiceName(field.name, true));
-  if (names.some(name => !name)) return 'Each output field needs a name.';
-  if (new Set(names).size !== names.length) return 'Each output field needs a unique name.';
-  return '';
+  return outputMappingError(fields, 'fork');
 }
 
 // Literal new-branch names, matching git check-ref-format --branch.

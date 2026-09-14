@@ -54,6 +54,24 @@ func configureProcess(cmd *exec.Cmd) {
 
 func killTree(p *os.Process) error { return syscall.Kill(-p.Pid, syscall.SIGKILL) }
 
+// Process groups retain the existing cancellation behavior but are not secure
+// containment: a descendant can setsid/setpgid. Never advertise graph drainage.
+type ownedProcess struct{ cmd *exec.Cmd }
+
+func prepareOwnedProcess(cmd *exec.Cmd) (*ownedProcess, error) {
+	configureProcess(cmd)
+	return &ownedProcess{cmd: cmd}, nil
+}
+func (o *ownedProcess) Attach() error { return nil }
+func (o *ownedProcess) Stop() error {
+	if o.cmd.Process == nil {
+		return nil
+	}
+	return killTree(o.cmd.Process)
+}
+func (o *ownedProcess) Close() error  { return o.Stop() }
+func (o *ownedProcess) Drained() bool { return false }
+
 func pickerCommand(ctx context.Context) (*exec.Cmd, error) {
 	return nil, errors.New("native directory picker is currently Windows-only")
 }

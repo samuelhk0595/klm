@@ -220,40 +220,67 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	defer a.wg.Done()
 	defer t.cancel()
 	p := &adapter{app: a, turn: t, id: s.ID, harness: s.Harness,
-		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}}
+		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true}
+	p.graph = graphBinding(t)
+	defer UnbindGraphAdapter(t)
 	var err error
-	// Resolve defaults from the harness catalog, not a previous native turn's override.
-	p.model, p.effort = s.Model, s.Effort
-	if catalog, catalogErr := a.catalog(t.ctx, s, cwd, false); catalogErr == nil {
-		if p.model == "" {
-			p.model = catalog.DefaultModel
-		}
-		if p.effort == "" {
-			if option := catalog.find(p.model); option != nil {
-				p.effort = option.DefaultEffort
-			}
-			if p.model == catalog.DefaultModel && catalog.DefaultEffort != "" {
-				p.effort = catalog.DefaultEffort
-			}
+	if t.prompt == "" {
+		t.prompt = payload.Text
+	}
+	if p.graph == nil && s.Role == "graph_node" {
+		err = errors.New("Private graph node requires its activation adapter binding.")
+	}
+	if p.graph == nil && s.Role != "graph_node" && graphConversationHooks != nil {
+		var hooks *GraphAdapterHooks
+		hooks, err = graphConversationHooks(a, t, s)
+		if hooks != nil {
+			err = errors.Join(err, BindGraphAdapter(t, *hooks))
+			p.graph = graphBinding(t)
 		}
 	}
-	bridge, bridgeErr := p.startLinkedBridge()
-	if bridgeErr != nil {
-		err = bridgeErr
-	} else {
-		p.bridge = bridge
-		payload.Text = linkedPromptPrefix + payload.Text
-		switch s.Harness {
-		case "opencode":
-			err = p.runOpenCode(b, cwd, payload)
-		case "pi":
-			err = p.runPi(b, cwd, payload.piText())
-		case "codex":
-			err = p.runCodex(b, cwd, payload)
-		default:
-			err = errors.New("Unsupported harness.")
+	if t.prompt != "" {
+		payload.Text = t.prompt
+	}
+	// Resolve defaults from the harness catalog, not a previous native turn's override.
+	p.model, p.effort = s.Model, s.Effort
+	if err == nil {
+		if catalog, catalogErr := a.catalog(t.ctx, s, cwd, false); catalogErr == nil {
+			if p.model == "" {
+				p.model = catalog.DefaultModel
+			}
+			if p.effort == "" {
+				if option := catalog.find(p.model); option != nil {
+					p.effort = option.DefaultEffort
+				}
+				if p.model == catalog.DefaultModel && catalog.DefaultEffort != "" {
+					p.effort = catalog.DefaultEffort
+				}
+			}
 		}
-		bridge.close()
+		bridge, bridgeErr := p.startLinkedBridge()
+		if bridgeErr != nil {
+			err = bridgeErr
+		} else {
+			p.bridge = bridge
+			if !p.graphNode() {
+				payload.Text = linkedPromptPrefix + payload.Text
+			}
+			switch s.Harness {
+			case "opencode":
+				err = p.runOpenCode(b, cwd, payload)
+			case "pi":
+				err = p.runPi(b, cwd, payload.piText())
+			case "codex":
+				err = p.runCodex(b, cwd, payload)
+			default:
+				err = errors.New("Unsupported harness.")
+			}
+			bridge.close()
+		}
+	}
+	graphResult := p.finishGraphAdapter(err)
+	if p.graphNode() && graphResult.Error != nil {
+		err = graphResult.Error
 	}
 	a.mu.Lock()
 	finalErr := a.commitLocked(func(d *diskState) {
@@ -345,22 +372,37 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	close(t.done)
 	a.scheduleLinkedLocked()
 	a.mu.Unlock()
+	if finalErr != nil {
+		graphResult.Outcome, graphResult.Error = "failed", finalErr
+	}
+	if p.graph != nil && p.graph.hooks.Finished != nil {
+		p.graph.hooks.Finished(graphResult)
+	} else if t.graphNotificationID != "" {
+		// Prompt loading may fail before the factory can construct its hooks.
+		// Still settle the core's already-reserved notification outbox entry.
+		a.graphNotificationFinished(t.graphNotificationID, graphResult)
+	}
 }
 
 type adapter struct {
-	bridge    *linkedBridge
-	app       *app
-	turn      *turn
-	id        string
-	harness   string
-	keys      map[string]string
-	toolNames map[string]string
-	commands  map[string]string
-	piMessage int
-	failed    bool
-	completed bool
-	model     string
-	effort    string
+	graph              *graphAdapterBinding
+	nativeSettled      bool
+	choiceToolSettled  bool
+	processesDrained   bool
+	processDrainFailed bool
+	bridge             *linkedBridge
+	app                *app
+	turn               *turn
+	id                 string
+	harness            string
+	keys               map[string]string
+	toolNames          map[string]string
+	commands           map[string]string
+	piMessage          int
+	failed             bool
+	completed          bool
+	model              string
+	effort             string
 }
 
 func object(value any) map[string]any {
@@ -561,7 +603,7 @@ func (p *adapter) pi(raw map[string]any) error {
 				return err
 			}
 		}
-		if status == "error" {
+		if status == "error" && !(stop == "aborted" && p.graphSealed() && p.choiceToolSettled) {
 			return p.failure(map[string]any{"type": typ, "message": message["errorMessage"]})
 		}
 		return nil

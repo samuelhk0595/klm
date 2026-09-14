@@ -3,8 +3,8 @@ import react from '@vitejs/plugin-react';
 
 export default defineConfig({
   plugins: [react()],
-  // The browser connects directly to the loopback engine; no dev-server proxy.
-  server: { host: '127.0.0.1' },
+  // Direct engine connection; Tauri's devUrl requires the fixed Vite port.
+  server: { host: '127.0.0.1', port: 5173, strictPort: true },
   preview: { host: '127.0.0.1' },
   test: {
     environment: 'jsdom',

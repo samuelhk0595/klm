@@ -6,43 +6,52 @@ import { ListTile } from '../../design-system/ListTile';
 import { Menu, MenuItem } from '../../design-system/Menu';
 import { GraphDetailsDialog } from './GraphDetailsDialog';
 import { DeleteGraphDialog } from './DeleteGraphDialog';
-import type { Graph } from './demo';
+import { authoringPath, graphListEntry, type GraphFile } from './files';
 import type { Agent } from '../agents/demo';
+import { request } from '../../engine';
 import './graphs.css';
 
 const GraphCanvas = lazy(() => import('./GraphCanvas').then(module => ({ default: module.GraphCanvas })));
 
-export function GraphsPage({ graphs, agents, onChange, creating, onCreate }: { graphs: Graph[]; agents: Agent[]; onChange: (graphs: Graph[]) => void; creating: boolean; onCreate: () => void }) {
+export function GraphsPage({ projectId, graphs, agents, catalogError = false, onChanged }: { projectId: string; graphs: GraphFile[]; agents: Agent[]; catalogError?: boolean; onChanged: () => Promise<void> }) {
   const [search, setSearch] = useState('');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-  const editingGraph = graphs.find(graph => graph.id === editingId);
-  const deletingGraph = graphs.find(graph => graph.id === deletingId);
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState<GraphFile | null>(null);
+  const [deleting, setDeleting] = useState<GraphFile | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
   const query = search.trim().toLowerCase();
-  const matches = graphs.filter(graph => `${graph.name} ${graph.description}`.toLowerCase().includes(query));
-
-  if (creating) return <Suspense fallback={<section className="graphs-page" aria-label="Loading graph canvas" aria-busy="true" />}><GraphCanvas agents={agents} /></Suspense>;
-
+  const matches = graphs.filter(g => `${g.definition.name} ${g.definition.description}`.toLowerCase().includes(query));
+  const base = authoringPath(projectId);
+  async function toggle(graph: GraphFile) {
+    setOpenMenu(null); setPending(true); setError('');
+    try { await request(`${base}/graphs/${encodeURIComponent(graph.id)}`, 'PATCH', { enabled: !graph.definition.enabled, revision: graph.revision }); await onChanged(); }
+    catch (e) { setError(e instanceof Error ? e.message : 'Could not update graph.'); }
+    finally { setPending(false); }
+  }
+  if (editing) return <Suspense fallback={<section className="graphs-page" aria-label="Loading graph canvas" aria-busy="true" />}><GraphCanvas graph={editing} graphs={graphs} projectId={projectId} agents={agents} onSaved={onChanged} onClose={() => { setEditing(null); void onChanged().catch(e => setError(e.message)); }} /></Suspense>;
   return <section className="graphs-page" aria-label="Graphs">
-    <div className="graphs-toolbar"><Input type="search" aria-label="Search graphs" placeholder="Search graphs" value={search} onChange={event => { setSearch(event.target.value); setOpenMenu(null); }} /><Button variant="primary" onClick={onCreate}><Plus />New graph</Button></div>
+    <div className="graphs-toolbar"><Input type="search" aria-label="Search graphs" placeholder="Search graphs" value={search} onChange={e => setSearch(e.target.value)} /><Button variant="primary" disabled={pending} onClick={() => setCreating(true)}><Plus />New graph</Button></div>
+    {error && <p className="form-error" role="alert">{error}</p>}
     {matches.length ? <ul className="graphs-list">{matches.map(graph => <li key={graph.id}>
-      <ListTile title={graph.name} description={graph.description} onClick={() => { setOpenMenu(null); setEditingId(graph.id); }}
-        status={!graph.enabled ? <span className="graph-disabled-status">Disabled</span> : undefined}
-        actions={<Menu label={`${graph.name} actions`} role="menu" side="bottom" className="graph-actions-menu" open={openMenu === graph.id} onOpenChange={open => setOpenMenu(open ? graph.id : null)}
-          trigger={props => <IconButton {...props} label={`${graph.name} actions`}><MoreHorizontal /></IconButton>}>
-          <MenuItem role="menuitem" onClick={() => { onChange(graphs.map(item => item.id === graph.id ? { ...item, enabled: !item.enabled } : item)); setOpenMenu(null); }}>{graph.enabled ? <Pause /> : <Play />}{graph.enabled ? 'Disable' : 'Enable'}</MenuItem>
-          <MenuItem role="menuitem" className="graph-delete-action" onClick={() => { setDeletingId(graph.id); setOpenMenu(null); }}><Trash2 />Delete</MenuItem>
+      <ListTile title={graph.definition.name} description={graph.definition.description} onClick={() => { if (!pending) setEditing(graph); }} status={!graph.definition.enabled ? <span className="graph-disabled-status">Disabled</span> : undefined}
+        actions={<Menu label={`${graph.definition.name} actions`} role="menu" side="bottom" className="graph-actions-menu" open={openMenu === graph.id} onOpenChange={open => setOpenMenu(open ? graph.id : null)} trigger={props => <IconButton {...props} disabled={pending} label={`${graph.definition.name} actions`}><MoreHorizontal /></IconButton>}>
+          <MenuItem role="menuitem" onClick={() => void toggle(graph)}>{graph.definition.enabled ? <Pause /> : <Play />}{graph.definition.enabled ? 'Disable' : 'Enable'}</MenuItem>
+          <MenuItem role="menuitem" className="graph-delete-action" onClick={() => { setOpenMenu(null); setDeleting(graph); }}><Trash2 />Delete</MenuItem>
         </Menu>} />
-    </li>)}</ul> : <p className="graphs-empty" role="status">{query ? 'No graphs found' : 'No graphs yet'}</p>}
-    {editingGraph && <GraphDetailsDialog key={editingGraph.id} graph={editingGraph} graphs={graphs} onClose={() => setEditingId(null)} onSave={(name, description) => {
-      const saved: Graph = { ...editingGraph, name, description };
-      onChange(graphs.map(item => item.id === editingGraph.id ? saved : item));
-      setSearch(''); setEditingId(null);
+    </li>)}</ul> : <p className="graphs-empty" role="status">{catalogError ? 'Graph catalog is unavailable.' : query ? 'No graphs found' : 'No graphs yet'}</p>}
+    {creating && <GraphDetailsDialog graphs={graphs.map(graphListEntry)} onClose={() => setCreating(false)} onSave={async (name, description) => {
+      const draft = await request<GraphFile>(`${base}/graph-drafts`, 'POST', { name, description });
+      setCreating(false); setEditing(draft);
     }} />}
-    {deletingGraph && <DeleteGraphDialog graphName={deletingGraph.name} onClose={() => setDeletingId(null)} onConfirm={() => {
-      onChange(graphs.filter(graph => graph.id !== deletingGraph.id));
-      setDeletingId(null);
+    {deleting && <DeleteGraphDialog graphName={deleting.definition.name} onClose={() => { if (!pending) setDeleting(null); }} onConfirm={() => {
+      if (pending) return;
+      setPending(true); setError('');
+      void request(`${base}/graphs/${encodeURIComponent(deleting.id)}`, 'DELETE', { revision: deleting.revision })
+        .then(async () => { setDeleting(null); await onChanged(); })
+        .catch(e => { setDeleting(null); setError(e instanceof Error ? e.message : 'Could not delete graph.'); })
+        .finally(() => setPending(false));
     }} />}
   </section>;
 }

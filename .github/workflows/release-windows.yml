@@ -1,0 +1,94 @@
+﻿name: Windows release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Each main update gets its own release; do not cancel earlier builds.
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: clients/desktop/package-lock.json
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+      - name: Set release version
+        id: version
+        env:
+          RELEASE_NUMBER: ${{ github.run_number }}
+        run: |
+          $base = [version](Get-Content clients/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $patch = $base.Build + [int]$env:RELEASE_NUMBER
+          if ($patch -gt 65535) { throw 'Release patch exceeds the Windows version limit. Bump the base minor version.' }
+          $version = "$($base.Major).$($base.Minor).$patch"
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed.' }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain selection failed.' }
+      - name: Install frontend dependencies
+        working-directory: clients/desktop
+        run: npm ci
+      - name: Build both installers
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: ./distribution/windows/build-release.ps1 -Version $env:RELEASE_VERSION
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: dist/release/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installers
+          path: installers
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="v$RELEASE_VERSION"
+          if existing=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$existing" = "false" ]; then
+              echo "Release $tag is already published; preserving its assets."
+              exit 0
+            fi
+          else
+            gh release create "$tag" --target "$RELEASE_COMMIT" \
+              --title "KLM $RELEASE_VERSION" --generate-notes --draft
+          fi
+          gh release upload "$tag" installers/* --clobber
+          gh release edit "$tag" --draft=false

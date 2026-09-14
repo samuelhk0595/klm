@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { addEdge, Background, Handle, MarkerType, Panel, Position, ReactFlow, useEdgesState, useNodesState, useOnViewportChange, useReactFlow, useUpdateNodeInternals, type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance, type XYPosition } from '@xyflow/react';
-import { Bot, Diamond, GitFork, GitMerge, Maximize, Minus, Plus, Settings2, Terminal, Trash2 } from 'lucide-react';
+import { ArrowLeft, Bot, Diamond, GitFork, GitMerge, Maximize, Minus, Plus, Save, Settings2, Terminal, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
 import { Badge } from '../../design-system/Badge';
 import { Menu, MenuItem } from '../../design-system/Menu';
@@ -14,9 +15,12 @@ import { TerminalNodePanel } from './TerminalNodePanel';
 import type { TerminalDefinition } from './terminal';
 import type { JoinDefinition } from './join';
 import { createFork, type ForkDefinition } from './fork';
-import type { ChoiceDefinition } from './choice';
+import { choiceOutputFields, type ChoiceDefinition } from './choice';
 import { RemoveNodeDialog } from './RemoveNodeDialog';
 import { effortLabel, harnessNames, resolveAgentNode, type AgentNodeOverrides } from './agent-node';
+import { request } from '../../engine';
+import { authoringPath, canvasDefinition, canvasLayout, graphDrawing, graphListEntry, type GraphFile, type GraphLayout } from './files';
+import { GraphDetailsDialog } from './GraphDetailsDialog';
 import '@xyflow/react/dist/style.css';
 import './graph-shimmer.css';
 import './graph-running-led.css';
@@ -25,7 +29,7 @@ import './graph-canvas.css';
 type CanvasNodeData = {
   readOnly?: boolean;
   running?: boolean;
-  activityStatus?: 'pending' | 'running' | 'completed';
+  activityStatus?: 'pending' | 'running' | 'collecting' | 'completed';
   inspecting?: boolean;
   inspectionMode?: 'activity' | 'configuration';
   onInspect?: () => void;
@@ -70,11 +74,11 @@ function AgentNodeCard({ data }: NodeProps<CanvasNode>) {
     <div className="graph-ai-agent-heading"><span><Bot />AI agent</span><span className="graph-node-heading-meta">
       {data.initial && <Badge>Start</Badge>}
       {data.running && <span className="graph-node-running-label"><i aria-hidden="true" />Running</span>}
-      {data.activityStatus === 'completed' && <span className="graph-run-status graph-run-status--completed">Completed</span>}
+      {!data.running && data.activityStatus === 'completed' && <span className="graph-run-status graph-run-status--completed">Completed</span>}
       {!data.readOnly && <IconButton label="Configure agent node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton>}
     </span></div>
     <strong>{data.name?.trim() || 'New agent node'}</strong>
-    <span className="graph-ai-agent-name" title="Agent">{data.agent?.name ?? 'Select agent'}</span>
+    <span className="graph-ai-agent-name" title="Agent">{data.agent?.name ?? data.agentId ?? 'Select agent'}</span>
     {data.agent && <span className="graph-ai-agent-model">{data.settings?.model?.name ?? 'Select model'}{data.settings?.effort && <> · {effortLabel(data.settings.effort)}</>}</span>}
     {data.settings && <div className="graph-ai-agent-metadata"><span><span aria-hidden="true"><HarnessIcon harness={data.settings.harness} /></span>{harnessNames[data.settings.harness]}</span></div>}
     <Handle type="source" position={Position.Right} id="choices" aria-label="Connect to a choice" />
@@ -82,10 +86,16 @@ function AgentNodeCard({ data }: NodeProps<CanvasNode>) {
   </div>;
 }
 
+function NodeProgress({ data }: { data: CanvasNodeData }) {
+  if (data.running) return <span className="graph-node-running-label"><i aria-hidden="true" />Running</span>;
+  if (data.activityStatus === 'collecting') return <span className="graph-run-status">Collecting</span>;
+  return data.activityStatus === 'completed' ? <span className="graph-run-status graph-run-status--completed">Completed</span> : null;
+}
+
 function ChoiceNodeCard({ data }: NodeProps<CanvasNode>) {
   return <div className={`graph-choice-node ${data.configuring ? 'is-configuring' : ''} ${data.running ? 'graph-node--running' : ''}`}>
     <Handle type="target" position={Position.Left} id="sources" isConnectableStart={false} aria-label="Expose this choice to a node" />
-    {data.readOnly ? <div className="graph-choice-content graph-choice-content--readonly"><strong>{data.choice?.name || 'New choice'}</strong></div> : <Button variant="ghost" className="graph-choice-content nopan" onClick={data.onConfigure} aria-label={`Configure choice: ${data.choice?.name || 'New choice'}`}>
+    {data.readOnly ? <div className="graph-choice-content graph-choice-content--readonly"><strong>{data.choice?.name || 'New choice'}</strong><NodeProgress data={data} /></div> : <Button variant="ghost" className="graph-choice-content nopan" onClick={data.onConfigure} aria-label={`Configure choice: ${data.choice?.name || 'New choice'}`}>
       <strong>{data.choice?.name || 'New choice'}</strong>
     </Button>}
     {!data.choice?.terminal && <Handle type="source" position={Position.Right} id="destination" aria-label="Choice destination" />}
@@ -98,10 +108,10 @@ function ForkNodeCard({ id, data }: NodeProps<CanvasNode>) {
   useEffect(() => { updateNodeInternals(id); }, [id, data.fork, updateNodeInternals]);
   return <div className={`graph-fork-card ${data.configuring ? 'is-configuring' : ''} ${data.running ? 'graph-node--running' : ''}`}>
     <Handle type="target" position={Position.Left} id="input" isConnectableStart={false} aria-label="Fork input" />
-    <div className="graph-ai-agent-heading"><span><GitFork />Fork</span>{!data.readOnly && <IconButton label="Configure fork node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton>}</div>
+    <div className="graph-ai-agent-heading"><span><GitFork />Fork</span><NodeProgress data={data} />{!data.readOnly && <IconButton label="Configure fork node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton>}</div>
     <strong>{data.fork?.name || 'Fork'}</strong>
     <div className="graph-fork-outputs">{data.fork?.branches.map(branch => <div key={branch.id} className="graph-fork-output">
-      <span>{branch.name}</span><span className="graph-fork-worktree-label">{branch.gitBranch || 'Worktree'}</span><Handle type="source" position={Position.Right} id={branch.id} aria-label={`Branch output: ${branch.name}`} />
+      <span>{branch.name}</span><span className="graph-fork-worktree-label">{branch.separateWorktree === false ? 'Shared workspace' : branch.gitBranch || 'Worktree'}</span><Handle type="source" position={Position.Right} id={branch.id} aria-label={`Branch output: ${branch.name}`} />
     </div>)}</div>
     <NodeInspectionButton data={data} />
   </div>;
@@ -110,8 +120,8 @@ function ForkNodeCard({ id, data }: NodeProps<CanvasNode>) {
 function JoinNodeCard({ data }: NodeProps<CanvasNode>) {
   return <div className={`graph-ai-agent-card ${data.configuring ? 'is-configuring' : ''} ${data.running ? 'graph-node--running' : ''}`}>
     <Handle type="target" position={Position.Left} id="branches" isConnectableStart={false} aria-label="Join branch inputs" />
-    <div className="graph-ai-agent-heading"><span><GitMerge />Join</span>{!data.readOnly && <IconButton label="Configure join node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton>}</div>
-    <strong>{data.agent?.name ?? 'Select agent'}</strong>
+    <div className="graph-ai-agent-heading"><span><GitMerge />Join</span><NodeProgress data={data} />{!data.readOnly && <IconButton label="Configure join node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton>}</div>
+    <strong>{data.agent?.name ?? data.join?.agentId ?? 'Select agent'}</strong>
     {data.agent && <span className="graph-ai-agent-model">{data.settings?.model?.name ?? 'Select model'}{data.settings?.effort && <> · {effortLabel(data.settings.effort)}</>}</span>}
     {data.join?.outputBranch && <span className="graph-join-output-branch" title="Output Git branch">{data.join.outputBranch}</span>}
     <Handle type="source" position={Position.Right} id="choices" aria-label="Connect join to a choice" />
@@ -122,7 +132,7 @@ function JoinNodeCard({ data }: NodeProps<CanvasNode>) {
 function TerminalNodeCard({ data }: NodeProps<CanvasNode>) {
   return <div className={`graph-ai-agent-card ${data.configuring ? 'is-configuring' : ''} ${data.running ? 'graph-node--running' : ''}`}>
     <Handle type="target" position={Position.Left} id="input" isConnectableStart={false} aria-label="Terminal command input" />
-    <div className="graph-ai-agent-heading"><span><Terminal />Terminal command</span><span className="graph-node-heading-meta">{data.initial && <Badge>Start</Badge>}{!data.readOnly && <IconButton label="Configure terminal node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton>}</span></div>
+    <div className="graph-ai-agent-heading"><span><Terminal />Terminal command</span><span className="graph-node-heading-meta">{data.initial && <Badge>Start</Badge>}<NodeProgress data={data} />{!data.readOnly && <IconButton label="Configure terminal node" className="nodrag nopan" onClick={data.onConfigure}><Settings2 /></IconButton>}</span></div>
     <strong>{data.terminal?.name || 'New terminal node'}</strong>
     {data.terminal?.command && <code className="graph-terminal-command-preview" title={data.terminal.command}>{data.terminal.command}</code>}
     <Handle type="source" position={Position.Right} id="output" aria-label="Terminal command destination" />
@@ -147,9 +157,23 @@ export function CanvasControls() {
   </Panel>;
 }
 
-export function GraphCanvas({ agents }: { agents: Agent[] }) {
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+export function GraphCanvas({ agents, graph, graphs, projectId, onSaved, onClose }: { agents: Agent[]; graph: GraphFile; graphs: GraphFile[]; projectId: string; onSaved: () => Promise<void>; onClose: () => void }) {
+  const [drawing] = useState(() => graphDrawing(graph));
+  const [nodes, setNodes, onNodesChange] = useNodesState(drawing.nodes.length ? drawing.nodes : initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(drawing.edges);
+  const [definition, setDefinition] = useState(graph.definition);
+  const file = useRef(graph);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const [saveError, setSaveError] = useState('');
+  const [layoutError, setLayoutError] = useState('');
+  const [saved, setSaved] = useState('');
+  const layoutQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const lastLayout = useRef<GraphLayout>(graph.layout);
+  const base = authoringPath(projectId);
+  const headerLeading = document.getElementById('workspace-header-leading');
+  const headerActions = document.getElementById('workspace-header-actions');
   const flow = useRef<ReactFlowInstance<CanvasNode> | null>(null);
   const [configuringId, setConfiguringId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<CanvasContextMenu | null>(null);
@@ -158,6 +182,42 @@ export function GraphCanvas({ agents }: { agents: Agent[] }) {
   const configuringNode = nodes.find(node => node.id === configuringId);
   const choiceDestination = nodes.find(node => node.id === edges.find(edge => edge.source === configuringId)?.target);
   const choiceSupportsSession = choiceDestination?.type === 'aiAgent' || choiceDestination?.type === 'join';
+  const payloadFields = [...new Set([
+    ...(configuringNode?.data.initial ? ['task'] : []),
+    ...edges.filter(edge => edge.target === configuringId).flatMap(edge => {
+      const source = nodes.find(node => node.id === edge.source);
+      const fields = source?.data.choice ? choiceOutputFields(source.data.choice)
+        : source?.data.terminal?.outputFields ?? source?.data.fork?.branches.find(branch => branch.id === edge.sourceHandle)?.outputFields ?? [];
+      return fields.map(field => field.name);
+    }),
+  ])];
+
+  function persistLayout(layout: GraphLayout) {
+    // Keep positions of the saved topology too, even when unsaved edits remove or
+    // rename an element. Autosaving layout must not erase the saved graph's layout.
+    const merged = { ...layout, positions: { ...lastLayout.current.positions, ...layout.positions } };
+    lastLayout.current = merged;
+    const next = layoutQueue.current.catch(() => {}).then(() => request<GraphLayout>(`${base}/graphs/${encodeURIComponent(file.current.id)}/layout`, 'POST', merged));
+    layoutQueue.current = next;
+    void next.then(() => setLayoutError(''), error => setLayoutError(error instanceof Error ? error.message : 'Could not save layout.'));
+    return next;
+  }
+  async function save() {
+    if (savingRef.current || configuringId) return;
+    savingRef.current = true; setSaving(true); setSaveError(''); setSaved('');
+    try {
+      const nextDefinition = canvasDefinition(definition, nodes, edges);
+      await persistLayout(canvasLayout(nodes, flow.current?.getViewport()));
+      const next = await request<GraphFile>(`${base}/graphs/${encodeURIComponent(file.current.id)}`, 'POST', { definition: nextDefinition, revision: file.current.revision });
+      file.current = next; setDefinition(next.definition); setSaved('Saved');
+      await onSaved();
+    } catch (error) { setSaveError(error instanceof Error ? error.message : 'Could not save graph.'); }
+    finally { savingRef.current = false; setSaving(false); }
+  }
+  // Only executable edits invalidate the explicit-save indicator; measurements
+  // and position changes are handled independently by layout autosave.
+  const definitionFingerprint = JSON.stringify([definition.name, definition.description, definition.enabled, nodes.map(n => [n.id, n.type, n.data]), edges.map(e => [e.source, e.target, e.sourceHandle])]);
+  useEffect(() => setSaved(''), [definitionFingerprint]);
 
   function clearChoiceSessionPolicies(sourceIds: Set<string>) {
     setNodes(current => current.map(node => sourceIds.has(node.id) && node.data.choice?.sessionPolicy
@@ -218,7 +278,19 @@ export function GraphCanvas({ agents }: { agents: Agent[] }) {
     };
   });
 
-  return <section className="graph-canvas" aria-label="New graph canvas">
+  return <section className="graph-editor" aria-label={`${definition.name} editor`}>
+    {headerLeading && createPortal(<div className="graph-editor-heading">
+      <Button disabled={saving} onClick={() => { void layoutQueue.current.catch(() => {}).then(onClose); }}><ArrowLeft />Back to graphs</Button>
+      <strong>{definition.name}</strong>
+    </div>, headerLeading)}
+    {headerActions && createPortal(<>
+      <span className="small muted" role="status">{saved}</span>
+      <IconButton label="Graph details" disabled={saving} onClick={() => setDetailsOpen(true)}><Settings2 /></IconButton>
+      <Button variant="primary" disabled={saving || !!configuringId} onClick={() => void save()}><Save />{saving ? 'Saving...' : 'Save'}</Button>
+    </>, headerActions)}
+    {saveError && <div className="storage-error" role="alert">{saveError}</div>}
+    {layoutError && <div className="storage-error" role="alert">Layout not saved: {layoutError} <Button size="sm" onClick={() => { void persistLayout(lastLayout.current).catch(() => {}); }}>Retry</Button></div>}
+    <div className="graph-canvas" inert={saving}>
     <ReactFlow<CanvasNode> nodes={canvasNodes} onNodesChange={onNodesChange} edges={edges} onEdgesChange={onEdgesChange} nodeTypes={nodeTypes} onInit={instance => { flow.current = instance; }} onNodeClick={(_, node) => { if (node.type !== 'initialPlaceholder') setConfiguringId(node.id); }}
       isValidConnection={validConnection} onConnect={connection => {
         if (!validConnection(connection)) return;
@@ -238,7 +310,9 @@ export function GraphCanvas({ agents }: { agents: Agent[] }) {
         setContextMenu({ kind: 'canvas', x: event.clientX, y: event.clientY });
       }}
       onNodeDragStart={() => setContextMenu(null)} onMoveStart={() => setContextMenu(null)}
-      minZoom={0.2} maxZoom={2} fitView fitViewOptions={{ maxZoom: 1 }}>
+      onNodeDragStop={(_, moved) => { if (!savingRef.current) void persistLayout(canvasLayout(nodes.map(n => n.id === moved.id ? { ...n, position: moved.position } : n), flow.current?.getViewport())).catch(() => {}); }}
+      onMoveEnd={(event, viewport) => { if (event && !savingRef.current) void persistLayout(canvasLayout(nodes, viewport)).catch(() => {}); }}
+      minZoom={0.2} maxZoom={2} defaultViewport={graph.layout.viewport} fitView={!graph.layout.viewport} fitViewOptions={{ maxZoom: 1 }}>
       <Background gap={24} size={1} color="var(--color-faint)" />
       <CanvasControls />
       {configuringNode?.type === 'aiAgent' && <Panel position="center-right" className="graph-agent-panel-position"><AgentNodePanel key={configuringNode.id} agents={agents} name={configuringNode.data.name ?? ''} onNameChange={name => setNodes(current => current.map(node => node.id === configuringNode.id ? { ...node, data: { ...node.data, name } } : node))} agentId={configuringNode.data.agentId ?? ''} overrides={configuringNode.data.overrides ?? {}} onSelectAgent={id => {
@@ -249,7 +323,7 @@ export function GraphCanvas({ agents }: { agents: Agent[] }) {
         if (choice.terminal) setEdges(current => current.filter(edge => edge.source !== configuringNode.id));
         setConfiguringId(null);
       }} onClose={() => setConfiguringId(null)} /></Panel>}
-      {configuringNode?.type === 'fork' && configuringNode.data.fork && <Panel position="center-right" className="graph-agent-panel-position graph-fork-panel-position"><ForkNodePanel key={configuringNode.id} fork={configuringNode.data.fork} destinations={Object.fromEntries(edges.filter(edge => edge.source === configuringNode.id).map(edge => {
+      {configuringNode?.type === 'fork' && configuringNode.data.fork && <Panel position="center-right" className="graph-agent-panel-position graph-fork-panel-position"><ForkNodePanel key={configuringNode.id} fork={configuringNode.data.fork} payloadFields={payloadFields} destinations={Object.fromEntries(edges.filter(edge => edge.source === configuringNode.id).map(edge => {
         const target = nodes.find(node => node.id === edge.target);
         return [edge.sourceHandle, target?.type === 'terminal' ? target.data.terminal?.name || 'New terminal node' : target?.data.name?.trim() || 'New agent node'];
       }))} onSave={fork => {
@@ -261,11 +335,13 @@ export function GraphCanvas({ agents }: { agents: Agent[] }) {
         setNodes(current => current.map(node => node.id === configuringNode.id ? { ...node, data: { ...node.data, join } } : node));
         setConfiguringId(null);
       }} onClose={() => setConfiguringId(null)} /></Panel>}
-      {configuringNode?.type === 'terminal' && configuringNode.data.terminal && <Panel position="center-right" className="graph-agent-panel-position"><TerminalNodePanel key={configuringNode.id} terminal={configuringNode.data.terminal} onSave={terminal => {
+      {configuringNode?.type === 'terminal' && configuringNode.data.terminal && <Panel position="center-right" className="graph-agent-panel-position"><TerminalNodePanel key={configuringNode.id} terminal={configuringNode.data.terminal} payloadFields={payloadFields} onSave={terminal => {
         setNodes(current => current.map(node => node.id === configuringNode.id ? { ...node, data: { ...node.data, terminal } } : node));
         setConfiguringId(null);
       }} onClose={() => setConfiguringId(null)} /></Panel>}
     </ReactFlow>
+    </div>
+    {detailsOpen && <GraphDetailsDialog graph={{ ...graphListEntry(file.current), name: definition.name, description: definition.description }} graphs={graphs.map(graphListEntry)} onClose={() => setDetailsOpen(false)} onSave={(name, description) => { setDefinition(current => ({ ...current, name, description })); setDetailsOpen(false); }} />}
     <Menu label={contextMenu?.kind === 'canvas' ? 'Node catalog' : 'Node actions'} role="menu" className={contextMenu?.kind === 'canvas' ? 'graph-node-catalog' : 'graph-node-actions-menu'} open={contextMenu !== null} position={contextMenu ?? undefined} onOpenChange={open => { if (!open) setContextMenu(null); }} trigger={() => null}>
       {contextMenu?.kind === 'canvas' ? <>
         <MenuItem role="menuitem" onClick={() => {

@@ -1,4 +1,7 @@
-export const ENGINE_URL = import.meta.env.VITE_ENGINE_URL ?? 'http://127.0.0.1:7331';
+import type { AuthoringCatalog, GraphFile } from './features/graphs/files';
+import { resolveEngineURL } from './platform';
+
+export const ENGINE_URL = resolveEngineURL();
 
 export type Project = {
   id: string;
@@ -33,6 +36,9 @@ export type SessionUsage = {
 };
 
 export type Session = {
+  role?: string;
+  selectedGraphId?: string;
+  graph?: ConversationGraphState;
   parentId?: string;
   sources?: SourceReference[];
   id: string;
@@ -54,6 +60,37 @@ export type Session = {
 };
 
 export type SourceReference = { sessionId: string; messageId: string; passage: string };
+
+export type ConversationGraphState = {
+  sessionId: string;
+  selectedGraphId: string;
+  revision: number;
+  run: GraphRunProjection | null;
+  requests: GraphRequestProjection[];
+};
+export type GraphRunProjection = {
+  id: string; graphId: string; active: boolean;
+  status: 'starting' | 'running' | 'ending'; revision: number;
+  snapshot: GraphFile;
+  activeNodeIds: string[]; completedNodeIds: string[];
+  completedChoiceIds: string[]; collectingJoinIds: string[];
+};
+export type GraphRequestProjection = {
+  runId: string; graphId: string; nodeId: string; nodeName: string;
+  activationId: string; sessionId: string; requestId: string;
+  kind: 'permission' | 'question';
+  permission?: PermissionRequest; question?: QuestionRequest;
+};
+
+// Graph revisions advance independently of the chat's updatedAt timestamp.
+export function mergeGraphState(previous: ConversationGraphState | undefined, incoming: ConversationGraphState | undefined) {
+  if (!incoming || (previous && incoming.revision <= previous.revision)) return previous;
+  return incoming;
+}
+
+export const getAuthoringCatalog = (projectId: string) => request<AuthoringCatalog>(`/api/projects/${encodeURIComponent(projectId)}/authoring`);
+export const getConversationGraph = (sessionId: string) => request<ConversationGraphState>(`/api/sessions/${encodeURIComponent(sessionId)}/graph`);
+export const selectConversationGraph = (sessionId: string, selectedGraphId: string) => request<ConversationGraphState>(`/api/sessions/${encodeURIComponent(sessionId)}/graph`, 'PATCH', { selectedGraphId });
 
 export type ProjectPath = { path: string; kind: 'file' | 'directory' };
 // Offsets use UTF-16 units in canonical message text (full @path), not UTF-8 bytes
@@ -103,7 +140,7 @@ export type ModelOption = { id: string; name: string; provider: string; provider
 export type ModelCatalog = { models: ModelOption[]; connectedProviders: { id: string; name: string; authType: string }[]; defaultModel?: string; defaultEffort?: string; effortLabel: string };
 export type QuotaSnapshot = { source: string; observedAt: string; stale?: boolean; windows: { name: string; usedPercent: number; resetsAt: number }[] };
 
-export async function request<T>(path: string, method = 'GET', body?: unknown, timeoutMs = 15000): Promise<T> {
+export async function request<T>(path: string, method = 'GET', body?: unknown, timeoutMs = 15000, signal?: AbortSignal): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${ENGINE_URL}${path}`, {
@@ -111,10 +148,10 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, t
       headers: { 'Content-Type': 'application/json' },
       credentials: 'omit',
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: method === 'GET' ? AbortSignal.timeout(timeoutMs) : undefined,
+      signal: signal ?? (method === 'GET' ? AbortSignal.timeout(timeoutMs) : undefined),
     });
   } catch {
-    throw new Error(`Cannot connect to the local engine at ${ENGINE_URL}. Start the engine and retry.`);
+    throw new Error(`Cannot connect to the engine at ${ENGINE_URL}. Start the engine and retry.`);
   }
   const result: unknown = await response.json().catch(() => null);
   if (!response.ok) {
@@ -125,7 +162,7 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, t
   return result as T;
 }
 
-export async function pickDirectory(): Promise<string | null> {
-  const result = await request<{ path: string | null }>('/api/dialogs/directory', 'POST', {});
+export async function pickDirectory(signal?: AbortSignal): Promise<string | null> {
+  const result = await request<{ path: string | null }>('/api/dialogs/directory', 'POST', {}, 15000, signal);
   return result.path;
 }

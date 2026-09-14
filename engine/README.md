@@ -6,33 +6,40 @@ bridge; no frontend or general-purpose engine MCP interface is bundled.
 
 ## Run
 
-From this directory, in PowerShell:
+From this directory, in PowerShell, build a persistent executable before starting:
 
 ```powershell
-go run .
+go build -o klm.exe .
+.\klm.exe start
+.\klm.exe stop
 ```
 
-Build and run a standalone executable:
+The public CLI has only `klm start` and `klm stop`. Start launches a detached worker,
+waits for readiness and returns; repeated start keeps the same engine. Closing the
+terminal does not stop it. Stop uses a per-user Windows named pipe, waits for the
+live pipe server's Windows process handle and data lock to be released after shutdown,
+and is idempotent when stopped.
+It never kills a process from a stored PID or exposes engine shutdown on HTTP.
+`__worker` is an internal launch mode, not an additional public command.
 
-```powershell
-go build -o klm-engine.exe .
-.\klm-engine.exe
-```
-
-Optional flags:
-
-```powershell
-.\klm-engine.exe -addr 127.0.0.1:7331 -data-dir "C:\path\to\local-engine-data"
-```
-
-- `-addr` defaults to `127.0.0.1:7331`. Only literal loopback IPs are accepted,
-  including `[::1]:7331`. No wildcard, LAN, or public binds.
-- `-data-dir` defaults to `os.UserConfigDir()/klm/engine`, normally
-  `%APPDATA%\klm\engine` on Windows. Relative overrides become absolute.
-- Stop with Ctrl+C. The engine cancels its active harness processes and persists
-  terminal session snapshots before releasing the data-directory lock.
+- API listen address is fixed at `0.0.0.0:7331`. Port conflicts are errors.
+- Data stays at `%APPDATA%\klm\engine`; `engine.log` captures background output.
+- The same exclusive data-directory lock protects existing data and live instances.
+- Shutdown cancels active harness work and records interruption without run replay.
+- Packaged binaries resolve adjacent `prompts/` before development source paths.
+  Pi's extension and OpenCode's graph plugin are embedded in the Go binary.
+- The separate NSIS installer configures user PATH and HKCU Run login startup,
+  starts the engine and preserves user data on uninstall. It does not install
+  harnesses. See [Windows packaging](../distribution/windows/README.md).
+- The Tauri client has its own installer and lifecycle; the engine serves no UI.
 
 ## HTTP Contract
+Development builds use `go build -tags dev -o klm-dev.exe .`, then
+`.\klm-dev.exe start` / `.\klm-dev.exe stop`. This selects API **17331**, Focus
+origin port **17332**, and `%APPDATA%\klm\engine-dev` for data, logs, locks and
+the derived local control channel. Release builds omit the tag and retain
+**7331/7332** and `%APPDATA%\klm\engine`. Both can run concurrently.
+
 
 All mutation requests, including stop and directory picker, require
 `Content-Type: application/json`. Stop and picker accept an empty body or `{}`.
@@ -41,7 +48,7 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 
 | Method | Path | Body / response |
 | --- | --- | --- |
-| GET | `/api/health` | `{status:"ok",version:1,runningSessions:number}`; 503 on persistence failure |
+| GET | `/api/health` | `{status:"ok",version:2,runningSessions:number,activeGraphRuns:number}`; 503 on persistence failure |
 | GET | `/api/state` | `{projects:Project[],sessions:Session[],harnesses:Harness[]}` |
 | POST | `/api/projects` | `{name,folder,icon}` -> 201 Project |
 | PATCH | `/api/projects/{id}` | `{name?,icon?}` -> 200 Project |
@@ -58,6 +65,9 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 | GET | `/api/sessions/{id}/quota` | `{quota:QuotaSnapshot\|null}`; null for unsupported/unverified connections |
 | POST | `/api/sessions/{id}/messages` | `{text,mentions?:[{id,path,kind,start,end}],sources?:[{sessionId,messageId,passage}]}` -> 202 Session, already containing the durable user event |
 | GET | `/api/sessions/{id}/events` | SSE, initial and subsequent full Session JSON snapshots |
+| GET | `/api/sessions/{id}/graph` | Conversation selection, active-run projection and node requests |
+| PATCH | `/api/sessions/{id}/graph` | `{selectedGraphId:string}`; empty string selects None |
+| GET | `/api/graph-runs/{runId}` | Real run summary and terminal result; 404 for unknown runs |
 | POST | `/api/sessions/{id}/stop` | 200 Session after cancellation completes; idle sessions are unchanged |
 | POST | `/api/sessions/{id}/permissions/{permissionID}` | `{decision:"once"\|"session"\|"always"\|"reject"}` -> Session |
 | POST | `/api/sessions/{id}/questions/{questionID}/reply` | `{answers:string[][]}` or `{cancelled:true}` -> Session |
@@ -211,6 +221,132 @@ Run in main and side chats with Pi, OpenCode, and Codex:
 Implementation validation uses an engine build to temporary output and the desktop
 production build. Native turn behavior and installed-harness compatibility still
 require the manual checks above; builds alone do not establish them.
+
+## Agent and Graph Files
+
+The authoring CRUD is independent of graph execution and of the chat graph selector.
+Files live in the selected project's `.klm/agents` and `.klm/graphs`, which are
+created on demand. No `harness.toml` is created. See
+[`GRAPH_AUTHORING_REFINEMENT.md`](../GRAPH_AUTHORING_REFINEMENT.md) for the decisions.
+
+| Method | Path (prefix `/api/projects/{id}`) | Body / response |
+| --- | --- | --- |
+| GET | `/authoring` | `{agents:AgentRecord[],graphs:GraphRecord[],errors:string[]}` |
+| GET | `/models/{harness}` | Real `ModelCatalog`; optional `?refresh=true`, no model prompt |
+| POST | `/agents` | `{agent:AgentDefinition,revision:""}` → AgentRecord |
+| PATCH | `/agents/{slug}` | `{agent:AgentDefinition,revision}` → AgentRecord; supports rename |
+| DELETE | `/agents/{slug}` | `{revision}` → `{removed:true}` |
+| POST | `/graph-drafts` | `{name,description}` → draft GraphRecord; layout only |
+| POST | `/graphs/{id}` | `{definition:GraphDefinition,revision}` → saved GraphRecord |
+| PATCH | `/graphs/{slug}` | `{enabled,revision}` → GraphRecord |
+| DELETE | `/graphs/{slug}` | `{revision}` → `{removed:true}` |
+| POST | `/graphs/{id}/layout` | `{positions:{[elementID]:{x,y}},viewport?:{x,y,zoom}}` → layout |
+
+AgentDefinition's JSON fields are `name`, `description`, `enabled`, `defaultHarness`,
+`model`, optional `effort`, and `prompt`. TOML uses `default_harness`. AgentRecord
+adds `id`, `revision`, and derived `graphReferences` (graph names), which are not
+stored inside the TOML. Model IDs come from real harness catalogs. Configurable
+effort requires a supported value; models without configurable effort omit it.
+Prompts are multiline TOML strings, not separate prompt files.
+
+GraphRecord is `{id,revision,definition,layout}`. GraphDefinition uses the YAML keys
+also in JSON: `name`, optional description text, `enabled`, `initial_node`, `nodes`,
+and `choices`. Nodes and Choices are maps keyed by identity. The Go structs in
+`authoring.go` are the serialization schema. Node variants:
+
+```yaml
+nodes:
+  implement:
+    type: agent
+    name: Implement task
+    agent: implementer
+    overrides: # optional; only local overrides, never the inherited definition
+      harness: codex
+      model: selected-model-id
+      effort: medium
+    choices: [ready, blocked]
+  prepare:
+    type: terminal
+    name: Update repository
+    command: git pull
+    to: implement
+  checks:
+    type: fork
+    name: Parallel checks
+    branches:
+      security:
+        name: Security review
+        git_branch: checks/security
+        output:
+          task: "{{run.input.task}}"
+        to: security-review
+      tests:
+        name: Test review
+        git_branch: checks/tests
+        output:
+          task: "{{run.input.task}}"
+        to: test-review
+  integrate:
+    type: join
+    agent: integrator
+    prompt: Follow project integration conventions.
+    output_branch: feature/integrated
+    choices: [integrated, blocked]
+```
+
+This fragment illustrates fields, not a complete executable graph. Agent IDs,
+destinations, model IDs and Choices must refer to actual definitions/configuration.
+Fork worktree isolation and incoming revision are fixed type rules; this CRUD does
+not perform Git operations or define synchronization. Join `prompt` and
+`output_branch` are optional. Terminal commands preserve their text and are never
+executed by these endpoints.
+
+Choice keys/references use the name-derived slug (`request-changes`), while `name`
+retains underscores (`request_changes`). Input is a map of string fields with
+`required` flags; output is a flat map of string/template values. Terminal Choices
+retain output and cannot have `to` or `session`. Eligible destinations for a session
+policy are agent and Join; omission means new. Template output is validated, not
+executed here. Graph Save checks settings and references, but is not a declaration
+of runtime executability: unfinished/disconnected destinations can be saved.
+
+### Saving, reading and concurrent edits
+
+- Agents are `<slug>.toml`. Graph definitions are `<slug>.yaml`. Companion layout
+  files are `<slug>.yaml.layout.json`, with `positions` and optional `viewport`.
+  Choice position keys are `choice:<choice-slug>`; other keys are node IDs.
+- Create establishes a unique `draft-<id>` layout identity without registering a
+  graph. The first Save checks the name-derived target for collisions, writes YAML,
+  moves the draft layout to the companion name and removes the old draft layout.
+  Abandoned layout-only drafts stay outside the catalog; draft recovery/cleanup UI
+  is not included.
+- Layout writes are atomic and independent of definition revision. The client
+  serializes them, saves positions on drag release and viewport on user move end,
+  and waits for them before Save/return. Layout never stores executable connections.
+- Definition revisions are hashes of current file bytes. Updates/deletes reject
+  stale revisions rather than overwriting newer edits. Renaming a graph moves both
+  files; renaming an agent updates saved graph references.
+- Referenced agents cannot be deleted or disabled. Graph references are derived
+  from YAML, not fixture counters or cached UI state.
+- Writes use same-directory temporary files and atomic replacement. Multi-file
+  changes use a `.klm/.authoring-transaction.json` roll-forward journal. Reads and
+  mutations recover pending transactions under the authoring mutex. A failed
+  transaction reports an error; a subsequent access finishes recovery before
+  exposing the catalog. This coordinates engine writes, not arbitrary external
+  editors writing simultaneously during a transaction.
+- Unknown TOML/YAML fields, unreadable files and malformed documents are reported.
+  Invalid definitions are not imported as fixtures or silently overwritten.
+  Catalog errors block mutations until repaired. Missing layout is supported;
+  invalid layout is reported and defaults positions when reading.
+- Client paths never determine the project root. IDs are validated, configuration
+  symlinks/junctions are rejected, and reads are capped at 2 MiB per file. Existing
+  JSON mutation limits apply. These endpoints use the engine's public API boundary.
+
+Validation for this delivery: Go build, TypeScript check, and the requested browser
+CRUD round trip in a temporary project. Created a graph with optional description
+empty, saved/reopened its terminal node and layout; created/reloaded an agent using
+the real Codex catalog, selected it in a graph node, connected it through a terminal
+Choice with output, saved/reopened, and disabled/enabled the graph across reloads.
+No graph execution, model prompt, full test suite or deep/adversarial review was run.
 
 ### Model selection and account quotas
 
@@ -592,18 +728,20 @@ execution, a full suite, or an adversarial review.
   histories/high token throughput. There is no retention, deletion, or compaction
   API yet. Back up the data directory with the engine stopped.
 
-## Local Security Boundary
+## Network and Private Control Boundaries
 
-The listener, client address, Host header, and browser Origin must be loopback.
-Allowed browser origins are HTTP(S) on `localhost` or loopback IPs with any port,
-so a Vite client can use the API directly. Non-loopback and `null` origins are
-rejected. Requests without Origin are accepted for local native clients. CORS
-does not permit credentials. JSON-only mutations block ordinary cross-origin
-HTML form submissions; there is no externally reachable listener.
+The public API binds `0.0.0.0:7331`, including LAN clients. Host accepts IP addresses,
+localhost or the Windows computer name on port 7331. CORS accepts HTTP Focus on
+the API's same hostname, port 7332 (loopback aliases are interchangeable), Tauri's
+native origin, and HTTP(S) loopback Vite origins on 5173/4173. Opaque/null origins
+remain rejected; requests without Origin are accepted. CORS does not grant
+credentials and is not network authentication. JSON mutation limits remain intact.
 
-This is a trusted-local-user API, not an authentication boundary between local
-applications. Any local process or accepted loopback web application can use it.
-Do not proxy it to a network or run untrusted web applications on loopback.
+Network authentication and TLS are explicitly deferred in the approved personal-use
+delivery. The existing `loopbackHost` helper, private authenticated MCP bridge and
+owned harness endpoints retain their local boundary. Engine shutdown is available
+only through a named pipe whose ACL allows this Windows user and denies network
+logons. Grants, permissions and sandbox behavior remain unchanged.
 
 The engine never reads auth stores, prints environment values, or exposes binary
 paths/command lines through discovery. Harness-generated tool/message content
@@ -624,3 +762,160 @@ Installed Pi source and harness CLI help were inspected without sending prompts.
 The implementation is intended for a lightweight Go build followed by manual
 HTTP, picker, SSE, stop/restart, and authenticated chat validation. No tests or
 test suites are included or run as part of this slice.
+
+## Graph execution core (P1–P5)
+
+Graph authoring remains separate from executable compilation. Runs snapshot the
+graph YAML and referenced agent TOMLs, resolve real model/effort settings, and
+retain those definitions through catalog edits. The compiler checks complete
+destinations, output references, normal Fork reconvergence and Join contracts.
+Layout is optional. Ordinary cycles are allowed; nested Forks are rejected.
+
+The main conversation's private harness bridge exposes `graph_catalog`,
+`graph_activities`, `graph_get_run`, `graph_recent_events`, `graph_invoke`,
+`graph_assess` and `graph_update_activity`. The side conversation gets the four
+read-only tools. There is no public HTTP invocation or orchestrator Stop tool.
+Selecting a graph, selecting None and opening Graph never execute or cancel work.
+
+Invocation records an express user-message authorization reference, self-contained
+task, objective and resolved workspace decision. `authorization` is a list of
+`{eventId,text}` references grounding the activity. Each event must exist, have type
+`user`, and belong to the invoking conversation. The reference is traceability,
+not semantic proof of consent or a native permission grant. The orchestrator
+instructions enforce the distinction.
+Activities use versions and operation IDs; duplicate operations do not dispatch
+another run. Ready correction takes priority, then explicit priority and request
+order. Dependencies wait for an explicit satisfied assessment of their objective;
+normal completion alone does not release them. Blocked/failure/interruption cannot
+satisfy a success prerequisite. A retry requires concrete correction and the
+user's fresh/reuse decision when earlier artifacts/workspaces are involved.
+
+### Invocation contract update — approved 2026-09-13
+
+The latest decision in refinement section 13 supersedes the earlier requirement
+to ask for a workspace mode and supply `workspace.authorizationEventId` on every
+invocation. Incomplete nested `graph_invoke` schemas had left the agent guessing
+`path`, `scope` and event identifiers against strict engine validation.
+
+- Omitting `workspace` resolves to `original` without asking. The product default
+  is the basis for that resolution; omission must not be represented as express
+  consent or as a message in which the user chose that directory.
+- Explicit `workspace.mode: "original"` and `"new_worktree"` remain available.
+  `original` uses the registered project directory and its actual file state,
+  including when it is already a worktree. It does not take an arbitrary `path`.
+- `workspace.authorizationEventId` is not mandatory. Activity `authorization`
+  remains required with the `{eventId,text}` shape above; it is not replaced by
+  `scope` or by a required workspace-choice event.
+- Publish complete nested schemas through MCP and Pi, with field types,
+  required/optional fields, mode/attempt enums, defaults, descriptions and reuse
+  map values. The workspace contract includes `mode`, `attempt`, optional
+  `authorizationEventId`, `baseRevision`, `sourceRunId` and `reuse` associations;
+  retain the applicable fresh/reuse conditions rather than marking every field
+  mandatory. Validation and the published schemas must agree.
+- Orchestrator instructions apply defined defaults and ask only for blocking
+  ambiguity or missing information. A new worktree still uses the requested
+  revision or current local HEAD by default, without a mandatory revision question.
+- Retrying with earlier artifacts still requires the user's fresh/reuse decision
+  and concrete correction; reuse still requires explicit associations. If that
+  decision is missing, ask. Fresh in the original directory retains W2's existing-
+  files behavior without reset or automatic worktree creation.
+
+This section records the approved contract for the parallel Go implementation,
+not evidence that its new default/schemas are running. See
+`GRAPH_ENGINE_PROGRESS_INVOCATION_DOCS.md` at the repository root. The user will
+reload the tab and retest after the principal agent coordinates the restart.
+
+### Run lifecycle and execution
+
+Each run has its own context and occupies its conversation slot during `starting`,
+`running` and `ending`. The initiating chat turn can finish or keep conversing.
+Node sessions are private, with explicit run/node ownership and canonical cwd.
+Continued sessions are reused only for the latest visit to that node in the same
+run, same directory and harness, after the adapter reports them continuable.
+Questions and permissions retain their originating private-session callbacks and
+are projected into the owning conversation, including when Graph is hidden.
+
+Only a valid Choice can finish an agent/Join node. The engine's
+`{origin:"engine",id:"blocked"}` is distinct from every author Choice. Invalid
+payloads and normally ended turns missing a Choice share a deduplicated counter
+per activation: two corrections, failure on the third. The core persists
+reservation/sealed/drained/accepted phases. No acceptance callback dispatches work;
+the supervisor continues only after the adapter's final `Finished` callback.
+
+Terminal runs one noninteractive PowerShell script in the inherited workspace.
+`$payload` is loaded from a private UTF-8 JSON file; values are never pasted into
+the script. The output mapper supports local `payload.<field>`, `command.result`
+and `run.input.task` references. Stdout/stderr are combined in observed order and
+bounded to 64 KiB UTF-8 with explicit truncation metadata. A nonzero shell exit
+continues through the configured mapping; process-start/collection failures fail
+the run. There is no task timeout or interactive Terminal input.
+
+Git operations use argument arrays and owned processes. New worktrees live under
+`<data-dir>/worktrees/<project-id>/<workspace-id>` and use unique run/activation
+branch suffixes. An intent is persisted before creation. Fork fixes one incoming
+commit for its isolated branches; branches without isolation share inherited cwd,
+branch and dirty state. No implicit commit, push, pull, checkout of the original
+directory, reset, dirty-file copy or cleanup is performed. Fresh in the original
+directory intentionally uses existing files. Reuse explicitly maps `initial` and
+`node:<node-id>:<occurrence>[:branch:<branch-id>]` to prior workspace IDs; repository,
+source-run usage and managed-branch provenance are checked.
+
+Join collects distinct payloads by incoming connection and causal round; `{}` is
+an arrival. It starts its agent only when all inputs arrived, rejects duplicate
+independent arrivals/overlapping rounds, and agrees incoming Choice session policy
+(Terminal does not vote). Without output branch it integrates at the parallel
+origin. With output branch it creates a new integration worktree from that origin's
+current local HEAD. The agent integrates and resolves conflicts; the engine never
+merges automatically. Continued work uses the integration directory. Missing
+inputs with no remaining producer fail with a dependency diagnostic; user waits
+are still active work, not deadlock.
+
+Terminal results and slot release are committed with a persistent notification
+outbox only after owned work settles. Notifications share the existing linked/user
+turn arbiter and cannot overlap native turns. Failed/uncertain notification sends
+retry with the same ID; effects are idempotent, not an exactly-once distributed
+transaction. Preflight failures have persistent activity-error notices. Startup
+preserves scheduled work/outbox and interrupts in-flight runs, activations and
+workspace intents without replaying them. Workspace artifacts and native IDs stay.
+
+Adapter preflight is authoritative per harness/platform. Implemented mechanisms
+are exposed by `GraphAdapterCapabilities`; they are not a claim of native runtime
+validation. Unconfirmed node/tool-call completion keeps a run in `ending` with a
+concrete diagnostic instead of releasing its slot as if termination were confirmed.
+
+### External MCP lifecycle boundary — approved 2026-09-13
+
+Refinement section 14 supersedes the preventive OpenCode/Codex configuration ban
+reported as `cannot confirm lifecycle ... agentdeck`. A configured external server
+alone is not evidence of a pending call. Permit configured MCPs without a server-name
+allowlist and without disabling them; this is not an `agentdeck`-only exception.
+
+The engine guarantees the node and its tool calls: prevent new calls after sealing
+and await completion of calls actually started before accepting Choice. Shared MCP
+server shutdown is not required or guaranteed. A response such as "task started"
+completes the call's lifecycle responsibility; the detached remote task continuing
+past that response is outside this guarantee and is not thereby deemed successful.
+
+Error/cancellation or loss of the callback without evidence of call completion must
+record uncertain finality. Process exit, an empty owned Job, closing the MCP client
+or requesting cancellation cannot substitute for a missing call result or prove
+remote cancellation. Preserve uncertain-finality handling; do not accept Choice
+or report a normal result merely because the local callback/process died.
+Grants, native approval flows and sandbox settings remain unchanged.
+
+The adapter implementer owns the parallel implementation. This contract update
+does not claim a new build, test or restart. The principal coordinates the requested
+restart after the build, then the user reloads the tab and retests. See
+`GRAPH_ENGINE_PROGRESS_EXTERNAL_MCP_DOCS.md` at the repository root.
+
+Internal instructions live in `engine/prompts/` and are reread for every send.
+Development uses that source directory. Packaged engines can include a sibling
+`prompts/` directory or set `KLM_PROMPTS_DIR`. Missing/empty prompts fail explicitly.
+With `go -C engine build`, the resulting `engine/engine.exe` also has the existing
+`engine/prompts/` as its sibling resource directory. Neither default lookup relies
+on the server's working directory. For an explicit development override, from the
+repository root use `$env:KLM_PROMPTS_DIR = (Resolve-Path .\engine\prompts).Path`
+before launching the engine. No prompt is read as a package-initialization side
+effect; the factory is registered in `init()` and prompts are loaded when needed.
+See `GRAPH_ENGINE_PROGRESS_CORE.md` and `GRAPH_ENGINE_PROGRESS_ADAPTER.md` at the
+repository root for integration contracts and actual verification evidence.

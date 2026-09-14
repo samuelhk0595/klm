@@ -2,6 +2,7 @@ import type { Harness } from '../../engine';
 
 // UI-only records. Model/effort/harness values below are visual fixtures, not execution defaults.
 export type Agent = {
+  revision?: string;
   id: string;
   name: string;
   description: string;

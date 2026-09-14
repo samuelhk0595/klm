@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { IconButton } from '../../design-system/Button';
 import { ProjectActionsMenu } from './ProjectActionsMenu';
 import type { Project } from '../../engine';
+import { IS_MOBILE_HOST, returnToHosts } from '../../platform';
 
 export function ProjectRail({ projects, activeId, onSelect, onEdit, onRemove, onAdd, onSettings, adding = false }: {
   projects: Project[]; activeId: string; onSelect: (project: Project) => void; onEdit: (project: Project) => void; onAdd: () => void; adding?: boolean;
@@ -18,7 +19,9 @@ export function ProjectRail({ projects, activeId, onSelect, onEdit, onRemove, on
     catch { /* Theme switching still works when browser storage is unavailable. */ }
   }, [theme]);
   return <nav className="project-rail" aria-label="Projects">
-    <div className="rail-brand" title="KLM"><span className="brand-mark" aria-hidden="true" /><span className="sr-only">KLM</span></div>
+    {IS_MOBILE_HOST
+      ? <IconButton label="Hosts" className="rail-brand" data-klm-host-navigation onClick={returnToHosts}><span className="brand-mark" aria-hidden="true" /></IconButton>
+      : <div className="rail-brand" title="KLM"><span className="brand-mark" aria-hidden="true" /><span className="sr-only">KLM</span></div>}
     <div className="project-icons">{projects.map(project => <ProjectActionsMenu key={project.id} project={project} onEdit={onEdit} onRemove={onRemove}
       open={contextMenu?.projectId === project.id} position={contextMenu?.projectId === project.id ? contextMenu : undefined}
       onOpenChange={open => { if (!open) setContextMenu(current => current?.projectId === project.id ? null : current); }}

@@ -41,7 +41,7 @@ func (p *adapter) internalOpenCodeTool(name string) bool {
 	if !p.ownsLinkedBridge("klm_linked") {
 		return false
 	}
-	for _, tool := range linkedTools() {
+	for _, tool := range p.bridgeTools() {
 		if name == "klm_linked_"+str(tool, "name") {
 			return true
 		}
@@ -84,6 +84,11 @@ func linkedAskResult(c Consultation, reciprocal bool) map[string]any {
 }
 
 func (p *adapter) startLinkedBridge() (*linkedBridge, error) {
+	if p.graphNode() {
+		if err := CheckGraphAdapter(p.harness); err != nil {
+			return nil, err
+		}
+	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, errors.New("Could not start the linked-agent bridge.")
@@ -148,7 +153,19 @@ func (b *linkedBridge) serve(w http.ResponseWriter, r *http.Request) {
 		result = map[string]any{}
 	case "tools/list":
 		b.once.Do(func() { close(b.ready) })
-		result = map[string]any{"tools": linkedTools()}
+		result = map[string]any{"tools": b.p.bridgeTools()}
+	case "klm/graph/gate":
+		if err := b.p.graphGate(); err != nil {
+			respond(w, 200, map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{"code": -32000, "message": err.Error()}})
+			return
+		}
+		result = map[string]any{"allowed": true}
+	case "klm/graph/opencode":
+		if err := b.p.openCodeGraphGate(message.Params); err != nil {
+			respond(w, 200, map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{"code": -32000, "message": err.Error()}})
+			return
+		}
+		result = map[string]any{"allowed": true}
 	case "tools/call":
 		var params struct {
 			Name      string          `json:"name"`
@@ -158,7 +175,7 @@ func (b *linkedBridge) serve(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "Invalid tool call.")
 			return
 		}
-		value, err := b.call(r.Context(), params.Name, params.Arguments)
+		value, err := b.call(r.Context(), params.Name, params.Arguments, string(message.ID))
 		text := ""
 		if err != nil {
 			text = err.Error()
@@ -174,7 +191,30 @@ func (b *linkedBridge) serve(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, map[string]any{"jsonrpc": "2.0", "id": message.ID, "result": result})
 }
 
-func (b *linkedBridge) call(ctx context.Context, name string, raw json.RawMessage) (any, error) {
+func (b *linkedBridge) call(ctx context.Context, name string, raw json.RawMessage, callIDs ...string) (any, error) {
+	// Inventory and dispatch use the same purpose-scoped capability. A node token
+	// cannot acquire linked tools by guessing their names or conversation IDs.
+	known := false
+	for _, tool := range b.p.bridgeTools() {
+		known = known || str(tool, "name") == name
+	}
+	if !known {
+		return nil, errors.New("Tool is not available to this turn capability.")
+	}
+	if !strings.HasPrefix(name, "linked_") {
+		a, p := b.p.app, b.p
+		a.mu.Lock()
+		active := !a.closing && a.storageErr == nil && a.runs[p.id] == p.turn && p.turn.ctx.Err() == nil
+		a.mu.Unlock()
+		if !active {
+			return nil, errors.New("Graph tool turn is no longer active.")
+		}
+		callID := newID()
+		if len(callIDs) > 0 {
+			callID = callIDs[0]
+		}
+		return p.callGraphTool(ctx, name, callID, raw)
+	}
 	var args struct {
 		Topic     string `json:"topic"`
 		Question  string `json:"question"`

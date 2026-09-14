@@ -3,8 +3,8 @@ import { MessageCircle } from 'lucide-react';
 import { Button } from '../../design-system/Button';
 import { request, type QuestionRequest, type Session } from '../../engine';
 
-export function QuestionCard({ question, sessionId, onResolved }: {
-  question: QuestionRequest; sessionId: string; onResolved: (session: Session) => void;
+export function QuestionCard({ question, sessionId, origin, onResolved }: {
+  question: QuestionRequest; sessionId: string; origin?: string; onResolved: (session: Session) => void;
 }) {
   const [responses, setResponses] = useState(() => question.items.map(() => ({ selected: [] as string[], custom: '' })));
   const [submitting, setSubmitting] = useState(false);
@@ -30,6 +30,7 @@ export function QuestionCard({ question, sessionId, onResolved }: {
   const harness = question.harness === 'opencode' ? 'OpenCode' : question.harness === 'pi' ? 'Pi' : 'Codex';
   return <form className="permission-card question-card" aria-label={`${harness} question`} onSubmit={event => { event.preventDefault(); void submit(); }}>
     <div className="permission-heading"><MessageCircle aria-hidden="true" /><strong>Your input</strong><span>{harness}</span></div>
+    {origin && <p className="permission-description">{origin}</p>}
     {question.items.map((item, index) => <fieldset key={item.id} className="question-item" disabled={busy}>
       <legend>{item.header || `Question ${index + 1}`}{item.multiple && <span className="muted"> · Select one or more</span>}</legend>
       <p className="question-prompt">{item.text}</p>

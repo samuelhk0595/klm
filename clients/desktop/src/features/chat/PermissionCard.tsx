@@ -3,8 +3,8 @@ import { ShieldQuestion } from 'lucide-react';
 import { Button } from '../../design-system/Button';
 import { request, type PermissionDecision, type PermissionRequest, type Session } from '../../engine';
 
-export function PermissionCard({ permission, sessionId, projectName, onResolved }: {
-  permission: PermissionRequest; sessionId: string; projectName: string; onResolved: (session: Session) => void;
+export function PermissionCard({ permission, sessionId, projectName, origin, onResolved }: {
+  permission: PermissionRequest; sessionId: string; projectName: string; origin?: string; onResolved: (session: Session) => void;
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -21,6 +21,7 @@ export function PermissionCard({ permission, sessionId, projectName, onResolved 
   const harness = permission.harness === 'opencode' ? 'OpenCode' : permission.harness === 'pi' ? 'Pi' : 'Codex';
   return <section className="permission-card" aria-label={`${harness} permission request`}>
     <div className="permission-heading"><ShieldQuestion aria-hidden="true" /><strong>{permission.title || 'Permission required'}</strong><span>{harness}</span></div>
+    {origin && <p className="permission-description">{origin}</p>}
     {permission.description && permission.description !== permission.patterns.join('\n') && <p className="permission-description">{permission.description}</p>}
     {permission.patterns.length > 0 && <ul className="permission-patterns">{permission.patterns.map((pattern, index) => <li key={index}><code>{pattern}</code></li>)}</ul>}
     {permission.details && <details className="permission-details"><summary>Request details</summary><pre>{JSON.stringify(permission.details, null, 2)}</pre></details>}

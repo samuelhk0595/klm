@@ -5,22 +5,28 @@ import { Menu, MenuItem } from '../../design-system/Menu';
 import type { Graph } from '../graphs/demo';
 import '../graphs/graph-running-led.css';
 
-export function GraphPicker({ graphs, value, running = false, onChange }: {
+export function GraphPicker({ graphs, value, selectedName, running = false, disabled = false, loading = false, error, onReload, onChange }: {
   graphs: Graph[];
   value: string;
   running?: boolean;
+  selectedName?: string;
+  disabled?: boolean;
+  loading?: boolean;
+  error?: string;
+  onReload?: () => void;
   onChange: (graphId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const options = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  const selected = graphs.find(graph => graph.id === value && graph.enabled);
+  const selected = graphs.find(graph => graph.id === value);
+  const label = selectedName ?? selected?.name ?? (value || 'Select graph');
   const searchable = graphs.length > 5;
   const query = searchable ? search.trim().toLowerCase() : '';
   const matches = graphs.filter(graph => `${graph.name} ${graph.description}`.toLowerCase().includes(query));
 
-  function choose(graphId: string) { onChange(graphId); setOpen(false); }
+  function choose(graphId: string) { if (!disabled) onChange(graphId); setOpen(false); }
 
   function navigate(event: KeyboardEvent<HTMLDivElement>) {
     const inSearch = event.target instanceof HTMLInputElement;
@@ -42,8 +48,8 @@ export function GraphPicker({ graphs, value, running = false, onChange }: {
     event.preventDefault(); items[next].focus(); items[next].scrollIntoView({ block: 'nearest' });
   }
 
-  return <Menu label="Graphs" className="model-menu graph-picker-menu" align="start" open={open} onOpenChange={next => { setSearch(''); setOpen(next); }} trigger={props => <Button {...props} variant="ghost" size="sm" className="model-picker-trigger graph-picker-trigger" aria-label={`Choose graph: ${selected?.name ?? 'None'}`} title={selected?.name}>
-    {running && selected ? <span className="graph-picker-run-indicator" role="img" aria-label="Graph run in progress" title="Graph run in progress" /> : <Workflow />}<span className="graph-picker-name">{selected?.name ?? 'Select graph'}</span><ChevronDown />
+  return <Menu label="Graphs" className="model-menu graph-picker-menu" align="start" open={open} onOpenChange={next => { setSearch(''); setOpen(next); if (next) onReload?.(); }} trigger={props => <Button {...props} disabled={disabled} variant="ghost" size="sm" className="model-picker-trigger graph-picker-trigger" aria-label={`Choose graph: ${value ? label : 'None'}`} title={label}>
+    {running && value ? <span className="graph-picker-run-indicator" role="img" aria-label="Graph run in progress" title="Graph run in progress" /> : <Workflow />}<span className="graph-picker-name">{label}</span><ChevronDown />
   </Button>}>
     <div ref={options} onKeyDown={navigate}>
       {searchable && <div className="model-menu-search"><input data-menu-autofocus type="search" aria-label="Search graphs" placeholder="Search graphs" value={search} onChange={event => { setSearch(event.target.value); list.current?.scrollTo({ top: 0 }); }} /></div>}
@@ -51,9 +57,9 @@ export function GraphPicker({ graphs, value, running = false, onChange }: {
         {matches.map(graph => <MenuItem key={graph.id} className="model-menu-option graph-picker-option" selected={selected?.id === graph.id} disabled={!graph.enabled} title={graph.description} onClick={() => choose(graph.id)}>
           <span><span className="model-menu-option-name">{graph.name}</span><small>{graph.enabled ? graph.description : 'Disabled'}</small></span>{selected?.id === graph.id && <Check />}
         </MenuItem>)}
-        {!matches.length && <p className="menu-feedback muted" role="status">{query ? 'No matching graphs.' : 'No graphs available.'}</p>}
+        {error ? <p className="menu-feedback" role="alert">{error}</p> : !matches.length && <p className="menu-feedback muted" role="status">{loading ? 'Loading graphs...' : query ? 'No matching graphs.' : 'No graphs available.'}</p>}
       </div>
-      <div className="model-menu-footer"><MenuItem selected={!selected} onClick={() => choose('')}>None{!selected && <Check />}</MenuItem></div>
+      <div className="model-menu-footer"><MenuItem selected={!value} onClick={() => choose('')}>None{!value && <Check />}</MenuItem></div>
     </div>
   </Menu>;
 }

@@ -1,33 +1,74 @@
 # KLM Desktop
 
-React 19 + TypeScript + Vite client for the standalone [Go engine](../../engine/README.md).
-The original `../../code.html` is preserved. This is a browser client, not a native
-desktop wrapper; native folder selection is handled by the local engine.
+React 19 + TypeScript + Vite, packaged as a Tauri 2 Windows client for the standalone
+[Go engine](../../engine/README.md). The same build runs in a browser. The original
+`../../code.html` is preserved; native folder selection belongs to the engine PC.
 
 ## Run
 
-Start `go -C engine run .` from the project root. Then, from `clients/desktop`:
+Build the development engine with `go -C engine build -tags dev -o klm-dev.exe .`
+from the repository root and start it with `.\engine\klm-dev.exe start`.
+From `clients/desktop`:
 
 ```sh
 npm install
 npm run dev
 ```
 
-The client calls `http://127.0.0.1:7331` directly. Set `VITE_ENGINE_URL` to override
-that endpoint. Production assets can be built with `npm run build` and served with
-`npm run preview`. Both require the separate engine for application features.
+For the native client, use `npm run desktop:dev`; Rust/MSVC/WebView2 prerequisites
+are required. `npm run desktop:build` builds frontend, Rust and a per-user NSIS
+installer in `src-tauri/target/release/bundle/nsis`. No engine is bundled or started.
+
+`src/platform.ts` resolves fetch and SSE to `http://localhost:7331` inside Tauri and
+to the browser page's hostname on port 7331. `VITE_ENGINE_URL` is a development
+override. The production desktop CSP permits the default local API; a custom
+packaged endpoint also needs an explicit CSP adjustment in `tauri.conf.json`.
+`npm run build` / `npm run preview` remain available for browser development.
+
+Vite dev uses API port **17331**. `desktop:dev` applies `tauri.dev.conf.json` for
+an independent app instance and serves Focus on **17332**, also targeting **17331**.
+The embedded Focus snapshot selects the dev API by its web port. Vite HMR remains
+on **5173**; ordinary production builds and previews default to API **7331**.
+The dev engine keeps data and local start/stop control separate in
+`%APPDATA%\klm\engine-dev`.
+
+## Desktop and Focus Lifecycle
+
+The desktop fills the WebView without the web page's outer gradient or margins.
+Header drag moves the native window; browser header drag still moves the app shell.
+Detection uses Tauri context rather than hostname. Closing the native window hides
+it to the tray. **Open** restores it; **Exit** stops Tauri and its web listener.
+Launching a second shortcut restores the existing instance.
+
+Rust embeds the same Vite `dist` assets and serves them on `0.0.0.0:7332`, with MIME
+types, GET/HEAD, SPA fallback and no filesystem access outside embedded assets.
+**Focus**, between **Session log** and **Side agent**, opens `http://localhost:7332`
+in the default browser. The button is absent in web mode. Port collisions show an
+error; Focus never opens an unknown listener. On another device, use
+`http://IP-OF-ENGINE-COMPUTER:7332`. The engine remains on that host, port 7331.
+
+The server lives with Tauri, including while hidden, and shuts down on Exit. It
+requires no Node/Vite at runtime. In development, the embedded Focus build is the
+snapshot produced before `desktop:dev`; Vite HMR applies to the native dev window.
+Rebuild/restart to update the embedded browser assets.
+
+Persisted data is shared through the engine. Unsent drafts, localStorage and WebView
+state are per-client and are not transferred by Focus. HTTP LAN pages use a
+`getRandomValues`-based UUID fallback; unavailable browser clipboard APIs retain
+the existing manual-copy recovery. Native directory dialogs still open on the engine PC.
 
 ## Structure
 
 ```text
 src/
+  platform.ts           Native context, endpoint resolution and Focus/window actions
   engine.ts             HTTP client, shared API types, native picker request
   design-system/        Domain-independent primitives, tokens, and shared styles
   features/projects/    Project rail and creation form
   features/workspace/   Sessions sidebar and creation dialog
   features/chat/        Main/side chats, composers, consultation activity, harness events
-  features/agents/      Agent catalog and editor with static fixtures
-  features/graphs/      Graph list and temporary authoring canvas
+  features/agents/      File-backed agent catalog/editor and real harness catalogs
+  features/graphs/      File-backed authoring, YAML/canvas mapping, catalog and run monitor
   App.tsx               Engine state, SSE subscriptions, and application composition
   DesignSystem.tsx      Interactive gallery with isolated static examples
 ```
@@ -37,20 +78,39 @@ dimensions. Primitive styles are in `design-system/styles.css`; app layout is in
 `styles.css`. Import components directly and keep service calls outside generic
 UI primitives. Inter fonts and Lucide icons are bundled without CDN dependencies.
 
-## Authoring Prototypes
+## Agents and Graphs
 
-Agents and Graphs use static fixtures in the main application, not only in the
-design-system gallery. The agent catalog, models, harness compatibility and graph
-references are simulated. Agent deletion/disable checks use those reference
-fixtures; they do not inspect canvas topology. Agent and graph lists are held in
-memory per project until reload.
+`ProjectAuthoring.tsx` shares the engine-backed project catalog with the chat picker
+through `features/graphs/catalog.ts`. Agents and Graphs are file-backed CRUD screens.
+They reload when revisited and invalidate the catalog after mutations; failed saves keep
+the form open and display the error. Revisions prevent stale edits overwriting
+newer saved definitions. Invalid project files are reported rather than replaced
+with fixtures.
 
-New graph opens a temporary canvas. Existing graph tiles edit their list metadata,
-not topology. Apply saves node settings in the current canvas only; there is no
-action to create a list record from that canvas or persist YAML/layout. Leaving
-the canvas discards it. AI agent settings update immediately; other node panels
-use Apply/Cancel. Cancelling configuration of a newly added node leaves its
-initial draft on the canvas.
+Agents use the selected harness's real model catalog. The form saves the model ID,
+requires effort when configurable, and stores the prompt directly in the agent's
+TOML. The identifier is derived from the name. Enable/Disable persists; referenced
+agents cannot be disabled/deleted, and renaming updates saved graph references.
+
+New graph opens a modal with required Name and optional Description. Create opens
+an identified draft canvas. Graph tiles reopen saved topology. Graph details edits
+name/description; Save persists the definition and registers a new graph. AI agent
+settings update the canvas immediately; other panels use Apply/Cancel. Close node
+settings before Save. Cancelling a new node's configuration leaves its draft in the
+canvas; incomplete required settings are rejected on Save.
+
+Layout autosaves on drag release and user viewport changes, separately from YAML.
+Before first Save it uses a unique draft layout filename; the first Save moves it
+to the graph's companion filename. Layout-only drafts do not appear in the catalog.
+Old positions are retained for saved nodes removed/renamed in an unsaved edit, so
+layout autosave does not erase the last saved definition's presentation. Layout
+failures expose Retry. Leaving the editor discards unsaved definition changes.
+
+`files.ts` maps the executable YAML definition to canvas nodes/connections and back.
+Layout stores positions/viewport only, never executable topology. Without layout,
+nodes get deterministic fallback positions. This CRUD does not establish that a
+saved graph is executable: disconnected authoring nodes can still be saved; runtime
+preflight separately checks completeness and the approved execution contracts.
 
 The initial node can be AI agent or Terminal command. The canvas catalog also
 includes Choice, Fork and Join. AI agent and Join nodes connect to Choices.
@@ -59,23 +119,39 @@ cleared when its outgoing connection or destination is removed. Choice input/out
 and Fork output field names use the same normalization as Choice names: lowercase,
 spaces converted to underscores, accents folded, other symbols removed, and
 edge underscores stripped on blur/apply. Payload values retain their text.
-Form and connection checks support visual editing,
-not validation of an executable graph: drafts may have unselected agents or
-unconnected destinations. Fork output fields currently validate names only;
-the variable picker offers run.input.task, without reference resolution or a
-payload preview. The Choice preview has its own local validation and interpolation.
+Choice output remains editable for End graph, with no destination/session policy.
+The shared output editor validates the restricted template grammar and offers
+immediately connected payload fields rather than global node-result lookup:
 
-Worktree and branch settings describe intended execution; there are no Git
-operations, shell command execution, graph runs or harness submissions here.
-Integration, synchronization and execution contracts remain under refinement.
+- Choice output: `choice.<declared field>` and `run.input.task`.
+- Fork output: `payload.<field>` and `run.input.task`.
+- Terminal output: the Fork references plus `command.result`.
+
+Terminal has a flat output editor and JSON preview. Missing output means `{}`, not
+implicit input forwarding; Command remains literal PowerShell with `$payload`
+provided as data by the engine. Each Fork branch has **Separate worktree**, default
+true even when absent in older files. Turning it off preserves the configured Git
+branch name without requiring or using it to create a branch. `files.ts` roundtrips
+Terminal `output` and branch `separate_worktree` through the engine's YAML contract.
+Previews perform local validation/interpolation, not harness submissions.
+
+The Go engine implements invocation, private node sessions, Choice acceptance,
+PowerShell commands, workspace tracking, parallel branches and Join-agent integration.
+Authoring only saves definitions; execution begins through the main-chat
+orchestrator's tools under the user's authorization and workspace decision.
+
+## Chat Graph Selection and Monitor
 
 The main chat composer shows a graph picker at bottom left, opposite the model
-and effort controls. It uses the selected project's graph fixtures/local list.
+and effort controls. It uses the selected project's file-backed catalog.
 All graphs are listed; disabled ones cannot be selected. Up to five graph rows
 are visible, with search only when the catalog has more than five graphs. None
-clears the selection. Selection is kept per chat in browser memory until reload;
-renames retain the selected ID, while disabling/deleting a graph clears its
-selections in that project. It is not sent to the engine or used by Send yet.
+clears the selection through the engine. Selection persists per conversation via
+GET/PATCH `/api/sessions/{id}/graph`, independently of Send; PATCH uses
+`{"selectedGraphId":"id"}` or `{"selectedGraphId":""}` for None. Starting an authorized
+run selects its graph atomically. Rename/delete reconcile through engine state; unavailable
+selections and catalog errors remain recoverable rather than silently becoming None.
+Failed loads preserve the last known catalog and show Retry; fixtures are not a fallback.
 The gallery's Composer example has six graphs to demonstrate search and scrolling.
 Model and graph search inputs omit the thick external focus outline.
 The graph menu aligns its left edge with the picker and extends rightward to
@@ -86,56 +162,42 @@ without switching tabs automatically. Graph shows a read-only React Flow canvas
 using the authoring cards, with pan, zoom and Reset view. Nodes cannot be moved,
 connected, removed or edited, and the authoring catalog is not exposed.
 The composer and Session Status Bar appear only in Chat, preserving the draft while
-Graph is open. None hides Graph and returns to Chat; deleting
-or disabling the selected graph also removes the tab. Tab selection is local to
+Graph is open. None hides Graph and returns to Chat without cancelling the run or
+removing its pending requests. Selecting/opening Graph does not execute it, and
+switching views does not control its lifecycle. Tab selection is local to
 each chat. Changing graphs while viewing Graph loads the new drawing and fits it.
 
-`features/graphs/graph-view-demo.ts` provides distinct fictional drawings keyed by
-the three catalog graph IDs. Renaming a graph retains its drawing. These are not
-saved builder canvases or executable definitions; New graph still has no save
-action.
+`GraphView.tsx` renders a real `GraphRecord`. When the selection matches the active
+run, it uses `run.snapshot`, including captured layout or deterministic fallback
+positions. `run.graphId` tracks catalog identity while `run.snapshot.id` retains the
+captured identity. Agent TOMLs are not part of this frontend DTO: the active monitor
+does not present live-catalog model settings as if they were captured run settings.
 
-CSV export opens focused on its first activities. The current visual experiment
-replaces the active element's LED border with a vertical pink-to-blue shimmer across
-the card body, without tilt. It travels back and forth, taking 4.5 seconds per direction
-with ease-in-out motion. The overlay follows
-the card's corners and does not intercept clicks or clip connection handles.
-Reduced-motion preferences disable the shimmer. The small dot beside Running
-blinks in discrete steps: 500ms blue with glow, 500ms gray without glow. This applies
-to the card and panel indicators. Reduced-motion preferences keep them steady.
-All graph cards share the moderate `--shadow-card` resting shadow, including Choice
-and Fork. The animated shimmer remains separate from that shadow. An explicit
-initial-node flag displays **Start** in the agent or terminal header, in both the
-authoring canvas and catalog drawings; it is not inferred from node position.
-While a graph run is active, clicking any agent, Choice, Fork, Join or terminal card
-(also keyboard-accessible) opens a floating panel above the canvas controls without resizing or moving nodes.
-Close or Escape dismisses it and returns focus to that card. Reset view fits the
-whole graph.
+`ConversationGraphState` carries the selection, monotonic revision, active-run
+projection and node requests. HTTP/SSE merges ignore older graph revisions; a legacy
+Session response without `graph` preserves the last known projection. Initial
+hydration and small graph polling complement global state refresh and SSE, including
+conversations with active graph runs while the orchestrator is idle. An authoritative
+`run:null` clears activity/LED and returns to idle configuration.
 
-The panel has **Run**, **Input** and **Output** tabs in the same 54px header, replacing
-the agent subtitle. The body remains 200px high. Run shows concise, non-expandable
-logs, following new entries unless the user scrolls up. Input displays received JSON.
-Output is blank while pending/running; a completed agent shows its selected Choice
-and submitted payload. The Choice has its own input and transformed destination
-output, rather than treating those two payloads as interchangeable.
+The monitor shows all active and actually completed nodes, including parallel work
+and revisits. Active takes precedence over earlier completion; Join **Collecting**
+is distinct from its agent **Running**. Raw completed Choice IDs gain `choice:` only
+in the canvas. Completion never marks unexecuted nodes or retains a run-history view.
 
-`graph-run-demo.ts` provides fictional snapshots driven locally by `GraphView.tsx`:
-Plan CSV export completes at 24 seconds, ready processes its payload, and Implement
-export starts at 27 seconds. Planning/Choice results remain available when selecting
-other cards and returning. Implementation logs loop while later elements remain
-pending with empty tabs. Opening Graph for the first time starts the local CSV
-simulation; selecting a graph alone does not. The clock, canvas viewport and inspected
-activity remain mounted across Chat/Graph switches, with the canvas hidden in Chat.
-A blinking LED beside the Graph tab label follows the preview's running state and
-remains visible in Chat. During a run, the graph picker replaces its left graph icon
-with the same blinking LED as the nodes; its name is always plain text. Idle/None
-selections show the usual graph icon. Shared LED styles live in `graph-running-led.css`
-and respect reduced-motion preferences. The text-shimmer experiment was removed;
-the card keeps its pastel shimmer in `graph-shimmer.css`.
-Changing/clearing the graph selection or leaving the session
-view unmounts the preview and clears its running indicator. This is not a complete simulation of Fork/Join or graph
-execution contracts. It runs no tools, writes no files and does not affect engine
-state or persisted chat history. Timeline tracking and real execution remain pending.
+The graph picker replaces its icon with the running LED only when its selection
+matches the conversation's active run, including starting/ending and human waits.
+The name remains plain text. The LED is in the composer selector, not the Graph tab.
+Cards retain the pink-to-blue body shimmer, Running indicator and `--shadow-card`;
+reduced-motion preferences disable the shimmer and keep LEDs steady. Styles remain
+in `graph-shimmer.css` and `graph-running-led.css`. The initial agent or Terminal
+keeps its explicit **Start** badge.
+
+Earlier CSV timers, fictional drawings and Run/Input/Output panels are historical
+visual experiments; their files remain outside the production monitor's imports.
+Section 12 of [the refinement record](../../GRAPH_AUTHORING_REFINEMENT.md) takes
+precedence: the delivered monitor has no execution-detail panels, separate run tabs,
+history browser or new sidebar request component. Results still reach the orchestrator.
 
 Without an active graph run, clicking a card opens `NodeConfigurationPanel.tsx` in
 the same right-side floating position and shell as the authoring panels. It renders
@@ -146,9 +208,36 @@ names, destinations, worktrees, Git branches, base revision and output fields; J
 agent, additional prompt and output Git branch; terminal name and command.
 There are no Apply/Cancel, edit, add/remove or preview-editing actions. Close and
 Escape return focus to the card. Required/Optional is provisional plain text rather
-than a toggle. Bug fix's request_changes and Code review's outcomes include fictional
-contract fields to demonstrate this view. CSV export remains the active-run example,
-where even pending nodes open the bottom activity panel rather than configuration.
+than a toggle. Values come from the real catalog; terminal Choice output, Terminal
+output mapping and per-branch isolation are included. Active runs expose progress
+without opening these configuration panels.
+
+Graph-node questions/permissions reuse `PermissionCard` and `QuestionCard` above
+the main composer with graph/node origin. Replies use the projected native
+`sessionId` and `requestId`, then refresh the owning conversation; private node
+sessions stay outside the session browser. None keeps these requests available,
+and a waiting node does not disable an idle orchestrator's composer. Answers are
+tool replies, not ordinary chat messages; grants keep their native scope.
+
+### Runtime validation status
+
+Windows mechanisms for Pi, OpenCode and Codex are implemented, with
+`RuntimeValidated=false`. OpenCode requires version **1.18.30** and the owned plugin;
+the 2026-09-13 decision in refinement section 14 replaces the preventive external-MCP
+configuration ban. Permit configured MCPs in OpenCode/Codex without name allowlists
+or disabling them. Node sealing blocks new calls and Choice waits for calls actually
+started to complete; shared MCP servers and detached tasks beyond the tool response
+need not terminate. A "task started" response completes the call, not the task.
+Missing completion evidence after error/cancellation or a lost callback remains
+uncertain finality, not a normal result or proof of remote cancellation. Existing
+grants/sandbox and permission cards keep their behavior. This is the approved
+contract, not evidence of updated runtime validation or restart.
+Unix graph execution is not enabled. The frontend's reported
+`npx tsc --noEmit` check covers TypeScript compilation, not real model execution,
+Choice finality or native continuation. Human validation of integrated selection,
+reload/reconnection, parallel/Join progress, requests with None and authoring roundtrip
+remains pending. See the current [frontend](../../GRAPH_ENGINE_PROGRESS_FRONTEND.md)
+and [adapter](../../GRAPH_ENGINE_PROGRESS_ADAPTER.md) reports for evidence and limits.
 
 ## Behavior
 

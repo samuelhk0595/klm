@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "tauri": "tauri",
+    "desktop:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "desktop:build": "tauri build --bundles nsis",
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
@@ -11,6 +14,7 @@
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
+    "@tauri-apps/api": "^2.11.1",
     "@xyflow/react": "^12.11.6",
     "lucide-react": "^0.468.0",
     "mermaid": "^12.0.0",
@@ -20,6 +24,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@testing-library/user-event": "^14.6.1",

@@ -43,7 +43,7 @@ func (d *diskState) consultation(id string) *Consultation {
 
 func (d *diskState) linked(id string) *Session {
 	s := d.session(id)
-	if s == nil {
+	if s == nil || s.GraphRunID != "" {
 		return nil
 	}
 	if s.ParentID != "" {
@@ -242,6 +242,8 @@ func (a *app) scheduleLinkedLocked() {
 	if a.closing || a.storageErr != nil {
 		return
 	}
+	a.scheduleGraphActivitiesLocked()
+	a.scheduleGraphNotificationsLocked()
 	for _, request := range a.state.Consultations {
 		id, delivery := request.To, false
 		if consultationTerminal(request.Status) && request.Delivery == "pending" {

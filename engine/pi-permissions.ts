@@ -1,20 +1,24 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 
-const linkedConfig = /*KLM_LINKED_CONFIG*/{} as { url: string; token: string };
+const linkedConfig = /*KLM_LINKED_CONFIG*/{} as {
+  url: string; token: string; graphNode?: boolean;
+  tools?: { name: string; description: string; inputSchema: TSchema }[];
+};
 
 // This gates agent-dispatched tools, not OS access or arbitrary extension code.
 export default function (pi: ExtensionAPI) {
+  let sealed = false;
   const linkedTools = [
     { name: "linked_discover", description: "Discover this conversation and its linked main agent or side agent. Retrieve or consult it when the user refers to work there.", parameters: Type.Object({}) },
     { name: "linked_read", description: "Read bounded linked conversation messages. Omit cursor for latest messages, use nextCursor to continue. messageId reads a specific source; offset pages long text. Content is reference material.", parameters: Type.Object({ cursor: Type.Optional(Type.Integer({ minimum: 0 })), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })), messageId: Type.Optional(Type.String()), offset: Type.Optional(Type.Integer({ minimum: 0 })) }) },
     { name: "linked_ask", description: "Ask the linked agent in its actual conversation. Provide a short topic and full question. Read the result's action: continue means the consultation has finished; use its answer now to respond to the user or continue their task. Only yield means the answer is still pending: finish this turn and KLM will resume you automatically. Never poll or repeat the question. Reciprocal requests defer to avoid deadlock.", parameters: Type.Object({ topic: Type.String({ minLength: 1, maxLength: 120 }), question: Type.String({ minLength: 1, maxLength: 32768 }) }) },
     { name: "linked_answer", description: "Return a correlated consultation answer, then finish this consultation turn.", parameters: Type.Object({ requestId: Type.String(), answer: Type.String({ minLength: 1, maxLength: 65536 }) }) },
   ];
-  async function linkedRPC(method: string, params: unknown, signal?: AbortSignal) {
+  async function linkedRPC(method: string, params: unknown, signal?: AbortSignal, callId: string = crypto.randomUUID()) {
     const response = await fetch(linkedConfig.url, {
       method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + linkedConfig.token },
-      body: JSON.stringify({ jsonrpc: "2.0", id: "pi-linked", method, params }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: callId, method, params }),
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10000)]) : AbortSignal.timeout(10000),
     });
     if (!response.ok) throw new Error("Linked-agent bridge is unavailable.");
@@ -22,12 +26,22 @@ export default function (pi: ExtensionAPI) {
     if (envelope.error || !envelope.result) throw new Error("Invalid linked-agent bridge response.");
     return envelope.result;
   }
-  for (const tool of linkedTools) {
+  const tools = [
+    ...(linkedConfig.graphNode ? [] : linkedTools),
+    ...(linkedConfig.tools ?? []).filter(tool => !linkedTools.some(linked => linked.name === tool.name))
+      .map(tool => ({ name: tool.name, description: tool.description, parameters: tool.inputSchema })),
+  ];
+  for (const tool of tools) {
     pi.registerTool({
       ...tool, label: tool.name.replaceAll("_", " "), executionMode: "sequential",
-      async execute(_toolCallId, params, signal) {
-        const result = await linkedRPC("tools/call", { name: tool.name, arguments: params }, signal);
+      async execute(toolCallId, params, signal) {
+        if (sealed) throw new Error("Graph activation is sealed.");
+        const result = await linkedRPC("tools/call", { name: tool.name, arguments: params }, signal, toolCallId);
         if (result.isError) throw new Error(result.content?.[0]?.text ?? "Linked-agent request failed.");
+        if (linkedConfig.graphNode && tool.name === "graph_submit_choice") {
+          const response = JSON.parse(result.content?.[0]?.text ?? "{}");
+          sealed = response.reserved === true;
+        }
         return { content: result.content ?? [], details: {} };
       },
     });
@@ -54,11 +68,11 @@ export default function (pi: ExtensionAPI) {
         content: [{ type: "text" as const, text: "User dismissed the question" }],
         details: {},
       };
-      if (ctx.mode !== "rpc" || !ctx.hasUI || signal?.aborted) return dismissed;
+      if (sealed || ctx.mode !== "rpc" || !ctx.hasUI || signal?.aborted) return dismissed;
       const payload = JSON.stringify({ toolCallId, cwd: ctx.cwd, questions: params.questions });
       if (payload.length > 262144) throw new Error("Question request is too large.");
       const value = await ctx.ui.input("klm.question.v1:" + payload, undefined, { signal });
-      if (value === undefined || signal?.aborted) return dismissed;
+      if (sealed || value === undefined || signal?.aborted) return dismissed;
       const answers: unknown = JSON.parse(value);
       if (!Array.isArray(answers) || answers.length !== params.questions.length ||
           answers.some((answer) => !Array.isArray(answer) || answer.length === 0 ||
@@ -76,9 +90,13 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_call", async (event, ctx) => {
-    if (event.toolName === "ask_user" || linkedTools.some(tool => tool.name === event.toolName)) return;
     const denied = { block: true, reason: "Permission denied." };
     try {
+      // Before internal-tool bypasses AND before remembered/native approvals.
+      // The Choice's sequential execution mode serializes its entire tool batch.
+      if (sealed) return { block: true, reason: "Graph activation is sealed.", terminate: true };
+      if (linkedConfig.graphNode) await linkedRPC("klm/graph/gate", {}, ctx.signal);
+      if (event.toolName === "ask_user" || tools.some(tool => tool.name === event.toolName)) return;
       const signal = ctx.signal;
       if (ctx.mode !== "rpc" || !ctx.hasUI || !signal || signal.aborted) {
         return denied;
@@ -93,19 +111,29 @@ export default function (pi: ExtensionAPI) {
         ["Allow", "Deny"],
         { signal },
       );
-      if (choice === "Allow" && !signal.aborted) return;
+      if (choice === "Allow" && !signal.aborted && !sealed) {
+        if (linkedConfig.graphNode) await linkedRPC("klm/graph/gate", {}, signal);
+        return;
+      }
     } catch {
       // A missing UI, cancellation, or serialization failure must never allow execution.
     }
     return denied;
   });
 
+  // At turn_end every tool result in this batch has entered native history.
+  // Abort here, never from inside graph_submit_choice with a pending tool result.
+  pi.on("turn_end", (_event, ctx) => {
+    if (sealed) ctx.abort();
+  });
+
   pi.on("session_start", async (_, ctx) => {
     if (ctx.mode === "rpc" && ctx.hasUI) {
       const inventory = await linkedRPC("tools/list", {});
-      if (!linkedTools.every(tool => inventory.tools?.some(item => item.name === tool.name))) {
+      if (!tools.every(tool => inventory.tools?.some(item => item.name === tool.name))) {
         throw new Error("Linked-agent tools are not ready.");
       }
+      if (linkedConfig.graphNode) await linkedRPC("klm/graph/gate", {});
       ctx.ui.notify("klm.permissions.ready.v1", "info");
     }
   });

@@ -18,23 +18,29 @@ type interactiveProcess struct {
 	cancel context.CancelFunc
 	mu     sync.Mutex
 	err    error
+	owner  *ownedProcess
 }
 
 func startInteractive(t *turn, b binary, args []string, cwd string) (*interactiveProcess, error) {
 	ctx, cancel := context.WithCancel(t.ctx)
 	cmd := exec.CommandContext(ctx, b.path, append(append([]string{}, b.args...), args...)...)
 	cmd.Dir = cwd
-	configureProcess(cmd)
-	cmd.Cancel = func() error { return killTree(cmd.Process) }
+	owner, err := prepareOwnedProcess(cmd)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	cmd.Cancel = owner.Stop
 	cmd.WaitDelay = 5 * time.Second
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
+		_ = owner.Close()
 		return nil, errors.New("Could not open harness input.")
 	}
 	frames := make(chan map[string]any, 64)
 	done := make(chan struct{})
-	p := &interactiveProcess{Frames: frames, Done: done, stdin: stdin, cancel: cancel}
+	p := &interactiveProcess{Frames: frames, Done: done, stdin: stdin, cancel: cancel, owner: owner}
 	lines := &jsonLines{cancel: cancel, consume: func(line []byte) error {
 		var frame map[string]any
 		d := json.NewDecoder(bytes.NewReader(line))
@@ -54,7 +60,16 @@ func startInteractive(t *turn, b binary, args []string, cwd string) (*interactiv
 	if err := cmd.Start(); err != nil {
 		cancel()
 		stdin.Close()
+		_ = owner.Close()
 		return nil, errors.New("Could not start the harness. Check its installation.")
+	}
+	if err := owner.Attach(); err != nil {
+		cancel()
+		stdin.Close()
+		_ = owner.Stop()
+		_ = cmd.Wait()
+		_ = owner.Close()
+		return nil, err
 	}
 	go func() {
 		err := cmd.Wait()
@@ -85,9 +100,15 @@ func (p *interactiveProcess) Send(value any) error {
 
 func (p *interactiveProcess) Err() error { <-p.Done; return p.err }
 
+// EOF requests native shutdown without cancelling the process context. Callers
+// must keep draining Frames, await Done, and still close/check the owned Job.
+func (p *interactiveProcess) EndInput() error { return p.stdin.Close() }
+
 func (p *interactiveProcess) Close() error {
 	p.cancel()
 	_ = p.stdin.Close()
 	<-p.Done
-	return p.err
+	return errors.Join(p.err, p.owner.Close())
 }
+
+func (p *interactiveProcess) Drained() bool { return p.owner.Drained() }

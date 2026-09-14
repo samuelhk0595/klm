@@ -56,8 +56,8 @@ export function NodeConfigurationPanel({ node, nodes, edges, onClose }: {
       <section className="graph-config-section"><h3>Input payload</h3>
         {choice.fields.length ? <ul className="graph-config-input-fields">{choice.fields.map(field => <li key={field.key}><code>{field.name}</code><span>{field.type}</span><span>{field.required ? 'Required' : 'Optional'}</span></li>)}</ul> : <p>None</p>}
       </section>
+      <OutputFields fields={choiceOutputFields(choice)} />
       {!choice.terminal && <>
-        <OutputFields fields={choiceOutputFields(choice)} />
         <dl className="graph-config-fields"><Field label="Destination">{nodeName(destination)}</Field>{supportsSession && <Field label="Session policy">{choice.sessionPolicy === 'continue_target' ? 'Continue target' : 'New session'}</Field>}</dl>
       </>}
     </>}
@@ -66,11 +66,11 @@ export function NodeConfigurationPanel({ node, nodes, edges, onClose }: {
       <section className="graph-config-section"><h3>Branches</h3>{fork.branches.map((branch, index) => {
         const target = nodes.find(item => item.id === edges.find(edge => edge.source === node.id && edge.sourceHandle === branch.id)?.target);
         return <details className="graph-config-branch" key={branch.id} open={index === 0}><summary>{branch.name}</summary><div>
-          <dl className="graph-config-fields"><Field label="Destination">{nodeName(target)}</Field><Field label="Workspace">Separate worktree</Field><Field label="Git branch name"><code>{branch.gitBranch || '—'}</code></Field><Field label="Base revision">Incoming revision</Field></dl>
+          <dl className="graph-config-fields"><Field label="Destination">{nodeName(target)}</Field><Field label="Workspace">{branch.separateWorktree === false ? 'Shared workspace' : 'Separate worktree'}</Field><Field label="Git branch name"><code>{branch.gitBranch || '—'}</code></Field>{branch.separateWorktree !== false && <Field label="Base revision">Incoming revision</Field>}</dl>
           <OutputFields fields={branch.outputFields} />
         </div></details>;
       })}</section>
     </>}
-    {terminal && <dl className="graph-config-fields"><Field label="Name">{terminal.name}</Field><Field label="Command"><pre>{terminal.command || '—'}</pre></Field></dl>}
+    {terminal && <><dl className="graph-config-fields"><Field label="Name">{terminal.name}</Field><Field label="Command"><pre>{terminal.command || '—'}</pre></Field><Field label="Destination">{nodeName(destination)}</Field></dl><OutputFields fields={terminal.outputFields ?? []} /></>}
   </aside>;
 }

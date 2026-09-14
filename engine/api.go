@@ -73,17 +73,30 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/projects/{id}", a.removeProject)
 	mux.HandleFunc("POST /api/projects/{id}/folders", a.createFolder)
 	mux.HandleFunc("GET /api/projects/{id}/paths", a.projectPaths)
+	mux.HandleFunc("GET /api/projects/{id}/authoring", a.authoring)
+	mux.HandleFunc("GET /api/projects/{id}/models/{harness}", a.projectModels)
+	mux.HandleFunc("POST /api/projects/{id}/agents", a.saveAgent)
+	mux.HandleFunc("PATCH /api/projects/{id}/agents/{item}", a.saveAgent)
+	mux.HandleFunc("DELETE /api/projects/{id}/agents/{item}", a.deleteAgent)
+	mux.HandleFunc("POST /api/projects/{id}/graph-drafts", a.createGraphDraft)
+	mux.HandleFunc("POST /api/projects/{id}/graphs/{item}", a.saveGraph)
+	mux.HandleFunc("PATCH /api/projects/{id}/graphs/{item}", a.patchGraph)
+	mux.HandleFunc("DELETE /api/projects/{id}/graphs/{item}", a.deleteGraph)
+	mux.HandleFunc("POST /api/projects/{id}/graphs/{item}/layout", a.saveGraphLayout)
 	mux.HandleFunc("POST /api/sessions", a.createSession)
-	mux.HandleFunc("POST /api/sessions/{id}/side", a.sideConversation)
-	mux.HandleFunc("PATCH /api/sessions/{id}/harness", a.sideHarness)
-	mux.HandleFunc("POST /api/sessions/{id}/consultations/{requestID}/cancel", a.cancelConsultation)
-	mux.HandleFunc("PATCH /api/sessions/{id}", a.patchSession)
+	mux.HandleFunc("GET /api/sessions/{id}/graph", a.getConversationGraph)
+	mux.HandleFunc("PATCH /api/sessions/{id}/graph", a.selectConversationGraph)
+	mux.HandleFunc("GET /api/graph-runs/{runID}", a.getGraphRun)
+	mux.HandleFunc("POST /api/sessions/{id}/side", a.chatSessionHandler(a.sideConversation))
+	mux.HandleFunc("PATCH /api/sessions/{id}/harness", a.chatSessionHandler(a.sideHarness))
+	mux.HandleFunc("POST /api/sessions/{id}/consultations/{requestID}/cancel", a.chatSessionHandler(a.cancelConsultation))
+	mux.HandleFunc("PATCH /api/sessions/{id}", a.chatSessionHandler(a.patchSession))
 	mux.HandleFunc("GET /api/sessions/{id}/models", a.getModels)
-	mux.HandleFunc("PATCH /api/sessions/{id}/settings", a.updateModelSettings)
+	mux.HandleFunc("PATCH /api/sessions/{id}/settings", a.chatSessionHandler(a.updateModelSettings))
 	mux.HandleFunc("GET /api/sessions/{id}/quota", a.getQuota)
-	mux.HandleFunc("POST /api/sessions/{id}/messages", a.message)
-	mux.HandleFunc("GET /api/sessions/{id}/events", a.events)
-	mux.HandleFunc("POST /api/sessions/{id}/stop", a.stop)
+	mux.HandleFunc("POST /api/sessions/{id}/messages", a.chatSessionHandler(a.message))
+	mux.HandleFunc("GET /api/sessions/{id}/events", a.chatSessionHandler(a.events))
+	mux.HandleFunc("POST /api/sessions/{id}/stop", a.chatSessionHandler(a.stop))
 	mux.HandleFunc("POST /api/sessions/{id}/permissions/{permissionID}", a.permissionDecision)
 	mux.HandleFunc("POST /api/sessions/{id}/questions/{questionID}/reply", a.answerQuestion)
 	mux.HandleFunc("POST /api/dialogs/directory", a.directory)
@@ -91,15 +104,13 @@ func (a *app) routes() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if !loopbackHost(r.RemoteAddr) || !loopbackHost(r.Host) {
-			fail(w, 403, "Only loopback clients and hosts are allowed.")
+		if !publicAPIHost(r.Host) {
+			fail(w, 403, "Invalid engine host; use this computer's address on port "+apiPort+".")
 			return
 		}
 		if origin := r.Header.Get("Origin"); origin != "" {
-			u, err := url.Parse(origin)
-			if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil ||
-				u.Path != "" || u.RawQuery != "" || u.Fragment != "" || !loopbackHost(u.Host) {
-				fail(w, 403, "Only HTTP loopback origins are allowed.")
+			if !publicAPIOrigin(origin, r.Host) {
+				fail(w, 403, "Origin is not an allowed KLM client.")
 				return
 			}
 			w.Header().Set("Access-Control-Allow-Origin", origin)
@@ -129,6 +140,37 @@ func (a *app) routes() http.Handler {
 	})
 }
 
+// Deliberately separate from loopbackHost: the authenticated harness bridge keeps
+// its original local-only host and peer validation.
+func publicAPIHost(authority string) bool {
+	host, port, err := net.SplitHostPort(authority)
+	if err != nil || port != apiPort {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return !ip.IsUnspecified() && !ip.IsMulticast()
+	}
+	name, _ := os.Hostname()
+	return strings.EqualFold(host, "localhost") || (name != "" && strings.EqualFold(host, name))
+}
+
+func publicAPIOrigin(origin, authority string) bool {
+	if origin == "tauri://localhost" || origin == "http://tauri.localhost" || origin == "https://tauri.localhost" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil ||
+		u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	if loopbackHost(u.Host) && (u.Port() == "5173" || u.Port() == "4173") {
+		return true
+	}
+	host, _, err := net.SplitHostPort(authority)
+	return err == nil && u.Scheme == "http" && u.Port() == webPort &&
+		(strings.EqualFold(u.Hostname(), host) || (loopbackHost(u.Host) && loopbackHost(authority)))
+}
+
 func (a *app) health(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -136,7 +178,13 @@ func (a *app) health(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, a.storageErr.Error())
 		return
 	}
-	respond(w, 200, map[string]any{"status": "ok", "version": 1, "runningSessions": len(a.runs)})
+	activeGraphs := 0
+	for _, run := range a.state.GraphRuns {
+		if graphRunActive(run.Status) {
+			activeGraphs++
+		}
+	}
+	respond(w, 200, map[string]any{"status": "ok", "version": 2, "runningSessions": len(a.runs), "activeGraphRuns": activeGraphs})
 }
 
 func (a *app) getState(w http.ResponseWriter, r *http.Request) {
@@ -151,8 +199,8 @@ func (a *app) getState(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, session := range a.state.Sessions {
-		if visible[session.ProjectID] {
-			sessions = append(sessions, session)
+		if visible[session.ProjectID] && session.GraphRunID == "" {
+			sessions = append(sessions, *a.state.sessionView(session.ID))
 		}
 	}
 	state := struct {
@@ -303,6 +351,12 @@ func (a *app) removeProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	for _, run := range a.state.GraphRuns {
+		if run.ProjectID == id && graphRunActive(run.Status) {
+			fail(w, 409, "Project has an active graph run.")
+			return
+		}
+	}
 	if !p.Removed {
 		if err := a.commitLocked(func(d *diskState) { d.project(id).Removed = true }); err != nil {
 			fail(w, 503, err.Error())
@@ -409,7 +463,7 @@ func (a *app) createSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
-	respond(w, 201, s)
+	respond(w, 201, a.state.sessionView(s.ID))
 }
 
 func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
@@ -455,7 +509,7 @@ func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
-	respond(w, 200, a.state.session(id))
+	respond(w, 200, a.state.sessionView(id))
 }
 
 func (a *app) message(w http.ResponseWriter, r *http.Request) {
@@ -567,6 +621,7 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snapshot := *a.state.session(id)
+	response := a.state.sessionView(id)
 	native := a.state.Native[id]
 	ctx, cancel := context.WithCancel(a.ctx)
 	t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{})}
@@ -574,7 +629,7 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 	a.wg.Add(1)
 	a.mu.Unlock()
 	go a.execute(t, snapshot, native, b, cwd, payload)
-	respond(w, 202, snapshot)
+	respond(w, 202, response)
 }
 
 func (a *app) stop(w http.ResponseWriter, r *http.Request) {
@@ -606,7 +661,7 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.mu.Lock()
-	s := *a.state.session(id)
+	s := *a.state.sessionView(id)
 	err := a.storageErr
 	a.mu.Unlock()
 	if err != nil {
@@ -620,7 +675,7 @@ func (a *app) events(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ch := make(chan struct{}, 1)
 	a.mu.Lock()
-	s := a.state.session(id)
+	s := a.state.sessionView(id)
 	if s == nil {
 		a.mu.Unlock()
 		fail(w, 404, "Session not found.")
@@ -664,7 +719,7 @@ func (a *app) events(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ch:
 			a.mu.Lock()
-			s = a.state.session(id)
+			s = a.state.sessionView(id)
 			a.mu.Unlock()
 			if send(s) != nil {
 				return
@@ -681,6 +736,136 @@ func (a *app) events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Node sessions expose their request reply routes, but are not independent chats.
+func (a *app) chatSessionHandler(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		a.mu.Lock()
+		s := a.state.session(r.PathValue("id"))
+		private := s != nil && s.GraphRunID != ""
+		a.mu.Unlock()
+		if private {
+			fail(w, 404, "Conversation not found.")
+			return
+		}
+		handler(w, r)
+	}
+}
+
+func (a *app) getConversationGraph(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s := a.state.session(r.PathValue("id"))
+	if s == nil || s.ParentID != "" || s.GraphRunID != "" {
+		fail(w, 404, "Main conversation not found.")
+		return
+	}
+	respond(w, 200, a.state.graphProjection(s.ID))
+}
+
+func (a *app) selectConversationGraph(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SelectedGraphID *string `json:"selectedGraphId"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.SelectedGraphID == nil {
+		fail(w, 400, "Provide selectedGraphId; use an empty string for None.")
+		return
+	}
+	graphID := *body.SelectedGraphID
+	if graphID != "" && !validAuthoringID(graphID) {
+		fail(w, 400, "Invalid graph identifier.")
+		return
+	}
+	// Same lock ordering as authoring mutations and snapshot capture.
+	a.authoringMu.Lock()
+	defer a.authoringMu.Unlock()
+	a.mu.Lock()
+	s := a.state.session(r.PathValue("id"))
+	if s == nil || s.ParentID != "" || s.GraphRunID != "" {
+		a.mu.Unlock()
+		fail(w, 404, "Main conversation not found.")
+		return
+	}
+	p := a.state.project(s.ProjectID)
+	if p == nil || p.Removed {
+		a.mu.Unlock()
+		fail(w, 404, "Project not found.")
+		return
+	}
+	project, sessionID := *p, s.ID
+	a.mu.Unlock()
+	if graphID != "" {
+		catalog, err := loadAuthoring(project)
+		if err != nil {
+			fail(w, 500, "Cannot read graph catalog: "+err.Error())
+			return
+		}
+		found := false
+		for _, graph := range catalog.Graphs {
+			if graph.ID == graphID {
+				if !graph.Definition.Enabled {
+					fail(w, 409, "Graph is disabled.")
+					return
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			if len(catalog.Errors) > 0 {
+				fail(w, 409, "Graph is unavailable; resolve catalog errors: "+strings.Join(catalog.Errors, "; "))
+				return
+			}
+			fail(w, 404, "Graph not found.")
+			return
+		}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s = a.state.session(sessionID)
+	p = a.state.project(project.ID)
+	if a.closing || a.storageErr != nil || s == nil || p == nil || p.Removed || p.Folder != project.Folder {
+		fail(w, 409, "Conversation or project changed; retry selection.")
+		return
+	}
+	if s.SelectedGraphID != graphID {
+		if err := a.commitLocked(func(d *diskState) {
+			session := d.session(sessionID)
+			session.SelectedGraphID, session.UpdatedAt = graphID, now()
+		}); err != nil {
+			fail(w, 503, err.Error())
+			return
+		}
+	}
+	respond(w, 200, a.state.graphProjection(sessionID))
+}
+
+type GraphRunSummary struct {
+	ID             string          `json:"id"`
+	ActivityID     string          `json:"activityId"`
+	ConversationID string          `json:"conversationId"`
+	GraphID        string          `json:"graphId"`
+	Status         string          `json:"status"`
+	Active         bool            `json:"active"`
+	Revision       uint64          `json:"revision"`
+	Result         *GraphRunResult `json:"result"`
+	CreatedAt      string          `json:"createdAt"`
+	EndedAt        string          `json:"endedAt,omitempty"`
+}
+
+func (a *app) getGraphRun(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	run := a.state.graphRun(r.PathValue("runID"))
+	if run == nil {
+		fail(w, 404, "Graph run not found.")
+		return
+	}
+	respond(w, 200, GraphRunSummary{ID: run.ID, ActivityID: run.ActivityID, ConversationID: run.ConversationID, GraphID: run.GraphID, Status: run.Status, Active: graphRunActive(run.Status), Revision: a.state.GraphRevision, Result: run.Result, CreatedAt: run.CreatedAt, EndedAt: run.EndedAt})
+}
+
 func (a *app) directory(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
@@ -688,8 +873,8 @@ func (a *app) directory(w http.ResponseWriter, r *http.Request) {
 	select {
 	case a.picker <- struct{}{}:
 		defer func() { <-a.picker }()
-	case <-ctx.Done():
-		fail(w, 408, "Directory picker timed out or was cancelled.")
+	default:
+		fail(w, 409, "A directory picker is already open on the engine computer. Complete or cancel it, then retry.")
 		return
 	}
 	cmd, err := pickerCommand(ctx)

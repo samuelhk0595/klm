@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -41,7 +42,14 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 	if err != nil {
 		return err
 	}
-	defer process.Close()
+	p.processesDrained = false
+	defer func() {
+		_ = process.Close()
+		for frame := range process.Frames {
+			p.observeCodexMCP(str(frame, "method"), object(frame["params"]))
+		}
+		p.processesDrained = process.Drained() && !p.processDrainFailed
+	}()
 	c := &codexInteractive{p: p, cwd: cwd, items: map[string]map[string]any{},
 		parts: map[string]map[string]bool{}, requests: map[string]*atomic.Bool{}}
 	defer func() {
@@ -93,6 +101,7 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 					return
 				}
 				params := object(frame["params"])
+				p.observeCodexMCP(str(frame, "method"), params)
 				if str(frame, "method") == "turn/completed" && str(params, "threadId") == c.threadID &&
 					str(object(params["turn"]), "id") == c.turnID {
 					return
@@ -108,12 +117,18 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 		return err
 	}
 	phase := "klm-init"
+	mcpBridgeFound := false
 	startup := time.NewTimer(30 * time.Second)
 	defer startup.Stop()
 	deadline := startup.C
 	var early []map[string]any
 	frames, done := process.Frames, process.Done
+	choiceStop := p.graphStop()
+	choiceInterrupted := false
 	for {
+		if !choiceInterrupted && p.choiceToolSettled && !p.graphMCPPending() {
+			choiceStop = p.graphStop()
+		}
 		var frame map[string]any
 		var ok bool
 		// Drain buffered output before interpreting process exit as a missing
@@ -128,6 +143,22 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 				return errors.New("Codex app-server exited without completing the turn.")
 			}
 			select {
+			case <-choiceStop:
+				choiceStop = nil
+				if p.graphMCPPending() {
+					continue
+				}
+				if p.completed {
+					return p.finishCodexNative(process, b, cwd, c.threadID, c.turnID)
+				}
+				choiceInterrupted = true
+				if c.threadID == "" || c.turnID == "" {
+					return errors.New("Choice completed before the native Codex turn was identified.")
+				}
+				if err := c.send(map[string]any{"id": "klm-choice-interrupt", "method": "turn/interrupt", "params": map[string]any{"threadId": c.threadID, "turnId": c.turnID}}); err != nil {
+					return err
+				}
+				continue
 			case frame, ok = <-frames:
 			case <-done:
 				done = nil
@@ -163,8 +194,8 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 			if err := c.frame(frame); err != nil {
 				return err
 			}
-			if p.completed {
-				return nil
+			if p.completed && !p.graphMCPPending() {
+				return p.finishCodexNative(process, b, cwd, c.threadID, c.turnID)
 			}
 			continue
 		}
@@ -220,6 +251,7 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 				return err
 			}
 			c.threadID = threadID
+			p.setGraphNativeSession(threadID)
 			effort := p.effort
 			if effort == "" {
 				effort = str(result, "reasoningEffort")
@@ -241,7 +273,7 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 				}
 				tools := object(server["tools"])
 				found = true
-				for _, tool := range linkedTools() {
+				for _, tool := range p.bridgeTools() {
 					exists := false
 					for key, value := range tools {
 						if key == str(tool, "name") || str(object(value), "name") == str(tool, "name") {
@@ -251,13 +283,14 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 					found = found && exists
 				}
 			}
-			if !found && str(result, "nextCursor") != "" {
+			mcpBridgeFound = mcpBridgeFound || found
+			if (p.graphNode() || !mcpBridgeFound) && str(result, "nextCursor") != "" {
 				if err := c.send(map[string]any{"id": phase, "method": "mcpServerStatus/list", "params": map[string]any{"threadId": c.threadID, "limit": 100, "cursor": result["nextCursor"]}}); err != nil {
 					return err
 				}
 				continue
 			}
-			if !found {
+			if !mcpBridgeFound {
 				return errors.New("Codex did not expose the linked-agent tools.")
 			}
 			if err := p.bridge.waitReady(p.turn.ctx); err != nil {
@@ -284,11 +317,164 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 				if err := c.frame(queued); err != nil {
 					return err
 				}
-				if p.completed {
-					return nil
+				if p.completed && !p.graphMCPPending() {
+					return p.finishCodexNative(process, b, cwd, c.threadID, c.turnID)
 				}
 			}
 			early = nil
+		}
+	}
+}
+
+// turn/completed is emitted before Codex's final transcript flush. For graph
+// sessions, request EOF shutdown, then use a fresh read-only app-server connection
+// to read persisted history WITHOUT resuming/starting a thread or sending a prompt.
+// This checks the actual stored tool-result pair before claiming continuability.
+func (p *adapter) finishCodexNative(process *interactiveProcess, b binary, cwd, threadID, turnID string) error {
+	if !p.graphNode() {
+		return nil
+	}
+	if err := finishCodexProcess(process, p.turn.ctx, func(frame map[string]any) { p.observeCodexMCP(str(frame, "method"), object(frame["params"])) }); err != nil {
+		return err
+	}
+	if !process.Drained() {
+		return errors.New("Codex owned processes did not drain after native shutdown.")
+	}
+	probe, err := startInteractive(p.turn, b, []string{"app-server", "--listen", "stdio://"}, cwd)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = probe.Close()
+		p.processDrainFailed = p.processDrainFailed || !probe.Drained()
+	}()
+	if err := probe.Send(map[string]any{"id": "klm-verify-init", "method": "initialize", "params": map[string]any{"clientInfo": map[string]any{"name": "klm", "version": "0.1.0"}, "capabilities": map[string]any{"experimentalApi": true}}}); err != nil {
+		return err
+	}
+	timer := time.NewTimer(30 * time.Second)
+	defer timer.Stop()
+	phase := "klm-verify-init"
+	readingThread := threadID
+	readThreads := map[string]bool{}
+	for {
+		select {
+		case <-p.turn.ctx.Done():
+			return p.turn.ctx.Err()
+		case <-timer.C:
+			return errors.New("Codex persisted-history verification timed out.")
+		case frame, ok := <-probe.Frames:
+			if !ok {
+				return errors.New("Codex closed before persisted-history verification.")
+			}
+			if str(frame, "id") != phase {
+				continue
+			}
+			if frame["error"] != nil {
+				return errors.New("Codex could not verify the persisted graph thread.")
+			}
+			if phase == "klm-verify-init" {
+				if err := probe.Send(map[string]any{"method": "initialized"}); err != nil {
+					return err
+				}
+				phase = "klm-verify-history"
+				if err := probe.Send(map[string]any{"id": phase, "method": "thread/read", "params": map[string]any{"threadId": threadID, "includeTurns": true}}); err != nil {
+					return err
+				}
+				continue
+			}
+			thread := object(object(frame["result"])["thread"])
+			if str(thread, "id") != readingThread {
+				return errors.New("Codex persisted-history response belongs to a different thread.")
+			}
+			turns, _ := thread["turns"].([]any)
+			matched, receipt := false, false
+			for _, value := range turns {
+				nativeTurn := object(value)
+				if readingThread != threadID {
+					p.auditCodexChildTurn(readingThread, nativeTurn)
+					continue
+				}
+				if str(nativeTurn, "status") == "inProgress" {
+					return errors.New("Codex persisted graph history still has an unfinished turn.")
+				}
+				if str(nativeTurn, "id") != turnID {
+					continue
+				}
+				status := str(nativeTurn, "status")
+				matched = status == "completed" || status == "interrupted"
+				items, _ := nativeTurn["items"].([]any)
+				for _, value := range items {
+					item := object(value)
+					p.observeCodexMCP("item/completed", map[string]any{"threadId": threadID, "turnId": turnID, "item": item})
+					if str(item, "type") == "mcpToolCall" && str(item, "server") == "klm_linked" && str(item, "tool") == "graph_submit_choice" {
+						receipt = receipt || p.graphReservationReceipt(item["result"])
+					}
+				}
+			}
+			if readingThread == threadID && (!matched || (p.graphSealed() && !receipt)) {
+				return errors.New("Codex persisted history does not contain the settled graph turn and its reserved Choice result.")
+			}
+			readThreads[readingThread] = true
+			if readingThread != threadID {
+				p.graph.mu.Lock()
+				if p.graph.codexAudited == nil {
+					p.graph.codexAudited = map[string]bool{}
+				}
+				p.graph.codexAudited[readingThread] = true
+				p.graph.mu.Unlock()
+			}
+			next := ""
+			for _, id := range p.codexChildIDs() {
+				if !readThreads[id] {
+					next = id
+					break
+				}
+			}
+			if next != "" {
+				readingThread = next
+				if err := probe.Send(map[string]any{"id": phase, "method": "thread/read", "params": map[string]any{"threadId": next, "includeTurns": true}}); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := finishCodexProcess(probe, p.turn.ctx, nil); err != nil {
+				return err
+			}
+			if !probe.Drained() {
+				return errors.New("Codex history-verification process drainage is unconfirmed.")
+			}
+			return nil
+		}
+	}
+}
+
+func finishCodexProcess(process *interactiveProcess, ctx context.Context, observe func(map[string]any)) error {
+	_ = process.EndInput()
+	timer := time.NewTimer(15 * time.Second)
+	defer timer.Stop()
+	frames := process.Frames
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timer.C:
+			return errors.New("Codex native shutdown was not confirmed.")
+		case frame, ok := <-frames:
+			if ok && observe != nil {
+				observe(frame)
+			}
+			if !ok {
+				frames = nil
+			}
+		case <-process.Done:
+			for frame := range process.Frames {
+				if observe != nil {
+					observe(frame)
+				}
+			}
+			err := process.Err()
+			closeErr := process.Close()
+			return errors.Join(err, closeErr)
 		}
 	}
 }
@@ -327,6 +513,7 @@ func (c *codexInteractive) warning(text string) error {
 
 func (c *codexInteractive) frame(frame map[string]any) error {
 	method, params := str(frame, "method"), object(frame["params"])
+	c.p.observeCodexMCP(method, params)
 	if _, request := frame["id"]; request {
 		return c.request(frame)
 	}
@@ -357,12 +544,16 @@ func (c *codexInteractive) frame(frame map[string]any) error {
 			c.p.completed = true
 			return c.p.failure(map[string]any{"type": method, "message": nativeTurn["error"]})
 		case "interrupted":
+			if !c.p.graphSealed() {
+				return errors.New("Codex turn was interrupted.")
+			}
 			status, message = "cancelled", "Turn interrupted."
 		case "completed":
 		default:
 			return errors.New("Codex returned an unknown terminal turn status.")
 		}
 		c.p.completed = true
+		c.p.nativeSettled = true
 		return c.p.put("", "status", "", message, status, false, nil)
 	}
 	if str(params, "turnId") != c.turnID {
@@ -388,6 +579,9 @@ func (c *codexInteractive) frame(frame map[string]any) error {
 			return errors.New("Codex returned an item without a valid identifier.")
 		}
 		c.items[id] = item
+		if method == "item/completed" && str(item, "type") == "mcpToolCall" && str(item, "server") == "klm_linked" && str(item, "tool") == "graph_submit_choice" && item["error"] == nil && str(item, "status") != "failed" {
+			c.p.graphChoiceToolSettled(item["result"])
+		}
 		if str(item, "type") == "contextCompaction" {
 			if err := c.p.clearContextUsage(); err != nil {
 				return err
@@ -515,12 +709,20 @@ func (c *codexInteractive) request(frame map[string]any) error {
 	if !validID {
 		return errors.New("Codex returned an invalid server request identifier.")
 	}
+	if c.p.graphSealed() {
+		return rpcError(-32000, "Graph activation is closing; no further interaction is permitted.")
+	}
 	if _, duplicate := c.requests[sourceID]; duplicate {
 		return errors.New("Codex reused a server request identifier within a turn.")
 	}
 	bound := c.threadID != "" && c.turnID != "" && str(params, "threadId") == c.threadID && str(params, "turnId") == c.turnID
 	if method == "mcpServer/elicitation/request" && params["turnId"] == nil {
 		bound = c.threadID != "" && c.turnID != "" && str(params, "threadId") == c.threadID
+	}
+	if method == "mcpServer/elicitation/request" && c.p.graphOwnsNativeSession(str(params, "threadId")) {
+		// Child calls in this owned activation keep the ordinary one-shot MCP
+		// permission flow. No cross-thread remembered grant is manufactured.
+		bound = true
 	}
 	if method == "execCommandApproval" || method == "applyPatchApproval" {
 		if err := c.send(map[string]any{"id": id, "result": map[string]any{"decision": "denied"}}); err != nil {
@@ -741,6 +943,9 @@ func (c *codexInteractive) request(frame map[string]any) error {
 		}
 		if c.p.turn.ctx.Err() != nil || !live.CompareAndSwap(true, false) {
 			return errors.New("The Codex permission request is no longer active.")
+		}
+		if allow && c.p.graphSealed() {
+			allow = false
 		}
 		return c.send(map[string]any{"id": id, "result": result(allow)})
 	})
