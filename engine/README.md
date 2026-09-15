@@ -54,17 +54,19 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 | PATCH | `/api/projects/{id}` | `{name?,icon?}` -> 200 Project |
 | DELETE | `/api/projects/{id}` | `{removed:true}`; hides the project, preserving its files and saved history; 409 while a session is running |
 | POST | `/api/projects/{id}/folders` | `{name}` -> 201 Project |
+| PATCH | `/api/projects/{id}/folders` | `{name,archived}` -> 200 Project |
 | GET | `/api/projects/{id}/paths?q=...` | `{paths:[{path,kind:"file"\|"directory"}],partial:boolean}`; project-relative paths |
 | POST | `/api/sessions` | `{projectId,title,workspace,harness,model?}` -> 201 Session |
 | POST | `/api/sessions/{id}/side` | `{harness?}` -> existing or newly created side Session; one per main, serialized atomically |
 | PATCH | `/api/sessions/{id}/harness` | `{harness}` -> side Session; only before its first turn |
 | POST | `/api/sessions/{id}/consultations/{requestID}/cancel` | `{}` -> Session; cancels the correlated request/continuation |
-| PATCH | `/api/sessions/{id}` | `{title?,workspace?}` -> 200 Session |
+| PATCH | `/api/sessions/{id}` | `{title?,workspace?,archived?}` -> 200 SessionUpdate |
 | GET | `/api/sessions/{id}/models` | Harness model catalog; `?refresh=true` bypasses the two-minute cache |
 | PATCH | `/api/sessions/{id}/settings` | `{model:string,effort:string}` -> Session; empty strings select harness defaults |
 | GET | `/api/sessions/{id}/quota` | `{quota:QuotaSnapshot\|null}`; null for unsupported/unverified connections |
 | POST | `/api/sessions/{id}/messages` | `{text,mentions?:[{id,path,kind,start,end}],sources?:[{sessionId,messageId,passage}]}` -> 202 Session, already containing the durable user event |
 | GET | `/api/sessions/{id}/events` | SSE, initial and subsequent full Session JSON snapshots |
+| PATCH | `/api/sessions/{id}/events/{eventID}` | `{favorite}` -> 200 Event; completed assistant messages only |
 | GET | `/api/sessions/{id}/graph` | Conversation selection, active-run projection and node requests |
 | PATCH | `/api/sessions/{id}/graph` | `{selectedGraphId:string}`; empty string selects None |
 | GET | `/api/graph-runs/{runId}` | Real run summary and terminal result; 404 for unknown runs |
@@ -83,6 +85,7 @@ type Project = {
   folder: string
   icon: string
   folders: string[]
+  archivedFolders: string[]
 }
 
 type Session = {
@@ -98,6 +101,7 @@ type Session = {
   resolvedModel?: string
   resolvedEffort?: string
   status: 'idle' | 'running' | 'error'
+  archived?: boolean
   events: Event[]
   permissions?: Permission[]
   questions?: QuestionRequest[]
@@ -117,6 +121,7 @@ type Event = {
   text: string
   title?: string
   status?: string
+  favorite?: boolean
   createdAt: string
   data?: Record<string, unknown>
 }
@@ -433,14 +438,20 @@ Validation and semantics:
 - Session titles are trimmed, 1-200 characters. Optional model IDs are trimmed,
   at most 200 characters, with no control characters or leading `-`.
 - `workspace` names an existing project grouping folder or `Ungrouped`. An empty
-  or omitted workspace becomes `Ungrouped`. It never changes the process cwd.
+  or omitted workspace becomes `Ungrouped`. Archived grouping folders cannot receive
+  new or moved sessions. It never changes the process cwd.
+- Archiving a grouping folder hides the folder and its sessions without mutating each
+  session. Session and folder archives are reversible and preserve all stored history.
+- Only completed assistant events, including legacy events without a status, accept
+  the durable `favorite` flag. Running, failed, and cancelled output does not.
 - New sessions are idle with `events: []`. The harness must be discoverable when
   creating a session, but availability does not imply authenticated or usable.
 - Messages preserve whitespace, cannot be blank or contain NUL, and are capped
   at 128 KiB UTF-8. JSON request bodies are capped at 512 KiB.
 - Only one turn per session can run; another message gets 409 until it exits.
   Different sessions may run independently. Linked-agent consultations queue and
-  route through the scheduler described below; ordinary user messages are not queued.
+  route through the scheduler described below. User messages sent during a turn
+  use the persistent queue described below.
 - Event IDs remain stable when a harness item is updated. Array ordering is
   first-observed ordering. Item updates replace that item's data/text in place;
   Pi text deltas append. This is not a duplicate raw-event audit log.
@@ -730,12 +741,13 @@ execution, a full suite, or an adversarial review.
 
 ## Network and Private Control Boundaries
 
-The public API binds `0.0.0.0:7331`, including LAN clients. Host accepts IP addresses,
-localhost or the Windows computer name on port 7331. CORS accepts HTTP Focus on
-the API's same hostname, port 7332 (loopback aliases are interchangeable), Tauri's
-native origin, and HTTP(S) loopback Vite origins on 5173/4173. Opaque/null origins
-remain rejected; requests without Origin are accepted. CORS does not grant
-credentials and is not network authentication. JSON mutation limits remain intact.
+The public API binds `0.0.0.0:7331`, including LAN clients. It does not restrict
+HTTP Host: domains, IP addresses and reverse-proxy authorities are accepted.
+CORS sends `Access-Control-Allow-Origin: *`, including for opaque/null origins,
+and allows wildcard request headers without credentials. Requests without Origin
+are also accepted. CORS does not grant credentials and is not network authentication.
+JSON mutation limits remain intact. Tunnel subdomains can change without engine
+configuration; enter the new public engine URL in the frontend Settings.
 
 Network authentication and TLS are explicitly deferred in the approved personal-use
 delivery. The existing `loopbackHost` helper, private authenticated MCP bridge and
@@ -919,3 +931,38 @@ before launching the engine. No prompt is read as a package-initialization side
 effect; the factory is registered in `init()` and prompts are loaded when needed.
 See `GRAPH_ENGINE_PROGRESS_CORE.md` and `GRAPH_ENGINE_PROGRESS_ADAPTER.md` at the
 repository root for integration contracts and actual verification evidence.
+
+## Queued messages and steering (issue #4)
+
+`POST /api/sessions/{id}/messages` accepts optional `mode: "queue" | "steer"`.
+The default is `queue`: idle conversations start immediately; active conversations
+retain messages FIFO until their current turn finishes successfully. `steer`
+requests native delivery during the active turn. If that turn finishes before
+submission, the input is used for a new turn in the same native session.
+
+Session summaries and SSE include `queue`, with item ID, text, mode, status, and
+recoverable error. `POST /api/sessions/{id}/queue/{messageID}/send` sends a pending
+item now; `DELETE /api/sessions/{id}/queue/{messageID}` removes an unsent item.
+Already-dispatching items cannot be removed. Queue actions retain the normal
+chat-session restrictions; graph-node and observed subagent sessions are excluded.
+
+Queue entries and prepared attachment payloads are saved before acknowledgement,
+with a maximum of 32 pending entries per conversation. Payloads are separate from
+HTTP/SSE projections. Selected passages and mention metadata enter user history
+when the message is dispatched/accepted. Queue delivery retains the existing
+one-turn reservation and uses the native session, model settings and grant flow.
+
+Pi uses RPC `steer`; Codex uses `turn/steer` with `expectedTurnId`; OpenCode posts
+`prompt_async` and waits for the matching persisted user-message notification.
+Neither an early OpenCode HTTP response nor a lost native acknowledgement proves
+acceptance. Failed/stopped turns pause unsent messages. Restart pauses the queue;
+inputs with uncertain delivery are not automatically replayed. Explicitly sending
+an uncertain item creates a fresh correlation ID; users should check the native
+conversation before retrying. Accepted steering belongs to the harness and cannot
+be removed using the KLM queue.
+
+Manual validation: queue several messages during a tool call; check FIFO and
+remove one; send a queued item now and a new steering message; repeat in main and
+side chats for Pi, Codex and OpenCode. Check attachments, questions/permissions,
+Stop, end-of-turn races, reload, restart, and delivery errors. No live harness
+validation or full test suite was run for this implementation.

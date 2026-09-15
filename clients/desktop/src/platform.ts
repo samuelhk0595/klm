@@ -25,7 +25,21 @@ export function resolveEngineURL() {
 }
 
 export function configureEngineURL(value: string) {
-  const url = new URL(value.trim());
+  let address = value.trim();
+  const hasScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(address);
+  if (!hasScheme) {
+    // A bare IPv6 literal needs brackets before URL parsing.
+    if (/^[\da-f:]+$/i.test(address) && address.includes("::")) address = "[" + address + "]";
+    const candidate = new URL("http://" + address);
+    const ip = candidate.hostname.startsWith("[") || /^\d+\.\d+\.\d+\.\d+$/.test(candidate.hostname);
+    address = (ip ? "http://" : "https://") + address;
+  }
+  const url = new URL(address);
+  if (url.username || url.password) throw new Error("The engine URL cannot include credentials.");
+  const ip = url.hostname.startsWith("[") || /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname);
+  // URL.port omits explicit :80/:443, so inspect the original authority.
+  const authority = address.slice(address.indexOf("://") + 3).split(/[/?#]/, 1)[0];
+  if (ip && !/:\d+$/.test(authority)) url.port = "7331";
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Use an HTTP or HTTPS URL.');
   if (url.search || url.hash) throw new Error('The engine URL cannot include a query or fragment.');
   const configured = url.toString().replace(/\/+$/, '');

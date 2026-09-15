@@ -16,6 +16,7 @@ import (
 )
 
 type turn struct {
+	steerWake           chan struct{} // protected by app.mu
 	graphNotificationID string
 	prompt              string // complete submission; graphConversationHooks prepends internal instructions
 	consultationID      string
@@ -103,6 +104,10 @@ func runEngine(dir string) error {
 	}
 	for i := range state.Sessions {
 		s := &state.Sessions[i]
+		if len(s.Queue) > 0 {
+			pauseMessageQueue(s, "Engine restarted. Send queued messages when ready.")
+			interrupted = true
+		}
 		if len(s.Questions) > 0 {
 			s.Questions = nil
 			s.UpdatedAt = now()

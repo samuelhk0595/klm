@@ -15,6 +15,7 @@ const (
 )
 
 type SessionSummary struct {
+	Queue           []QueuedMessage         `json:"queue"`
 	Role            string                  `json:"role,omitempty"`
 	GraphRunID      string                  `json:"graphRunId,omitempty"`
 	GraphNodeID     string                  `json:"graphNodeId,omitempty"`
@@ -32,6 +33,7 @@ type SessionSummary struct {
 	ResolvedModel   string                  `json:"resolvedModel,omitempty"`
 	ResolvedEffort  string                  `json:"resolvedEffort,omitempty"`
 	Status          string                  `json:"status"`
+	Archived        bool                    `json:"archived,omitempty"`
 	RuntimeActive   bool                    `json:"runtimeActive,omitempty"`
 	Permissions     []Permission            `json:"permissions,omitempty"`
 	Questions       []QuestionRequest       `json:"questions,omitempty"`
@@ -82,10 +84,11 @@ type sessionJournal struct {
 
 func sessionSummary(view *Session) SessionSummary {
 	return SessionSummary{
-		Role: view.Role, GraphRunID: view.GraphRunID, GraphNodeID: view.GraphNodeID, ExecutionCWD: view.ExecutionCWD,
+		Queue: view.Queue,
+		Role:  view.Role, GraphRunID: view.GraphRunID, GraphNodeID: view.GraphNodeID, ExecutionCWD: view.ExecutionCWD,
 		SelectedGraphID: view.SelectedGraphID, Graph: view.Graph, ParentID: view.ParentID, ID: view.ID, ProjectID: view.ProjectID,
 		Title: view.Title, Workspace: view.Workspace, Harness: view.Harness, Model: view.Model, Effort: view.Effort,
-		ResolvedModel: view.ResolvedModel, ResolvedEffort: view.ResolvedEffort, Status: view.Status, RuntimeActive: view.RuntimeActive,
+		ResolvedModel: view.ResolvedModel, ResolvedEffort: view.ResolvedEffort, Status: view.Status, Archived: view.Archived, RuntimeActive: view.RuntimeActive,
 		Permissions: view.Permissions, Questions: view.Questions, Usage: view.Usage, CreatedAt: view.CreatedAt, UpdatedAt: view.UpdatedAt,
 	}
 }

@@ -10,16 +10,18 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
 type Project struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Folder  string   `json:"folder"`
-	Icon    string   `json:"icon"`
-	Folders []string `json:"folders"`
-	Removed bool     `json:"removed,omitempty"`
+	ID              string   `json:"id"`
+	Name            string   `json:"name"`
+	Folder          string   `json:"folder"`
+	Icon            string   `json:"icon"`
+	Folders         []string `json:"folders"`
+	ArchivedFolders []string `json:"archivedFolders"`
+	Removed         bool     `json:"removed,omitempty"`
 }
 
 type Event struct {
@@ -29,11 +31,13 @@ type Event struct {
 	Text           string         `json:"text"`
 	Title          string         `json:"title,omitempty"`
 	Status         string         `json:"status,omitempty"`
+	Favorite       bool           `json:"favorite,omitempty"`
 	CreatedAt      string         `json:"createdAt"`
 	Data           map[string]any `json:"data,omitempty"`
 }
 
 type Session struct {
+	Queue           []QueuedMessage         `json:"queue"`
 	Role            string                  `json:"role,omitempty"`
 	GraphRunID      string                  `json:"graphRunId,omitempty"`
 	GraphNodeID     string                  `json:"graphNodeId,omitempty"`
@@ -52,6 +56,7 @@ type Session struct {
 	ResolvedModel   string                  `json:"resolvedModel,omitempty"`
 	ResolvedEffort  string                  `json:"resolvedEffort,omitempty"`
 	Status          string                  `json:"status"`
+	Archived        bool                    `json:"archived,omitempty"`
 	RuntimeActive   bool                    `json:"runtimeActive,omitempty"` // HTTP/SSE view only
 	Events          []Event                 `json:"events"`
 	Permissions     []Permission            `json:"permissions,omitempty"`
@@ -67,6 +72,7 @@ type nativeSession struct {
 }
 
 type diskState struct {
+	QueuePayloads       map[string]queuedPayload `json:"queuePayloads,omitempty"`
 	GraphRevision       uint64                   `json:"graphRevision"`
 	GraphActivities     []GraphActivity          `json:"graphActivities,omitempty"`
 	GraphRuns           []GraphRun               `json:"graphRuns,omitempty"`
@@ -139,9 +145,28 @@ func loadState(dir string) (diskState, error) {
 		return d, errors.New("unsupported or incomplete state.json; refusing to overwrite")
 	}
 	ids := map[string]bool{}
-	for _, p := range d.Projects {
+	for i := range d.Projects {
+		p := &d.Projects[i]
 		if p.ID == "" || ids[p.ID] || p.Folders == nil {
 			return d, errors.New("invalid project in state.json")
+		}
+		if p.ArchivedFolders == nil {
+			p.ArchivedFolders = []string{}
+		}
+		archived := map[string]bool{}
+		for _, name := range p.ArchivedFolders {
+			found := false
+			for _, folder := range p.Folders {
+				if folder == name {
+					found = true
+					break
+				}
+			}
+			key := strings.ToLower(name)
+			if !found || archived[key] {
+				return d, errors.New("invalid archived project folder in state.json")
+			}
+			archived[key] = true
 		}
 		ids[p.ID] = true
 	}

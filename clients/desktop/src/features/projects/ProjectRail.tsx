@@ -5,10 +5,14 @@ import { ProjectActionsMenu } from './ProjectActionsMenu';
 import type { Project, Session } from '../../engine';
 import { IS_MOBILE_HOST, returnToHosts } from '../../platform';
 
-function projectRuntimeState(projectId: string, sessions: Session[]) {
+function projectRuntimeState(project: Project, sessions: Session[]) {
   let state = 'off';
+  const projectSessions = sessions.filter(session => session.projectId === project.id);
+  const byId = new Map(projectSessions.map(session => [session.id, session]));
   for (const session of sessions) {
-    if (session.projectId !== projectId || session.role === 'graph_node' || session.role === 'subagent') continue;
+    const parent = session.parentId ? byId.get(session.parentId) : undefined;
+    if (session.projectId !== project.id || session.role === 'graph_node' || session.role === 'subagent' || session.archived || parent?.archived) continue;
+    if (project.archivedFolders.includes(parent?.workspace ?? session.workspace)) continue;
     if (session.status === 'error') return { state: 'error', label: 'Session error' };
     if ((session.permissions?.length ?? 0) > 0 || (session.questions?.length ?? 0) > 0) state = 'waiting';
     else if (state === 'off' && (session.status === 'running' || session.runtimeActive)) state = 'active';
@@ -36,7 +40,7 @@ export function ProjectRail({ projects, sessions, activeId, onSelect, onEdit, on
       ? <IconButton label="Hosts" className="rail-brand" data-klm-host-navigation onClick={returnToHosts}><span className="brand-mark" aria-hidden="true" /></IconButton>
       : <div className="rail-brand" title="KLM"><span className="brand-mark" aria-hidden="true" /><span className="sr-only">KLM</span></div>}
     <div className="project-icons">{projects.map(project => {
-      const runtime = projectRuntimeState(project.id, sessions);
+      const runtime = projectRuntimeState(project, sessions);
       return <ProjectActionsMenu key={project.id} project={project} onEdit={onEdit} onRemove={onRemove}
       open={contextMenu?.projectId === project.id} position={contextMenu?.projectId === project.id ? contextMenu : undefined}
       onOpenChange={open => { if (!open) setContextMenu(current => current?.projectId === project.id ? null : current); }}

@@ -40,6 +40,17 @@ and a React client. A project has a name, directory, and icon. Each session belo
 to one project and uses Pi, OpenCode, or Codex headlessly. The client presents the
 messages, exposed reasoning, commands, and MCP/tool events those harnesses emit.
 
+Top-level sessions and their visual grouping folders can be archived and restored.
+Archived content retains its history and runtime state but does not contribute error,
+waiting, or activity indicators to the project rail. Folder collapsed state remains
+local to each browser or WebView. Sessions can also be renamed and moved between
+active folders without changing their execution directory.
+
+Assistant message actions are hidden while that message is streaming. Completed
+assistant messages provide Copy and a durable Favorite toggle; like and dislike are
+not used. Failed or cancelled partial responses remain copyable but cannot be marked
+as favorites.
+
 ### Windows Delivery and Focus
 
 The engine and Tauri 2 desktop client are installed separately. `klm start` starts
@@ -53,6 +64,13 @@ The public HTTP API listens on `0.0.0.0:7331`. Network authentication and TLS ar
 deferred by the approved personal-use contract; grants, sandbox and the private
 authenticated loopback bridge keep their existing boundaries. Commands, project
 files and native directory dialogs always belong to the engine computer.
+
+The public API accepts any HTTP Host and any CORS origin, including tunnel/proxy
+domains, without an allowlist. This does not change the private authenticated
+loopback bridge. Frontend Settings accept an engine IP or domain, with optional
+HTTP(S) scheme and port. IPs without a port use 7331; explicit ports are preserved.
+Domains receive no added port. Without a scheme, IPs use HTTP and domains use
+HTTPS. A tunnel subdomain change only requires updating the frontend engine URL.
 
 The desktop fills its native window. Closing it hides to the tray; **Open** restores
 it and **Exit** ends only desktop/web. The client neither starts nor stops the
@@ -146,6 +164,26 @@ at 200 KiB; oversized submissions require fewer/smaller attachments.
 The engine persists references and preparation metadata, while the harness owns
 the native message content, history, compaction, and subsequent tool execution.
 Selecting context does not change tool permissions or sandbox settings.
+
+## Messages During Execution
+
+Main and side chats accept messages while a turn is active. Enter or the send
+button adds a message to a persistent FIFO queue for the next turn. **Send now**
+submits steering to the active harness at its supported interaction boundary;
+when idle it starts a turn. Queued items can be removed or sent ahead of the queue.
+Steering does not stop the turn or change its model, permissions, or sandbox.
+
+Pi uses native RPC steering; Codex uses `turn/steer` with the expected turn ID;
+OpenCode submits another prompt to its existing session loop. Harness acceptance
+is distinct from proof that the model has acted on the instruction. Pending
+permissions and questions retain their own reply controls.
+
+The engine stores up to 32 pending messages per conversation, including prepared
+attachments. Accepted inputs enter chat history. Stop, execution failure, and
+engine restart pause unsent inputs. Unconfirmed native delivery is marked for
+manual recovery and is never automatically replayed. These controls affect the
+chat agent; they do not stop or steer an independently running graph node.
+Runtime behavior across the three harnesses awaits human validation.
 
 ## Linked Side Agent Conversation
 

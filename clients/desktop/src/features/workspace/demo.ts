@@ -1,6 +1,6 @@
 import type { FileMention, MentionPreparation } from '../../engine';
 
-export type Message = { id: string; role: 'user' | 'assistant'; text: string; context?: string[]; thought?: string; mentions?: FileMention[]; mentionPreparation?: MentionPreparation[] };
+export type Message = { id: string; role: 'user' | 'assistant'; text: string; status?: string; favorite?: boolean; context?: string[]; thought?: string; mentions?: FileMention[]; mentionPreparation?: MentionPreparation[] };
 export type Session = { id: string; projectId: string; title: string; workspace: string; messages: Message[] };
 
 export const initialSessions: Session[] = [

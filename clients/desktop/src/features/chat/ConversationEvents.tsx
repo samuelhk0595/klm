@@ -255,16 +255,21 @@ function SubagentActivity({ event, session, onOpen }: { event: EngineEvent; sess
   </button>;
 }
 
-export function ConversationEvents({ session, subagents, onSnapshot, onAskSide, onOpenSubagent, working }: {
+export function ConversationEvents({ session, subagents, onSnapshot, onEventChange, onAskSide, onOpenSubagent, working }: {
   session: Session;
   subagents?: Session[];
   onSnapshot: (session: SessionResponse) => void;
+  onEventChange?: (sessionId: string, event: EngineEvent) => void;
   onAskSide?: (messageId: string, passage: string) => void;
   onOpenSubagent?: (sessionId: string) => void;
   working?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<{ messageId: string; passage: string; left: number; top: number } | null>(null);
+  async function favorite(event: EngineEvent, value: boolean) {
+    const next = await request<EngineEvent>(`/api/sessions/${encodeURIComponent(session.id)}/events/${encodeURIComponent(event.id)}`, 'PATCH', { favorite: value });
+    onEventChange?.(session.id, next);
+  }
   useEffect(() => {
     if (!onAskSide) return;
     const readSelection = () => {
@@ -322,7 +327,7 @@ export function ConversationEvents({ session, subagents, onSnapshot, onAskSide, 
     <EventSequence events={visibleEvents} status={timelineStatus} updatedAt={session.updatedAt} showActiveWork={active} activeWorkStartedAt={activeWorkStartedAt} renderEvent={event => event.type === 'consultation'
       ? <ConsultationActivity event={event} output={grouped.get(String(event.data?.requestId)) ?? []} sessionId={session.id} onSnapshot={onSnapshot} />
       : event.type === 'subagent' ? <SubagentActivity event={event} session={subagents?.find(item => item.id === event.data?.childSessionId)} onOpen={onOpenSubagent} />
-      : <SessionEvent event={event} />} />
+      : <SessionEvent event={event} onFavorite={onEventChange && event.type === 'assistant' ? value => favorite(event, value) : undefined} />} />
     {selection && onAskSide && <Button size="sm" className="selection-action" style={{ left: selection.left, top: selection.top }} onPointerDown={event => event.preventDefault()} onClick={() => {
       onAskSide(selection.messageId, selection.passage); setSelection(null); window.getSelection()?.removeAllRanges();
     }}>Ask side agent</Button>}

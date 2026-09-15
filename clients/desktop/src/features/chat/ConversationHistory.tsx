@@ -3,7 +3,7 @@ import type { EventPage, Session, SessionResponse } from '../../engine';
 import { ConversationEvents } from './ConversationEvents';
 import { HistoryLoader } from './HistoryLoader';
 
-export function ConversationHistory({ session, subagents, working, label, empty, onSnapshot, onHistory, onAskSide, onOpenSubagent }: {
+export function ConversationHistory({ session, subagents, working, label, empty, onSnapshot, onHistory, onEventChange, onAskSide, onOpenSubagent }: {
   session: Session;
   subagents?: Session[];
   working: boolean;
@@ -11,6 +11,7 @@ export function ConversationHistory({ session, subagents, working, label, empty,
   empty?: ReactNode;
   onSnapshot: (session: SessionResponse) => void;
   onHistory: (page: EventPage) => void;
+  onEventChange?: (sessionId: string, event: import('../../engine').EngineEvent) => void;
   onAskSide?: (messageId: string, passage: string) => void;
   onOpenSubagent?: (sessionId: string) => void;
 }) {
@@ -27,7 +28,7 @@ export function ConversationHistory({ session, subagents, working, label, empty,
     {!session.history && !session.events.length
       ? <p className="muted" role="status">Loading history...</p>
       : session.events.length || working
-        ? <ConversationEvents key={`conversation-events/${session.id}`} session={session} subagents={subagents} working={working} onSnapshot={onSnapshot} onAskSide={onAskSide} onOpenSubagent={onOpenSubagent} />
+        ? <ConversationEvents key={`conversation-events/${session.id}`} session={session} subagents={subagents} working={working} onSnapshot={onSnapshot} onEventChange={onEventChange} onAskSide={onAskSide} onOpenSubagent={onOpenSubagent} />
         : empty}
   </div>;
 }

@@ -161,6 +161,8 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 	frames, done := process.Frames, process.Done
 	choiceStop := p.graphStop()
 	choiceInterrupted := false
+	steering := p.steeringChannel()
+	steeringRequests := map[string]bool{}
 	sendThread := func() error {
 		params := map[string]any{"cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": "read-only"}
 		method := "thread/start"
@@ -181,6 +183,10 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 		if !choiceInterrupted && p.choiceToolSettled && !p.graphMCPPending() {
 			choiceStop = p.graphStop()
 		}
+		var inputReady <-chan struct{}
+		if phase == "" && c.turnID != "" && !p.completed {
+			inputReady = steering
+		}
 		var frame map[string]any
 		var ok bool
 		// Drain buffered output before interpreting process exit as a missing
@@ -195,6 +201,18 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 				return errors.New("Codex app-server exited without completing the turn.")
 			}
 			select {
+			case <-inputReady:
+				q, payload, err := p.takeSteering()
+				if err != nil {
+					return err
+				}
+				if q != nil {
+					steeringRequests["klm-steer-"+q.ID] = true
+					if err := c.send(map[string]any{"id": "klm-steer-" + q.ID, "method": "turn/steer", "params": map[string]any{"threadId": c.threadID, "expectedTurnId": c.turnID, "input": payload.codexInput()}}); err != nil {
+						return err
+					}
+				}
+				continue
 			case <-choiceStop:
 				choiceStop = nil
 				if p.graphMCPPending() {
@@ -252,6 +270,25 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 			continue
 		}
 		id, isString := frame["id"].(string)
+		if isString && strings.HasPrefix(id, "klm-steer-") {
+			if !steeringRequests[id] {
+				continue
+			}
+			delete(steeringRequests, id)
+			failure := ""
+			if frame["error"] != nil {
+				failure = humanError(frame["error"])
+				if failure == "" {
+					failure = "Codex did not accept this message. Send it again when ready."
+				}
+			} else if str(object(frame["result"]), "turnId") != c.turnID {
+				return errors.New("Codex steering acknowledgement identified a different turn.")
+			}
+			if err := p.finishSteering(strings.TrimPrefix(id, "klm-steer-"), failure); err != nil {
+				return err
+			}
+			continue
+		}
 		if !isString || phase == "" || id != phase {
 			continue
 		}

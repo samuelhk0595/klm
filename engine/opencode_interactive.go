@@ -916,13 +916,69 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	}
 	// Events queued during prompt_async are processed only after submission succeeds.
 	busy, ownedMessage := false, false
+	steering := p.steeringChannel()
+	steeringMessageID, steeringQueueID := "", ""
+	latestSteeringID := ""
+	steeringHTTPPending := false
+	steeringResult := make(chan error, 1)
+	var deferredIdle map[string]any
+	steeringTimer := time.NewTimer(15 * time.Second)
+	steeringTimer.Stop()
+	defer steeringTimer.Stop()
+	var steeringDeadline <-chan time.Time
 	choiceStop := p.graphStop()
 	choiceInterrupted := false
 	for {
 		if p.completed && !p.graphMCPPending() {
 			return nil
 		}
+		nextEvents := events
+		if deferredIdle != nil && steeringMessageID == "" && !steeringHTTPPending {
+			replay := make(chan map[string]any, 1)
+			replay <- deferredIdle
+			deferredIdle, nextEvents = nil, replay
+		}
+		var inputReady <-chan struct{}
+		if !steeringHTTPPending {
+			inputReady = steering
+		}
 		select {
+		case <-inputReady:
+			q, payload, err := p.takeSteering()
+			if err != nil {
+				return err
+			}
+			if q == nil {
+				continue
+			}
+			steeringQueueID = q.ID
+			steeringMessageID = fmt.Sprintf("msg_%012x%s", (uint64(time.Now().UnixMilli())*0x1000+1)&0xffffffffffff, q.ID[:14])
+			latestSteeringID = steeringMessageID
+			steeringHTTPPending = true
+			steeringTimer.Reset(15 * time.Second)
+			steeringDeadline = steeringTimer.C
+			nextPrompt := map[string]any{"messageID": steeringMessageID, "parts": payload.openCodeParts()}
+			if model, ok := prompt["model"]; ok {
+				nextPrompt["model"] = model
+			}
+			if variant, ok := prompt["variant"]; ok {
+				nextPrompt["variant"] = variant
+			}
+			go func() {
+				sendCtx, sendCancel := context.WithTimeout(ctx, 15*time.Second)
+				defer sendCancel()
+				steeringResult <- h.json(sendCtx, http.MethodPost, sessionPath+"/prompt_async", nextPrompt, nil)
+			}()
+		case <-steeringDeadline:
+			return errors.New("OpenCode did not confirm the steering message before the delivery deadline.")
+		case sendErr := <-steeringResult:
+			steeringHTTPPending = false
+			p.app.mu.Lock()
+			p.app.wakeSteeringLocked(p.id)
+			p.app.mu.Unlock()
+			if sendErr != nil && steeringMessageID != "" {
+				return fmt.Errorf("OpenCode message delivery was not confirmed: %w", sendErr)
+			}
 		case <-choiceStop:
 			choiceStop = nil
 			if p.completed {
@@ -940,7 +996,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			return err
 		case err := <-streamFailed:
 			return err
-		case event := <-events:
+		case event := <-nextEvents:
 			typ, properties := str(event, "type"), object(event["properties"])
 			if typ == "message.part.updated" {
 				p.observeOpenCodeMCPPart(object(properties["part"]))
@@ -1137,6 +1193,14 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				if id == "" || baseline[id] {
 					continue
 				}
+				if id == steeringMessageID && str(info, "role") == "user" {
+					if err := p.finishSteering(steeringQueueID, ""); err != nil {
+						return err
+					}
+					steeringMessageID, steeringQueueID = "", ""
+					steeringTimer.Stop()
+					steeringDeadline = nil
+				}
 				ownedMessage = true
 				infos[id] = info
 				usage.message(info)
@@ -1203,6 +1267,10 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				if (typ != "session.idle" && status != "idle") || (!busy && !ownedMessage) {
 					continue
 				}
+				if steeringMessageID != "" || steeringHTTPPending {
+					deferredIdle = event
+					continue
+				}
 				// Retain only this turn, then reconcile oldest first for UI ordering.
 				var history []map[string]any
 				if err := h.walkMessages(ctx, sessionID, baseline, func(message map[string]any) error {
@@ -1213,6 +1281,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				}
 				terminalAssistant, incomplete := false, false
 				latestCreated, latestID := float64(-1), ""
+				latestParentID := ""
 				for i := len(history) - 1; i >= 0; i-- {
 					message := history[i]
 					info := object(message["info"])
@@ -1235,6 +1304,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 					created, _ := object(info["time"])["created"].(float64)
 					if created > latestCreated || (created == latestCreated && id > latestID) {
 						latestCreated, latestID = created, id
+						latestParentID = str(info, "parentID")
 						finish := str(info, "finish")
 						terminalAssistant = completed && finish != "" && finish != "tool-calls" && finish != "unknown"
 						if choiceInterrupted && completed && str(object(info["error"]), "name") == "MessageAbortedError" {
@@ -1264,6 +1334,9 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				}
 				if err := p.setUsage(usage.snapshot()); err != nil {
 					return err
+				}
+				if latestSteeringID != "" && (latestParentID != latestSteeringID || incomplete || !terminalAssistant) {
+					continue
 				}
 				if incomplete || !terminalAssistant {
 					return errors.New("OpenCode became idle without a completed assistant response.")

@@ -117,7 +117,7 @@ func (a *app) sideHarness(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "Side conversation not found.")
 		return
 	}
-	if len(s.Events) > 0 || a.runs[s.ID] != nil {
+	if len(s.Events) > 0 || len(s.Queue) > 0 || a.runs[s.ID] != nil {
 		fail(w, 409, "Harness can only change before the first turn.")
 		return
 	}
@@ -244,6 +244,7 @@ func (a *app) scheduleLinkedLocked() {
 	if a.closing || a.storageErr != nil {
 		return
 	}
+	a.scheduleMessagesLocked()
 	a.scheduleGraphActivitiesLocked()
 	a.scheduleGraphNotificationsLocked()
 	for _, request := range a.state.Consultations {

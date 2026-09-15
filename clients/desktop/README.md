@@ -22,7 +22,11 @@ installer in `src-tauri/target/release/bundle/nsis`. No engine is bundled or sta
 `src/platform.ts` resolves fetch and SSE to `http://localhost:7331` inside Tauri and
 to the browser page's hostname on port 7331. Settings can persist a different HTTP(S)
 engine URL for that frontend; connecting reloads the page so requests and streams
-switch together. `VITE_ENGINE_URL` remains a development override. The production
+switch together. IP literals without a port use 7331; explicit ports are preserved,
+including 80/443. Domains receive no added port. Without a scheme, IPs use HTTP
+and domains use HTTPS. IPv6 supports `[IP]:port` and bare compressed literals.
+For Cloudflare Tunnels, enter e.g. `klmengine.codemob.com.br`; changing the
+subdomain needs no engine allowlist update. `VITE_ENGINE_URL` remains a development override. The production
 desktop CSP permits HTTP(S) connections so the configured endpoint also works in the
 packaged client.
 `npm run build` / `npm run preview` remain available for browser development.
@@ -246,6 +250,10 @@ and [adapter](../../GRAPH_ENGINE_PROGRESS_ADAPTER.md) reports for evidence and l
 Project creation persists name, absolute directory, and a resized PNG icon through
 the engine. The sidebar contains only the selected project's sessions, optionally
 grouped into topic folders. Each real session chooses its harness at creation.
+Session menus provide Rename and Archive, and the header title is also a rename
+trigger. Sessions can be dragged between active folders; the folder select remains
+available for keyboard and touch use. Folder menus archive whole visual groups.
+The Archived section restores sessions and folders without deleting history.
 Below the project heading/path, compact icon-and-text rows show **New session**,
 **Agents** and **Graphs**, before the Sessions list. New session uses a compose icon
 and opens the existing creation dialog; it replaces the former large button.
@@ -289,6 +297,8 @@ Drafts and unsent selections are independent per main chat and last until reload
 The selected project, last selected session per project, and side-panel open state
 per main session are saved in browser localStorage under the versioned, engine-scoped
 `klm.workspace-navigation.v1:<engine-url>` key. Reloading restores that navigation.
+The same entry preserves each project's collapsed folders. Search expands groups
+temporarily without replacing the saved collapsed state.
 Switching sessions restores only that session's side-panel state; opening a side chat
 does not open or create side chats for other sessions. Missing projects/sessions fall
 back to the first available entry. Storage failures leave in-memory navigation usable.
@@ -328,6 +338,9 @@ within the message. Copy preserves the original Markdown. Raw HTML is disabled,
 unsafe URL schemes are filtered, and Markdown images appear as links rather than
 automatically fetching remote resources. The Design system gallery includes a
 Markdown example for visual validation. Syntax highlighting is not included yet.
+Assistant message actions stay hidden while the message streams. A completed response
+provides Copy and a persistent Favorite toggle; failed or cancelled partial output
+provides Copy only. Like and dislike actions are not shown.
 
 Mermaid `flowchart` and `graph` blocks render inline between paragraphs in both
 chats, with a preview capped at 320px high. **Expand** opens a modal with zoom,
@@ -344,8 +357,12 @@ for checking inline layout and expansion without running a harness.
 
 The composer grows up to ten visible lines before scrolling. Enter sends;
 Shift+Enter and Ctrl+J insert a newline. Project/session data and native harness
-continuity survive restart; drafts are browser-memory-only. Feedback on message
-buttons is local UI state and is not sent to a provider.
+continuity survive restart; drafts are browser-memory-only. Message favorites are
+stored by the engine and are not sent to a provider.
+
+Archived sessions and sessions inside archived folders retain their runtime state but
+do not affect the error, waiting, or activity treatment on the project rail. Restoring
+them makes their current state visible again.
 
 The window has a blue/lavender gradient backdrop and can be dragged by its header.
 Header buttons do not drag it. Mobile retains the full-screen layout, and side
@@ -384,3 +401,11 @@ examples only. Native OS picker language may follow Windows settings; app copy
 remains English.
 
 See the root README for current execution, permission, and persistence boundaries.
+
+### Messages during a response
+
+Enter queues a message while the agent is running. The composer keeps Stop
+available and offers **Send now** for steering. The queue above the composer
+supports removing and sending individual items; it is shared through engine SSE
+and survives page reload. Main and side chats use the same controls. Paused and
+unconfirmed items require explicit action after Stop, failure or engine restart.

@@ -11,6 +11,7 @@ import { useAuthoringCatalog } from './features/graphs/catalog';
 import { graphListEntry } from './features/graphs/files';
 import { SideChatPanel } from './features/chat/SideChatPanel';
 import { CreateSessionDialog } from './features/workspace/CreateSessionDialog';
+import { RenameSessionDialog } from './features/workspace/RenameSessionDialog';
 import { SessionStatusBar } from './features/chat/SessionStatusBar';
 import { ModelPicker } from './features/chat/ModelPicker';
 import { isSessionResponse, mergeSessions, prependHistory } from './features/chat/sessionState';
@@ -19,11 +20,12 @@ import { SubagentView } from './features/chat/SubagentView';
 import { GraphPicker } from './features/chat/GraphPicker';
 import { PermissionCard } from './features/chat/PermissionCard';
 import { QuestionCard } from './features/chat/QuestionCard';
-import { MessageComposer, type ComposerDraft } from './features/chat/MessageComposer';
+import { MessageQueue } from './features/chat/MessageQueue';
+import { MessageComposer, type ComposerDraft, type SendMode } from './features/chat/MessageComposer';
 import { DesignSystem } from './DesignSystem';
 import { ProjectRail } from './features/projects/ProjectRail';
 import { ProjectDialog } from './features/projects/ProjectDialog';
-import { ENGINE_URL, getConversationGraph, mergeGraphState, selectConversationGraph, request, type ConversationGraphState, type EngineState, type EngineSnapshot, type EventPage, type Harness, type Project, type Session, type SessionResponse, type SessionMetadata, type SourceReference } from './engine';
+import { ENGINE_URL, getConversationGraph, mergeGraphState, selectConversationGraph, request, type ConversationGraphState, type EngineEvent, type EngineState, type EngineSnapshot, type EventPage, type Harness, type Project, type Session, type SessionResponse, type SessionMetadata, type SourceReference } from './engine';
 import { Select } from './design-system/Select';
 
 const GraphView = lazy(() => import('./features/graphs/GraphView').then(module => ({ default: module.GraphView })));
@@ -33,11 +35,11 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'The engine request failed. Please retry.';
 }
 
-type WorkspaceNavigation = { activeProjectId: string; selectedSessions: Record<string, string>; openSideSessions: string[] };
+type WorkspaceNavigation = { activeProjectId: string; selectedSessions: Record<string, string>; openSideSessions: string[]; collapsedFolders: Record<string, string[]>; collapsedArchivedProjects: string[] };
 const navigationStorageKey = `klm.workspace-navigation.v1:${ENGINE_URL}`;
 
 function readWorkspaceNavigation(): WorkspaceNavigation {
-  const fallback: WorkspaceNavigation = { activeProjectId: '', selectedSessions: {}, openSideSessions: [] };
+  const fallback: WorkspaceNavigation = { activeProjectId: '', selectedSessions: {}, openSideSessions: [], collapsedFolders: {}, collapsedArchivedProjects: [] };
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(navigationStorageKey) ?? 'null');
     if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return fallback;
@@ -47,6 +49,9 @@ function readWorkspaceNavigation(): WorkspaceNavigation {
       selectedSessions: value.selectedSessions && typeof value.selectedSessions === 'object' && !Array.isArray(value.selectedSessions)
         ? Object.fromEntries(Object.entries(value.selectedSessions).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {},
       openSideSessions: Array.isArray(value.openSideSessions) ? [...new Set(value.openSideSessions.filter((id): id is string => typeof id === 'string'))] : [],
+      collapsedFolders: value.collapsedFolders && typeof value.collapsedFolders === 'object' && !Array.isArray(value.collapsedFolders)
+        ? Object.fromEntries(Object.entries(value.collapsedFolders).flatMap(([id, folders]) => Array.isArray(folders) ? [[id, [...new Set(folders.filter((folder): folder is string => typeof folder === 'string'))]]] : [])) : {},
+      collapsedArchivedProjects: Array.isArray(value.collapsedArchivedProjects) ? [...new Set(value.collapsedArchivedProjects.filter((id): id is string => typeof id === 'string'))] : [],
     };
   } catch { return fallback; }
 }
@@ -72,13 +77,15 @@ export function App() {
   const navigation = useRef(0);
   const streams = useRef(new Map<string, EventSource>());
   const [workspaceNavigation, setWorkspaceNavigation] = useState(readWorkspaceNavigation);
-  const { activeProjectId, selectedSessions, openSideSessions } = workspaceNavigation;
+  const { activeProjectId, selectedSessions, openSideSessions, collapsedFolders, collapsedArchivedProjects } = workspaceNavigation;
   const [addingProject, setAddingProject] = useState<string | null>(null);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [creatingSession, setCreatingSession] = useState<{ projectId: string; workspace: string } | null>(null);
+  const [renamingSession, setRenamingSession] = useState<Session | null>(null);
   const project = projects.find(item => item.id === activeProjectId) ?? projects[0];
   const projectSessions = sessions.filter(item => item.projectId === project?.id && !item.parentId && item.role !== 'graph_node');
-  const session = projectSessions.find(item => item.id === selectedSessions[project?.id ?? '']) ?? projectSessions[0];
+  const visibleProjectSessions = projectSessions.filter(item => !item.archived && !project?.archivedFolders.includes(item.workspace));
+  const session = visibleProjectSessions.find(item => item.id === selectedSessions[project?.id ?? '']) ?? visibleProjectSessions[0];
   const activeId = session?.id ?? '';
   const gitBranch = sessionMetadata?.sessionId === activeId ? sessionMetadata.gitBranch ?? '' : '';
   const working = session?.status === 'running' || !!pendingMessages[activeId];
@@ -323,7 +330,7 @@ export function App() {
     setCreatingSession({ projectId: project.id, workspace: folder });
     setSidebarOpen(false);
   }
-  async function updateSession(target: Session, action: 'messages' | 'stop' | 'move' | 'harness', body: (ComposerDraft & { sources?: SourceReference[] }) | { workspace: string } | { harness: Harness['id'] } | Record<string, never>) {
+  async function updateSession(target: Session, action: 'messages' | 'stop' | 'harness', body: (ComposerDraft & { sources?: SourceReference[]; mode?: SendMode }) | { harness: Harness['id'] } | Record<string, never>) {
     const id = target.id;
     if (pending.current.has(id)) return false;
     pending.current.add(id);
@@ -331,7 +338,7 @@ export function App() {
     if (action === 'messages') setPendingMessages(current => ({ ...current, [id]: true }));
     setSessionErrors(current => ({ ...current, [id]: '' }));
     try {
-      const next = await request<SessionResponse>(`/api/sessions/${encodeURIComponent(id)}${action === 'move' ? '' : `/${action}`}`, action === 'move' || action === 'harness' ? 'PATCH' : 'POST', body);
+      const next = await request<SessionResponse>(`/api/sessions/${encodeURIComponent(id)}/${action}`, action === 'harness' ? 'PATCH' : 'POST', body);
       setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [next]) }));
       return true;
     } catch (error) {
@@ -341,6 +348,22 @@ export function App() {
       pending.current.delete(id);
       setPendingSessions(current => ({ ...current, [id]: false }));
       if (action === 'messages') setPendingMessages(current => ({ ...current, [id]: false }));
+    }
+  }
+  async function patchSession(target: Session, body: { title?: string; workspace?: string; archived?: boolean }): Promise<string | null> {
+    const id = target.id;
+    if (pending.current.has(id)) return 'Another session update is still in progress.';
+    pending.current.add(id); setPendingSessions(current => ({ ...current, [id]: true })); setSessionErrors(current => ({ ...current, [id]: '' }));
+    try {
+      const next = await request<SessionResponse>(`/api/sessions/${encodeURIComponent(id)}`, 'PATCH', body);
+      setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [next]) }));
+      return null;
+    } catch (error) {
+      const failure = errorMessage(error);
+      setSessionErrors(current => ({ ...current, [id]: failure }));
+      return failure;
+    } finally {
+      pending.current.delete(id); setPendingSessions(current => ({ ...current, [id]: false }));
     }
   }
   async function applyModelSettings(target: Session, model: string, effort: string) {
@@ -355,15 +378,18 @@ export function App() {
     } catch (error) { setSessionErrors(current => ({ ...current, [id]: errorMessage(error) })); return false; }
     finally { pending.current.delete(id); setPendingSessions(current => ({ ...current, [id]: false })); }
   }
-  async function send(draft: ComposerDraft) {
-    if (!session || session.status === 'running' || !draft.text.trim()) return false;
-    return updateSession(session, 'messages', draft);
+  async function send(draft: ComposerDraft, mode?: SendMode) {
+    if (!session || !draft.text.trim()) return false;
+    return updateSession(session, 'messages', { ...draft, mode });
   }
   function receiveSession(snapshot: SessionResponse) {
     setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [snapshot]) }));
   }
   function receiveHistory(page: EventPage) {
     setEngine(current => ({ ...current, sessions: prependHistory(current.sessions, page) }));
+  }
+  function receiveEvent(sessionId: string, event: EngineEvent) {
+    setEngine(current => ({ ...current, sessions: current.sessions.map(session => session.id === sessionId ? { ...session, events: session.events.map(item => item.id === event.id ? event : item) } : session) }));
   }
   function graphRequestResolved(conversationId: string) {
     // Callback responses describe the private node session, not a public chat.
@@ -394,11 +420,11 @@ export function App() {
     setSideSources(current => ({ ...current, [session.id]: [...(current[session.id] ?? []), { sessionId: session.id, messageId, passage }] }));
     setSideOpen(true); setSidebarOpen(false);
   }
-  async function sendSide(draft: ComposerDraft) {
-    if (!sideSession || sideSession.status === 'running') return false;
+  async function sendSide(draft: ComposerDraft, mode?: SendMode) {
+    if (!sideSession) return false;
     const mainId = activeId;
     const sources = sideSources[mainId] ?? [];
-    const accepted = await updateSession(sideSession, 'messages', { ...draft, sources });
+    const accepted = await updateSession(sideSession, 'messages', { ...draft, sources, mode });
     if (accepted) setSideSources(current => ({ ...current, [mainId]: (current[mainId] ?? []).filter(source => !sources.includes(source)) }));
     return accepted;
   }
@@ -425,7 +451,7 @@ export function App() {
     setSidebarOpen(false);
     setAddingProject('');
   }
-  async function addProject(input: Omit<Project, 'id' | 'folders'>): Promise<string | null> {
+  async function addProject(input: Omit<Project, 'id' | 'folders' | 'archivedFolders'>): Promise<string | null> {
     const selection = navigation.current;
     try {
       const next = await request<Project>('/api/projects', 'POST', input);
@@ -479,6 +505,19 @@ export function App() {
       return null;
     } catch (error) { return errorMessage(error); }
   }
+  async function archiveFolder(folder: string, archived: boolean): Promise<boolean> {
+    if (!project) return false;
+    const projectId = project.id;
+    try {
+      const next = await request<Project>(`/api/projects/${encodeURIComponent(projectId)}/folders`, 'PATCH', { name: folder, archived });
+      projectRevision.current += 1;
+      setEngine(current => ({ ...current, projects: current.projects.map(item => item.id === projectId ? next : item) }));
+      return true;
+    } catch (error) {
+      setConnectionError(errorMessage(error));
+      return false;
+    }
+  }
 
   const tabItems: { value: SessionTab; label: string; onClose?: () => void; closeLabel?: string }[] = [{ value: 'chat', label: 'Chat' }];
   if (selectedGraphId) tabItems.push({ value: 'graph', label: 'Graph' });
@@ -523,18 +562,18 @@ export function App() {
   >
     <ProjectRail projects={projects} sessions={sessions} activeId={project?.id ?? ''} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); setSettingsEngineURL(ENGINE_URL); setSettingsError(''); settings.current?.showModal(); }} />
     {sidebarOpen && <button className="panel-backdrop" aria-label="Close side panel" onClick={() => setSidebarOpen(false)} />}
-    {project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} onNew={newSession} onCreateFolder={createFolder} onSelect={id => { navigation.current += 1; setWorkspaceNavigation(current => ({ ...current, selectedSessions: { ...current.selectedSessions, [project.id]: id } })); setView('chat'); setSidebarOpen(false); }} onClose={() => setSidebarOpen(false)} onAgents={() => { navigation.current += 1; setAgentsVisit(current => current + 1); setView('agents'); setSidebarOpen(false); }} onGraphs={() => { navigation.current += 1; setGraphsVisit(current => current + 1); setView('graphs'); setSidebarOpen(false); }} onEditProject={openProjectEditor} onRemoveProject={target => removeProject(target.id)} />}
+    {project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} collapsed={collapsedFolders[project.id] ?? []} archivedCollapsed={collapsedArchivedProjects.includes(project.id)} onCollapsedChange={folders => setWorkspaceNavigation(current => ({ ...current, collapsedFolders: { ...current.collapsedFolders, [project.id]: folders } }))} onArchivedCollapsedChange={collapsed => setWorkspaceNavigation(current => ({ ...current, collapsedArchivedProjects: collapsed ? [...new Set([...current.collapsedArchivedProjects, project.id])] : current.collapsedArchivedProjects.filter(id => id !== project.id) }))} onNew={newSession} onCreateFolder={createFolder} onRename={setRenamingSession} onMove={async (target, folder) => (await patchSession(target, { workspace: folder })) === null} onArchiveSession={async (target, archived) => (await patchSession(target, { archived })) === null} onArchiveFolder={archiveFolder} onSelect={id => { navigation.current += 1; setWorkspaceNavigation(current => ({ ...current, selectedSessions: { ...current.selectedSessions, [project.id]: id } })); setView('chat'); setSidebarOpen(false); }} onClose={() => setSidebarOpen(false)} onAgents={() => { navigation.current += 1; setAgentsVisit(current => current + 1); setView('agents'); setSidebarOpen(false); }} onGraphs={() => { navigation.current += 1; setGraphsVisit(current => current + 1); setView('graphs'); setSidebarOpen(false); }} onEditProject={openProjectEditor} onRemoveProject={target => removeProject(target.id)} />}
     <main className="main-panel">
-      <header className="session-header"><div id="workspace-header-leading" className="header-leading">{project && <IconButton label="Open sessions" className="mobile-nav" onClick={() => setSidebarOpen(true)}><PanelLeft /></IconButton>}<h1>{view === 'design' ? 'Design system' : view === 'agents' ? 'Agents' : view === 'graphs' ? 'Graphs' : session?.title ?? project?.name ?? 'KLM'}</h1>{view === 'chat' && session && gitBranch && <span className="mode-label session-header-branch" title={gitBranch}><GitBranch aria-hidden="true" /><span>{gitBranch}</span></span>}</div><div id="workspace-header-actions" className="header-actions">
+      <header className="session-header"><div id="workspace-header-leading" className="header-leading">{project && <IconButton label="Open sessions" className="mobile-nav" onClick={() => setSidebarOpen(true)}><PanelLeft /></IconButton>}<h1>{view === 'chat' && session ? <button className="session-title-button" title="Rename session" onClick={() => setRenamingSession(session)}>{session.title}</button> : view === 'design' ? 'Design system' : view === 'agents' ? 'Agents' : view === 'graphs' ? 'Graphs' : project?.name ?? 'KLM'}</h1>{view === 'chat' && session && gitBranch && <span className="mode-label session-header-branch" title={gitBranch}><GitBranch aria-hidden="true" /><span>{gitBranch}</span></span>}</div><div id="workspace-header-actions" className="header-actions">
         {session && view === 'chat' && <Button size="sm" className="export-button" onClick={exportSession}>Session log<Download /></Button>}
         {IS_DESKTOP && <IconButton label="Focus" onClick={() => void focus()}><Focus /></IconButton>}
         {session && view === 'chat' && <IconButton label={sideOpen ? 'Close side agent' : 'Open side agent'} aria-expanded={sideOpen} onClick={() => { setSideOpen(!sideOpen); setSidebarOpen(false); }}><PanelRight /></IconButton>}
       </div></header>
       {focusError && <div role="alert" className="storage-error">{focusError} <Button size="sm" onClick={() => void focus()}>Retry</Button></div>}
       {connectionError && <div role="alert" className="storage-error">{connectionError} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}
-      {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav<SessionTab> value={view === 'design' ? 'chat' : activeTab} onChange={tab => { setView('chat'); setSessionTabs(current => ({ ...current, [activeId]: tab })); }} items={view === 'chat' ? tabItems : [{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <Select label="Move session to folder" value={session.workspace} disabled={pendingSessions[session.id] || !!connectionError} onChange={event => void updateSession(session, 'move', { workspace: event.target.value })}>{[...project.folders, 'Ungrouped'].map(folder => <option key={folder} value={folder}>{folder}</option>)}</Select>}</div>}
+      {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav<SessionTab> value={view === 'design' ? 'chat' : activeTab} onChange={tab => { setView('chat'); setSessionTabs(current => ({ ...current, [activeId]: tab })); }} items={view === 'chat' ? tabItems : [{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <Select label="Move session to folder" value={session.workspace} disabled={pendingSessions[session.id] || !!connectionError} onChange={event => void patchSession(session, { workspace: event.target.value })}>{[...project.folders.filter(folder => !project.archivedFolders.includes(folder)), 'Ungrouped'].map(folder => <option key={folder} value={folder}>{folder}</option>)}</Select>}</div>}
       {view === 'design' ? <DesignSystem /> : (view === 'agents' || view === 'graphs') && project ? <ProjectAuthoring key={`${project.id}:${view}:${agentsVisit}:${graphsVisit}`} projectId={project.id} area={view} /> : !loaded ? <div className="empty-chat"><h2>{connectionError ? 'Engine disconnected' : 'Connecting to engine...'}</h2></div> : !project ? <div className="empty-chat"><h2>Add a project</h2><Button onClick={() => void openProjectPicker()}>Add project</Button></div> : !session ? <div className="empty-chat"><h2>Create a session</h2><Button onClick={() => newSession()} disabled={!!connectionError}>Create session</Button></div> : <>
-        {activeTab === 'chat' && <ConversationHistory session={session} subagents={sessions.filter(item => item.parentId === activeId && item.role === 'subagent')} working={working} label="Conversation" onSnapshot={receiveSession} onHistory={receiveHistory} onAskSide={askSide} onOpenSubagent={openSubagent} empty={<div className="empty-chat"><div className="empty-chat-brand" role="img" aria-label="KLM Harness"><span className="empty-chat-wordmark" aria-hidden="true"><span>K</span><span>L</span><span>M</span></span><Badge>Harness</Badge></div><h2>What would you like to work on?</h2></div>} />}
+        {activeTab === 'chat' && <ConversationHistory session={session} subagents={sessions.filter(item => item.parentId === activeId && item.role === 'subagent')} working={working} label="Conversation" onSnapshot={receiveSession} onHistory={receiveHistory} onEventChange={receiveEvent} onAskSide={askSide} onOpenSubagent={openSubagent} empty={<div className="empty-chat"><div className="empty-chat-brand" role="img" aria-label="KLM Harness"><span className="empty-chat-wordmark" aria-hidden="true"><span>K</span><span>L</span><span>M</span></span><Badge>Harness</Badge></div><h2>What would you like to work on?</h2></div>} />}
         {activeTab.startsWith('subagent:') && <SubagentView session={activeSubagent} onSnapshot={receiveSession} onHistory={receiveHistory} />}
         {(catalogError || !!catalog?.errors.length) && <div role="alert" className="storage-error">{catalogError || catalog?.errors.join(' ')} <Button size="sm" disabled={catalogLoading} onClick={() => void reloadCatalog().catch(() => {})}>Retry</Button></div>}
         {graphErrors[session.id] && <div role="alert" className="storage-error">{graphErrors[session.id]} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}
@@ -556,7 +595,8 @@ export function App() {
                   ? <QuestionCard key={key} question={{ ...item.question, id: item.requestId }} sessionId={item.sessionId} origin={origin} onResolved={() => graphRequestResolved(session.id)} /> : null;
             })}
           </div>}
-          <MessageComposer key={session.id} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} disabled={!!connectionError || pendingSessions[session.id] || session.status === 'running' || awaitingPermission || awaitingQuestion} running={session.status === 'running'} onStop={() => void updateSession(session, 'stop', {})} graphControl={<GraphPicker key={session.id} graphs={catalogGraphs} value={selectedGraphId} selectedName={catalogSelectedGraph?.definition.name ?? selectedGraph?.definition.name} running={graphRunInProgress} disabled={!!connectionError || !!selectingGraphs[session.id] || !session.graph} loading={catalogLoading} error={catalogError || catalog?.errors.join(' ')} onReload={() => void reloadCatalog().catch(() => {})} onChange={graphId => void chooseGraph(session.id, graphId)} />} modelControl={<ModelPicker key={session.id} session={session} disabled={!!connectionError || !!pendingSessions[session.id] || working} onSave={(model, effort) => applyModelSettings(session, model, effort)} />} />
+          <MessageQueue key={`queue/${session.id}`} session={session} disabled={!!connectionError || !!pendingSessions[session.id]} onSnapshot={receiveSession} />
+          <MessageComposer key={session.id} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} disabled={!!connectionError || pendingSessions[session.id]} running={session.status === 'running'} onStop={() => void updateSession(session, 'stop', {})} graphControl={<GraphPicker key={session.id} graphs={catalogGraphs} value={selectedGraphId} selectedName={catalogSelectedGraph?.definition.name ?? selectedGraph?.definition.name} running={graphRunInProgress} disabled={!!connectionError || !!selectingGraphs[session.id] || !session.graph} loading={catalogLoading} error={catalogError || catalog?.errors.join(' ')} onReload={() => void reloadCatalog().catch(() => {})} onChange={graphId => void chooseGraph(session.id, graphId)} />} modelControl={<ModelPicker key={session.id} session={session} disabled={!!connectionError || !!pendingSessions[session.id] || working} onSave={(model, effort) => applyModelSettings(session, model, effort)} />} />
           <SessionStatusBar session={session} />
         </div>
       </>}
@@ -564,7 +604,7 @@ export function App() {
     {sideVisible && project && session && <SideChatPanel key={session.id} session={sideSession} project={project} harnesses={harnesses}
       draft={drafts[`side:${session.id}`] ?? { text: '', mentions: [] }} sources={sideSources[session.id] ?? []}
       error={sideSession ? sessionErrors[sideSession.id] ?? '' : sideErrors[session.id] ?? ''} disconnected={!!connectionError} pending={!!sideSession && !!pendingSessions[sideSession.id]}
-      onClose={() => setSideOpen(false)} onRetry={() => void ensureSide(session)} onSnapshot={receiveSession} onHistory={receiveHistory}
+      onClose={() => setSideOpen(false)} onRetry={() => void ensureSide(session)} onSnapshot={receiveSession} onHistory={receiveHistory} onEventChange={receiveEvent}
       onDraftChange={draft => setDrafts(current => ({ ...current, [`side:${session.id}`]: draft }))}
       onRemoveSource={index => setSideSources(current => ({ ...current, [session.id]: (current[session.id] ?? []).filter((_, i) => i !== index) }))}
       onSend={sendSide} onStop={() => { if (sideSession) void updateSession(sideSession, 'stop', {}); }}
@@ -573,6 +613,7 @@ export function App() {
     {addingProject !== null && <ProjectDialog initialFolder={addingProject} onSave={addProject} onClose={() => { navigation.current += 1; setAddingProject(null); }} />}
     {editingProject && <ProjectDialog key={`edit-project:${editingProject.id}`} initialFolder={editingProject.folder} project={editingProject} onSave={input => editProject(editingProject.id, input)} onClose={() => setEditingProject(null)} />}
     {creatingSession && createProject && <CreateSessionDialog project={createProject} harnesses={harnesses} workspace={creatingSession.workspace} onCreate={createSession} onClose={() => { navigation.current += 1; setCreatingSession(null); }} />}
-    <dialog ref={settings} aria-label="Settings" className="settings-dialog"><div className="dialog-heading"><h2>Settings</h2><IconButton label="Close settings" onClick={() => settings.current?.close()}><X /></IconButton></div><form className="engine-settings-form" onSubmit={connectEngine}><label htmlFor="engine-url">Engine URL</label><Input id="engine-url" type="url" required autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="http://localhost:7331" value={settingsEngineURL} aria-invalid={!!settingsError} aria-describedby={settingsError ? 'engine-url-error' : undefined} onChange={event => { setSettingsEngineURL(event.target.value); setSettingsError(''); }} />{settingsError && <p id="engine-url-error" className="form-error" role="alert">{settingsError}</p>}<div className="dialog-actions"><Button variant="primary" type="submit">Connect</Button></div></form><p>Projects and session history are saved locally by the engine. Unsent drafts are kept only until this page reloads.</p><Button onClick={() => { settings.current?.close(); setView('design'); }}>Design system</Button></dialog>
+    {renamingSession && <RenameSessionDialog key={renamingSession.id} session={renamingSession} onRename={title => patchSession(renamingSession, { title })} onClose={() => setRenamingSession(null)} />}
+    <dialog ref={settings} aria-label="Settings" className="settings-dialog"><div className="dialog-heading"><h2>Settings</h2><IconButton label="Close settings" onClick={() => settings.current?.close()}><X /></IconButton></div><form className="engine-settings-form" onSubmit={connectEngine}><label htmlFor="engine-url">Engine URL</label><Input id="engine-url" type="text" inputMode="url" required autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="http://localhost:7331" value={settingsEngineURL} aria-invalid={!!settingsError} aria-describedby={settingsError ? 'engine-url-error' : undefined} onChange={event => { setSettingsEngineURL(event.target.value); setSettingsError(''); }} />{settingsError && <p id="engine-url-error" className="form-error" role="alert">{settingsError}</p>}<div className="dialog-actions"><Button variant="primary" type="submit">Connect</Button></div></form><p>Projects and session history are saved locally by the engine. Unsent drafts are kept only until this page reloads.</p><Button onClick={() => { settings.current?.close(); setView('design'); }}>Design system</Button></dialog>
   </div>;
 }

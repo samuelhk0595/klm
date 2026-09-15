@@ -9,6 +9,7 @@ export type Project = {
   folder: string;
   icon: string;
   folders: string[];
+  archivedFolders: string[];
 };
 
 export type Harness = {
@@ -25,6 +26,7 @@ export type EngineEvent = {
   text: string;
   title?: string;
   status?: string;
+  favorite?: boolean;
   createdAt: string;
   data?: Record<string, unknown> & { mentions?: FileMention[]; mentionPreparation?: MentionPreparation[] };
 };
@@ -35,7 +37,10 @@ export type SessionUsage = {
   context: { tokens: number | null; window: number | null } | null;
 };
 
+export type QueuedMessage = { id: string; text: string; mode: "queue" | "steer"; status: "queued" | "steering" | "sending" | "paused" | "uncertain"; error?: string };
+
 export type Session = {
+  queue?: QueuedMessage[] | null;
   role?: 'side_agent' | 'subagent' | 'graph_node';
   selectedGraphId?: string;
   graph?: ConversationGraphState;
@@ -51,6 +56,7 @@ export type Session = {
   resolvedModel?: string;
   resolvedEffort?: string;
   status: 'idle' | 'running' | 'error';
+  archived?: boolean;
   runtimeActive?: boolean;
   events: EngineEvent[];
   history?: { revision: number; startIndex: number; total: number; nextCursor?: string; hasMore: boolean };
