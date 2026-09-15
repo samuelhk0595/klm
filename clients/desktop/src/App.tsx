@@ -37,7 +37,7 @@ function mergeSessions(current: Session[], incoming: Session[]): Session[] {
     const previous = sessions.get(session.id);
     const base = !previous || version(session.updatedAt) > version(previous.updatedAt) ? session : previous;
     const graph = mergeGraphState(previous?.graph, session.graph);
-    sessions.set(session.id, { ...base, ...(graph ? { graph, selectedGraphId: graph.selectedGraphId } : {}) });
+    sessions.set(session.id, { ...base, runtimeActive: session.runtimeActive, ...(graph ? { graph, selectedGraphId: graph.selectedGraphId } : {}) });
   }
   return [...sessions.values()];
 }
@@ -124,6 +124,9 @@ export function App() {
   const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>({});
   const settings = useRef<HTMLDialogElement>(null);
   const history = useRef<HTMLDivElement>(null);
+  const followingHistory = useRef(true);
+  const renderedHistory = useRef<HTMLDivElement | null>(null);
+  const renderedSessionId = useRef('');
   const shell = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; minX: number; maxX: number; minY: number; maxY: number } | null>(null);
   useEffect(() => {
@@ -215,7 +218,7 @@ export function App() {
     catch (error) { setGraphErrors(current => ({ ...current, [id]: errorMessage(error) })); }
     finally { graphSelectionPending.current.delete(id); setSelectingGraphs(current => ({ ...current, [id]: false })); }
   }
-  const streamIds = JSON.stringify(sessions.filter(item => item.role !== 'graph_node' && (item.status === 'running' || item.graph?.run?.active || item.id === activeId || (sideVisible && item.id === sideSession?.id))).map(item => item.id).sort());
+  const streamIds = JSON.stringify(sessions.filter(item => item.role !== 'graph_node' && (item.status === 'running' || item.runtimeActive || item.graph?.run?.active || item.id === activeId || (sideVisible && item.id === sideSession?.id))).map(item => item.id).sort());
   useEffect(() => {
     const ids = new Set<string>(JSON.parse(streamIds) as string[]);
     for (const [id, source] of streams.current) {
@@ -283,7 +286,15 @@ export function App() {
     return () => { covered.forEach(element => { element.inert = false; }); document.removeEventListener('keydown', onKey); window.removeEventListener('resize', resize); previous?.focus(); };
   }, [sidebarOpen, project?.id]);
   useEffect(() => { if (sideVisible && session) void ensureSide(session); }, [sideVisible, activeId]);
-  useEffect(() => { history.current?.scrollTo?.({ top: history.current.scrollHeight }); }, [session?.updatedAt, activeId, view, working]);
+  useEffect(() => {
+    const element = history.current;
+    const enteringHistory = element !== renderedHistory.current || activeId !== renderedSessionId.current;
+    renderedHistory.current = element;
+    renderedSessionId.current = activeId;
+    if (!element) return;
+    if (enteringHistory) followingHistory.current = true;
+    if (followingHistory.current) element.scrollTo({ top: element.scrollHeight });
+  }, [session?.updatedAt, activeId, view, working]);
   function newSession(folder = 'Ungrouped') {
     if (!project) return;
     navigation.current += 1;
@@ -459,7 +470,7 @@ export function App() {
     onLostPointerCapture={() => { drag.current = null; if (shell.current) delete shell.current.dataset.dragging; }}
     onPointerCancel={() => { drag.current = null; if (shell.current) delete shell.current.dataset.dragging; }}
   >
-    <ProjectRail projects={projects} activeId={project?.id ?? ''} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); settings.current?.showModal(); }} />
+    <ProjectRail projects={projects} sessions={sessions} activeId={project?.id ?? ''} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); settings.current?.showModal(); }} />
     {sidebarOpen && <button className="panel-backdrop" aria-label="Close side panel" onClick={() => setSidebarOpen(false)} />}
     {project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} onNew={newSession} onCreateFolder={createFolder} onSelect={id => { navigation.current += 1; setWorkspaceNavigation(current => ({ ...current, selectedSessions: { ...current.selectedSessions, [project.id]: id } })); setView('chat'); setSidebarOpen(false); }} onClose={() => setSidebarOpen(false)} onAgents={() => { navigation.current += 1; setAgentsVisit(current => current + 1); setView('agents'); setSidebarOpen(false); }} onGraphs={() => { navigation.current += 1; setGraphsVisit(current => current + 1); setView('graphs'); setSidebarOpen(false); }} onEditProject={openProjectEditor} onRemoveProject={target => removeProject(target.id)} />}
     <main className="main-panel">
@@ -472,9 +483,11 @@ export function App() {
       {connectionError && <div role="alert" className="storage-error">{connectionError} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}
       {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav<'chat' | 'graph'> value={view === 'design' ? 'chat' : chatTab} onChange={tab => { setView('chat'); setSessionTabs(current => ({ ...current, [activeId]: tab })); }} items={view === 'chat' && selectedGraphId ? [{ value: 'chat', label: 'Chat' }, { value: 'graph', label: 'Graph' }] : [{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <Select label="Move session to folder" value={session.workspace} disabled={pendingSessions[session.id] || !!connectionError} onChange={event => void updateSession(session, 'move', { workspace: event.target.value })}>{[...project.folders, 'Ungrouped'].map(folder => <option key={folder} value={folder}>{folder}</option>)}</Select>}</div>}
       {view === 'design' ? <DesignSystem /> : (view === 'agents' || view === 'graphs') && project ? <ProjectAuthoring key={`${project.id}:${view}:${agentsVisit}:${graphsVisit}`} projectId={project.id} area={view} /> : !loaded ? <div className="empty-chat"><h2>{connectionError ? 'Engine disconnected' : 'Connecting to engine...'}</h2></div> : !project ? <div className="empty-chat"><h2>Add a project</h2><Button onClick={() => void openProjectPicker()}>Add project</Button></div> : !session ? <div className="empty-chat"><h2>Create a session</h2><Button onClick={() => newSession()} disabled={!!connectionError}>Create session</Button></div> : <>
-        <div className="chat-history" hidden={chatTab === 'graph'} ref={history} role="log" aria-label="Conversation" aria-live="polite">
-          {session.events.length ? <ConversationEvents key={session.id} session={session} onSnapshot={receiveSession} onAskSide={askSide} /> : !working ? <div className="empty-chat"><div className="empty-chat-brand" role="img" aria-label="KLM Harness"><span className="empty-chat-wordmark" aria-hidden="true"><span>K</span><span>L</span><span>M</span></span><Badge>Harness</Badge></div><h2>What would you like to work on?</h2></div> : null}
-          {working && <div className="chat-working" role="status">{awaitingPermission ? 'Waiting for approval' : awaitingQuestion ? 'Waiting for your answer' : <><span className="working-spinner" aria-hidden="true" />Working</>}</div>}
+        <div className="chat-history" hidden={chatTab === 'graph'} ref={history} role="log" aria-label="Conversation" aria-live="polite" onScroll={event => {
+          const element = event.currentTarget;
+          followingHistory.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+        }}>
+          {session.events.length || working ? <ConversationEvents key={session.id} session={session} working={working} onSnapshot={receiveSession} onAskSide={askSide} /> : <div className="empty-chat"><div className="empty-chat-brand" role="img" aria-label="KLM Harness"><span className="empty-chat-wordmark" aria-hidden="true"><span>K</span><span>L</span><span>M</span></span><Badge>Harness</Badge></div><h2>What would you like to work on?</h2></div>}
         </div>
         {(catalogError || !!catalog?.errors.length) && <div role="alert" className="storage-error">{catalogError || catalog?.errors.join(' ')} <Button size="sm" disabled={catalogLoading} onClick={() => void reloadCatalog().catch(() => {})}>Retry</Button></div>}
         {graphErrors[session.id] && <div role="alert" className="storage-error">{graphErrors[session.id]} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}

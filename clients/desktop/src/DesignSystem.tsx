@@ -14,6 +14,7 @@ import { Toggle } from './design-system/Toggle';
 import { TokenTextarea } from './design-system/TokenTextarea';
 import { SearchSelect } from './design-system/SearchSelect';
 import { ListTile } from './design-system/ListTile';
+import { AgentWorkDemo } from './design-system/AgentWorkDemo';
 import { MessageComposer, type ComposerDraft } from './features/chat/MessageComposer';
 import { ChatMessage } from './features/chat/ChatMessage';
 import { GraphPicker } from './features/chat/GraphPicker';
@@ -90,6 +91,7 @@ export function DesignSystem() {
     <Section title="Inline tokens"><TokenTextarea aria-label="Template value" value={template} onChange={event => setTemplate(event.target.value)} spellCheck={false} tokens={[...template.matchAll(/\{\{\s*[^{}]+?\s*\}\}/g)].map(match => ({ start: match.index, end: match.index + match[0].length }))} /></Section>
     <Section title="Radio buttons and searchable select"><div style={{ display: 'grid', gap: 16 }}><RadioGroup label="Default harness" value={harness} onChange={setHarness} options={[{ value: 'opencode', label: 'OpenCode' }, { value: 'codex', label: 'Codex' }, { value: 'pi', label: 'Pi' }]} /><SearchSelect label="Model" value={model} onChange={setModel} placeholder="Select model" searchPlaceholder="Search models" options={[{ value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', description: 'OpenAI' }, { value: 'gpt-5.4', label: 'GPT-5.4', description: 'OpenAI' }, { value: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', description: 'Anthropic' }]} /></div></Section>
     <Section title="List tiles"><ListTile title="Planner" description="Turns a request into a focused implementation plan." metadata={<><span>GPT-5.6 Terra</span><span>High</span></>} onClick={() => setNotice('Planner opened')} actions={<IconButton label="Planner actions" onClick={() => setNotice('Planner actions clicked')}><MoreHorizontal /></IconButton>} /></Section>
+    <Section title="Agent work"><AgentWorkDemo /></Section>
     <Section title="Collapsible section" collapsible><p className="muted">Native details and summary provide keyboard-accessible disclosure without a JavaScript dependency.</p></Section>
     <Section title="Menu and slider"><div className="component-row"><Menu label="Example menu" open={menuOpen} onOpenChange={setMenuOpen} trigger={props => <Button {...props}>Open menu</Button>}>{['Rename', 'Duplicate', 'Archive'].map(action => <MenuItem key={action} onClick={() => { setNotice(`${action} selected`); setMenuOpen(false); }}>{action}</MenuItem>)}</Menu><div style={{ width: 240 }}><Slider label="Level" value={level} valueText={`${level}%`} step={10} onValueChange={setLevel} marks={[{ value: 0, label: '0' }, { value: 50, label: '50' }, { value: 100, label: '100' }]} /></div></div></Section>
     <Section title="Messages"><div className="message-examples">{initialSessions[0].messages.map(message => <ChatMessage key={message.id} message={message} />)}</div></Section>

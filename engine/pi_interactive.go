@@ -98,35 +98,52 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 	if err != nil {
 		return errors.New("Cannot resolve the engine data directory.")
 	}
-	// A fresh private directory avoids symlink overwrites and concurrent turn writes.
-	extensionDir, err := os.MkdirTemp(dataDir, ".pi-permissions-")
-	if err != nil {
-		return errors.New("Cannot create the Pi permission extension directory.")
+	proc, reused := (*interactiveProcess)(nil), false
+	toolKey := p.runtimeToolKey()
+	if p.runtime != nil {
+		proc, reused = p.runtime.getInteractive("pi", p.model, p.effort, toolKey)
 	}
-	defer os.RemoveAll(extensionDir)
-	extensionPath := filepath.Join(extensionDir, "pi-permissions.ts")
-	bridgeConfig, _ := json.Marshal(map[string]any{"url": p.bridge.url, "token": p.bridge.token, "graphNode": p.graphNode(), "tools": p.bridgeTools()})
-	extension := strings.Replace(string(piPermissionsExtension), "/*KLM_LINKED_CONFIG*/{}", string(bridgeConfig), 1)
-	if err := os.WriteFile(extensionPath, []byte(extension), 0600); err != nil {
-		return errors.New("Cannot write the Pi permission extension.")
-	}
-	args := []string{"--mode", "rpc", "--no-extensions", "--extension", extensionPath, "--session", native.Path}
-	if p.model != "" {
-		args = append(args, "--model", p.model)
-	}
-	if p.effort != "" {
-		args = append(args, "--thinking", p.effort)
+	if !reused {
+		// The extension directory must live as long as a retained Pi process.
+		extensionDir, makeErr := os.MkdirTemp(dataDir, ".pi-permissions-")
+		if makeErr != nil {
+			return errors.New("Cannot create the Pi permission extension directory.")
+		}
+		cleanup := func() { _ = os.RemoveAll(extensionDir) }
+		extensionPath := filepath.Join(extensionDir, "pi-permissions.ts")
+		bridgeConfig, _ := json.Marshal(map[string]any{"url": p.bridge.url, "token": p.bridge.token, "graphNode": p.graphNode(), "tools": p.bridgeTools()})
+		extension := strings.Replace(string(piPermissionsExtension), "/*KLM_LINKED_CONFIG*/{}", string(bridgeConfig), 1)
+		if writeErr := os.WriteFile(extensionPath, []byte(extension), 0600); writeErr != nil {
+			cleanup()
+			return errors.New("Cannot write the Pi permission extension.")
+		}
+		args := []string{"--mode", "rpc", "--no-extensions", "--extension", extensionPath, "--session", native.Path}
+		if p.model != "" {
+			args = append(args, "--model", p.model)
+		}
+		if p.effort != "" {
+			args = append(args, "--thinking", p.effort)
+		}
+		proc, err = startInteractive(p.turn, b, args, cwd, p.runtime)
+		if err != nil {
+			cleanup()
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return err
+		}
+		if p.runtime != nil {
+			if err := p.runtime.retainInteractive(proc, "pi", p.model, p.effort, toolKey, cleanup); err != nil {
+				closeRuntimeInteractive(&runtimeInteractive{process: proc, cleanup: cleanup})
+				return err
+			}
+		} else {
+			defer cleanup()
+		}
 	}
 	timer := time.NewTimer(20 * time.Second)
 	defer timer.Stop()
 	startup := timer.C
-	proc, err := startInteractive(p.turn, b, args, cwd)
-	if err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		return err
-	}
 	p.processesDrained = false
 	pending := map[string]string{} // tool call ID -> native UI request ID
 	nativeQuestionPending := map[string]string{}
@@ -135,8 +152,19 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 		for _, live := range questionRequests {
 			live.Store(false)
 		}
-		_ = proc.Close()
-		p.processesDrained = proc.Drained()
+		if p.runtime == nil {
+			_ = proc.Close()
+			p.processesDrained = proc.Drained()
+		} else {
+			reusable := err == nil
+			if ctx.Err() != nil && !p.completed {
+				reusable = settlePiCancellation(proc)
+			}
+			if !reusable {
+				p.runtime.discardInteractive(proc)
+			}
+			p.processesDrained = true
+		}
 		for _, sourceID := range pending {
 			if dismissErr := p.dismissPermission(sourceID); err == nil {
 				err = dismissErr
@@ -160,12 +188,12 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 		latestStatsID = "klm-stats-" + strconv.Itoa(statsSequence)
 		return proc.Send(map[string]any{"id": latestStatsID, "type": "get_session_stats"})
 	}
-	// Optional telemetry gets a bounded final read before closing the RPC process.
+	// Optional telemetry gets a bounded final read before releasing the turn.
 	statsTimer := time.NewTimer(2 * time.Second)
 	statsTimer.Stop()
 	defer statsTimer.Stop()
 	var statsDeadline <-chan time.Time
-	ready, stateReceived, prompted := false, false, false
+	ready, stateReceived, prompted := reused, false, false
 reading:
 	for {
 		if err := ctx.Err(); err != nil {
@@ -175,6 +203,7 @@ reading:
 			if err := p.bridge.waitReady(ctx); err != nil {
 				return err
 			}
+			p.markRuntimeInfrastructure()
 			select {
 			case <-startup:
 				return errors.New("Pi permission bridge startup timed out.")
@@ -468,4 +497,30 @@ reading:
 		return errors.New("Pi exited before the permission bridge and session state were ready.")
 	}
 	return errors.New("Pi RPC stream ended before agent_settled.")
+}
+
+func settlePiCancellation(proc *interactiveProcess) bool {
+	if proc.Send(map[string]any{"id": "klm-abort", "type": "abort"}) != nil {
+		return false
+	}
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case <-timer.C:
+			return false
+		case <-proc.Done:
+			return false
+		case frame, ok := <-proc.Frames:
+			if !ok {
+				return false
+			}
+			if str(frame, "type") == "agent_settled" {
+				return true
+			}
+			if str(frame, "type") == "response" && str(frame, "id") == "klm-abort" && !truth(frame, "success") {
+				return false
+			}
+		}
+	}
 }

@@ -36,6 +36,7 @@ type app struct {
 	harnesses     []Harness
 	binaries      map[string]binary
 	runs          map[string]*turn
+	runtimes      map[string]*sessionRuntime
 	graphRuns     map[string]*graphExecution // graph run ID -> lifetime independent of chat turns
 	graphStarting map[string]bool            // conversation reservations while capturing current definitions
 	listeners     map[string]map[chan struct{}]bool
@@ -128,7 +129,7 @@ func runEngine(dir string) error {
 	defer cancel()
 	harnesses, binaries := discoverHarnesses()
 	a := &app{dir: dir, state: state, harnesses: harnesses, binaries: binaries,
-		runs: map[string]*turn{}, graphRuns: map[string]*graphExecution{}, listeners: map[string]map[chan struct{}]bool{}, picker: make(chan struct{}, 1), ctx: ctx}
+		runs: map[string]*turn{}, runtimes: map[string]*sessionRuntime{}, graphRuns: map[string]*graphExecution{}, listeners: map[string]map[chan struct{}]bool{}, picker: make(chan struct{}, 1), ctx: ctx}
 	go a.expireConsultations()
 	a.mu.Lock()
 	a.scheduleLinkedLocked()
@@ -162,6 +163,7 @@ func runEngine(dir string) error {
 	_ = server.Shutdown(shutdownCtx)
 	_ = server.Close()
 	a.wg.Wait()
+	a.shutdownSessionRuntimes()
 	a.mu.Lock()
 	if a.storageErr == nil && len(a.state.GraphRuns) > 0 {
 		if persistErr := a.commitLocked(func(d *diskState) {

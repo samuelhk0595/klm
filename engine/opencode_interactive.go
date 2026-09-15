@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -77,6 +78,40 @@ type openCodeHTTP struct {
 	base      string
 	directory string
 	password  string
+}
+
+type openCodeServer struct {
+	h            *openCodeHTTP
+	transport    *http.Transport
+	owner        *ownedProcess
+	processDone  <-chan struct{}
+	outputFailed <-chan error
+	cleanup      func()
+	once         sync.Once
+}
+
+func (s *openCodeServer) Alive() bool {
+	select {
+	case <-s.processDone:
+		return false
+	default:
+		return true
+	}
+}
+
+func (s *openCodeServer) Close() {
+	s.once.Do(func() {
+		s.transport.CloseIdleConnections()
+		_ = s.owner.Stop()
+		select {
+		case <-s.processDone:
+		case <-time.After(5 * time.Second):
+		}
+		_ = s.owner.Close()
+		if s.cleanup != nil {
+			s.cleanup()
+		}
+	})
 }
 
 func (h *openCodeHTTP) request(ctx context.Context, method, path string, body any) (*http.Response, error) {
@@ -273,19 +308,10 @@ func openCodeEvents(ctx context.Context, body io.Reader, events chan<- map[strin
 	}
 }
 
-func (p *adapter) runOpenCode(b binary, cwd string, payload submission) error {
-	p.app.mu.Lock()
-	s := *p.app.state.session(p.id)
-	native := p.app.state.Native[p.id]
-	p.app.mu.Unlock()
-	t := p.turn
-	ctx, cancel := context.WithCancel(t.ctx)
-	defer cancel()
-	p.completed = false
-
+func (p *adapter) startOpenCodeServer(b binary, cwd string, ctx context.Context) (_ *openCodeServer, err error) {
 	var secret [32]byte
 	if _, err := rand.Read(secret[:]); err != nil {
-		return errors.New("Could not generate OpenCode server credentials.")
+		return nil, errors.New("Could not generate OpenCode server credentials.")
 	}
 	h := &openCodeHTTP{directory: cwd, password: hex.EncodeToString(secret[:])}
 	transport := &http.Transport{
@@ -296,21 +322,23 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) error {
 	h.client = &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return errors.New("OpenCode server redirects are not allowed.")
 	}}
-	defer transport.CloseIdleConnections()
-
+	cleanup := func() {}
+	graphConfig := ""
+	if p.graphNode() {
+		graphConfig, cleanup, err = p.openCodeGraphConfig()
+		if err != nil {
+			transport.CloseIdleConnections()
+			return nil, err
+		}
+	}
+	fail := func(err error) (*openCodeServer, error) {
+		transport.CloseIdleConnections()
+		cleanup()
+		return nil, err
+	}
 	args := append(append([]string{}, b.args...), "serve", "--hostname", "127.0.0.1", "--port", "0", "--mdns=false")
 	cmd := exec.Command(b.path, args...)
 	cmd.Dir = cwd
-	graphConfig := ""
-	if p.graphNode() {
-		var cleanup func()
-		var err error
-		graphConfig, cleanup, err = p.openCodeGraphConfig()
-		if err != nil {
-			return err
-		}
-		defer cleanup()
-	}
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
 		if p.graphNode() && strings.EqualFold(key, "OPENCODE_CONFIG_CONTENT") {
@@ -325,24 +353,25 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) error {
 	if p.graphNode() {
 		cmd.Env = append(cmd.Env, "OPENCODE_CONFIG_CONTENT="+graphConfig)
 	}
-	owner, err := prepareOwnedProcess(cmd)
-	if err != nil {
-		return err
+	var owner *ownedProcess
+	if p.runtime == nil {
+		owner, err = prepareOwnedProcess(cmd)
+	} else {
+		owner, err = p.runtime.prepare(cmd)
 	}
-	defer func() {
-		_ = owner.Close()
-		p.processesDrained = owner.Drained()
-	}()
+	if err != nil {
+		return fail(err)
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return errors.New("Could not open OpenCode server output.")
+		_ = owner.Close()
+		return fail(errors.New("Could not open OpenCode server output."))
 	}
-	defer stdout.Close()
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return errors.New("Could not open OpenCode server diagnostics.")
+		_ = owner.Close()
+		return fail(errors.New("Could not open OpenCode server diagnostics."))
 	}
-	defer stderr.Close()
 	announced := make(chan string, 1)
 	outputFailed := make(chan error, 1)
 	go func() {
@@ -363,44 +392,29 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) error {
 	}()
 	go func() { _, _ = io.Copy(io.Discard, stderr) }()
 	if err := ctx.Err(); err != nil {
-		return err
+		_ = owner.Close()
+		return fail(err)
 	}
 	if err := cmd.Start(); err != nil {
-		return errors.New("Could not start the OpenCode server. Check its installation and configuration.")
+		_ = owner.Close()
+		return fail(errors.New("Could not start the OpenCode server. Check its installation and configuration."))
 	}
 	if err := owner.Attach(); err != nil {
 		_ = owner.Stop()
 		_ = cmd.Wait()
-		return err
+		_ = owner.Close()
+		return fail(err)
 	}
-	p.processesDrained = false
 	processDone := make(chan struct{})
 	go func() {
 		_ = cmd.Wait()
 		close(processDone)
 	}()
-	sessionID := ""
-	promptAttempted := false
-	defer func() {
-		// Cancel local subscriptions/replies first, then abort only our native turn.
-		cancel()
-		if sessionID != "" && promptAttempted && !p.completed {
-			abortCtx, abortCancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = h.json(abortCtx, http.MethodPost, "/session/"+url.PathEscape(sessionID)+"/abort", nil, nil)
-			abortCancel()
-		}
-		select {
-		case <-processDone:
-			return
-		default:
-			_ = owner.Stop()
-		}
-		select {
-		case <-processDone:
-		case <-time.After(5 * time.Second):
-		}
-	}()
-
+	server := &openCodeServer{h: h, transport: transport, owner: owner, processDone: processDone, outputFailed: outputFailed, cleanup: cleanup}
+	failed := func(err error) (*openCodeServer, error) {
+		server.Close()
+		return nil, err
+	}
 	startup := time.NewTimer(30 * time.Second)
 	defer startup.Stop()
 	select {
@@ -408,58 +422,112 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) error {
 		u, parseErr := url.Parse(address)
 		if parseErr != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.User != nil ||
 			u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
-			return errors.New("OpenCode announced an invalid loopback server address.")
+			return failed(errors.New("OpenCode announced an invalid loopback server address."))
 		}
 		port, parseErr := strconv.Atoi(u.Port())
 		if parseErr != nil || port < 1 || port > 65535 || u.Host != net.JoinHostPort("127.0.0.1", u.Port()) {
-			return errors.New("OpenCode announced an invalid loopback server port.")
+			return failed(errors.New("OpenCode announced an invalid loopback server port."))
 		}
 		h.base = u.String()
 	case err := <-outputFailed:
-		return err
+		return failed(err)
 	case <-processDone:
-		return errors.New("OpenCode server exited before startup completed.")
+		return failed(errors.New("OpenCode server exited before startup completed."))
 	case <-startup.C:
-		return errors.New("OpenCode server startup timed out.")
+		return failed(errors.New("OpenCode server startup timed out."))
 	case <-ctx.Done():
-		return ctx.Err()
+		return failed(ctx.Err())
 	}
-
 	if p.graphNode() {
 		var health struct {
 			Version string `json:"version"`
 			Healthy bool   `json:"healthy"`
 		}
 		if err := h.json(ctx, http.MethodGet, "/global/health", nil, &health); err != nil {
-			return err
+			return failed(err)
 		}
 		if !health.Healthy || health.Version != "1.18.30" {
-			return errors.New("Graph gating requires the inspected OpenCode 1.18.30 protocol; this server version has not been checked.")
+			return failed(errors.New("Graph gating requires the inspected OpenCode 1.18.30 protocol; this server version has not been checked."))
 		}
 	}
 	var bridgeStatus map[string]any
 	if err := h.json(ctx, http.MethodPost, "/mcp", map[string]any{"name": "klm_linked", "config": map[string]any{"type": "remote", "url": p.bridge.url, "headers": map[string]string{"Authorization": "Bearer " + p.bridge.token}, "oauth": false, "enabled": true, "timeout": 10000}}, &bridgeStatus); err != nil {
-		return errors.New("Could not configure the OpenCode linked-agent bridge.")
+		return failed(errors.New("Could not configure the OpenCode linked-agent bridge."))
 	}
 	if str(object(bridgeStatus["klm_linked"]), "status") != "connected" {
-		return errors.New("OpenCode did not connect to the linked-agent bridge.")
+		return failed(errors.New("OpenCode did not connect to the linked-agent bridge."))
 	}
 	if err := p.bridge.waitReady(ctx); err != nil {
-		return err
+		return failed(err)
 	}
 	if p.graphNode() {
 		if err := p.waitGraphPlugin(ctx); err != nil {
-			return err
+			return failed(err)
 		}
 		var ids []string
 		if err := h.json(ctx, http.MethodGet, "/experimental/tool/ids", nil, &ids); err != nil {
-			return err
+			return failed(err)
 		}
 		if len(ids) == 0 {
-			return errors.New("OpenCode did not identify its native tool inventory.")
+			return failed(errors.New("OpenCode did not identify its native tool inventory."))
 		}
 		p.setOpenCodeGraphTools(ids, bridgeStatus)
 	}
+	return server, nil
+}
+
+func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err error) {
+	p.app.mu.Lock()
+	s := *p.app.state.session(p.id)
+	native := p.app.state.Native[p.id]
+	p.app.mu.Unlock()
+	t := p.turn
+	ctx, cancel := context.WithCancel(t.ctx)
+	defer cancel()
+	p.completed = false
+
+	server, reused := (*openCodeServer)(nil), false
+	toolKey := p.runtimeToolKey()
+	if p.runtime != nil {
+		server, reused = p.runtime.getOpenCode(toolKey)
+	}
+	if !reused {
+		server, err = p.startOpenCodeServer(b, cwd, ctx)
+		if err != nil {
+			return err
+		}
+		if p.runtime != nil {
+			if err := p.runtime.retainOpenCode(server, toolKey); err != nil {
+				server.Close()
+				return err
+			}
+		}
+	}
+	h, owner := server.h, server.owner
+	processDone, outputFailed := server.processDone, server.outputFailed
+	p.processesDrained = false
+	sessionID := ""
+	promptAttempted := false
+	abortSettled := false
+	defer func() {
+		// Cancel local subscriptions/replies first, then abort only our native turn.
+		cancel()
+		if sessionID != "" && promptAttempted && !p.completed {
+			abortCtx, abortCancel := context.WithTimeout(context.Background(), 2*time.Second)
+			abortSettled = h.json(abortCtx, http.MethodPost, "/session/"+url.PathEscape(sessionID)+"/abort", nil, nil) == nil
+			abortCancel()
+		}
+		if p.runtime == nil {
+			server.Close()
+			p.processesDrained = owner.Drained()
+		} else {
+			if err != nil && !(t.ctx.Err() != nil && abortSettled) {
+				p.runtime.discardOpenCode(server)
+			}
+			p.processesDrained = true
+		}
+	}()
+	p.markRuntimeInfrastructure()
 	var session map[string]any
 	if native.ID != "" {
 		if err := h.json(ctx, http.MethodGet, "/session/"+url.PathEscape(native.ID), nil, &session); err != nil {

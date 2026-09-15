@@ -163,10 +163,11 @@ func publicAPIOrigin(origin, authority string) bool {
 		u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 		return false
 	}
-	if loopbackHost(u.Host) && (u.Port() == "5173" || u.Port() == "4173") {
+	host, _, err := net.SplitHostPort(authority)
+	if (u.Port() == "5173" || u.Port() == "4173") &&
+		(loopbackHost(u.Host) || developmentBuild && err == nil && strings.EqualFold(u.Hostname(), host)) {
 		return true
 	}
-	host, _, err := net.SplitHostPort(authority)
 	return err == nil && u.Scheme == "http" && u.Port() == webPort &&
 		(strings.EqualFold(u.Hostname(), host) || (loopbackHost(u.Host) && loopbackHost(authority)))
 }
@@ -200,7 +201,7 @@ func (a *app) getState(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, session := range a.state.Sessions {
 		if visible[session.ProjectID] && session.GraphRunID == "" {
-			sessions = append(sessions, *a.state.sessionView(session.ID))
+			sessions = append(sessions, *a.sessionViewLocked(session.ID))
 		}
 	}
 	state := struct {
@@ -463,7 +464,7 @@ func (a *app) createSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
-	respond(w, 201, a.state.sessionView(s.ID))
+	respond(w, 201, a.sessionViewLocked(s.ID))
 }
 
 func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
@@ -509,7 +510,7 @@ func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
-	respond(w, 200, a.state.sessionView(id))
+	respond(w, 200, a.sessionViewLocked(id))
 }
 
 func (a *app) message(w http.ResponseWriter, r *http.Request) {
@@ -621,7 +622,7 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snapshot := *a.state.session(id)
-	response := a.state.sessionView(id)
+	response := a.sessionViewLocked(id)
 	native := a.state.Native[id]
 	ctx, cancel := context.WithCancel(a.ctx)
 	t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{})}
@@ -661,7 +662,7 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.mu.Lock()
-	s := *a.state.sessionView(id)
+	s := *a.sessionViewLocked(id)
 	err := a.storageErr
 	a.mu.Unlock()
 	if err != nil {
@@ -675,7 +676,7 @@ func (a *app) events(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ch := make(chan struct{}, 1)
 	a.mu.Lock()
-	s := a.state.sessionView(id)
+	s := a.sessionViewLocked(id)
 	if s == nil {
 		a.mu.Unlock()
 		fail(w, 404, "Session not found.")
@@ -719,7 +720,7 @@ func (a *app) events(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ch:
 			a.mu.Lock()
-			s = a.state.sessionView(id)
+			s = a.sessionViewLocked(id)
 			a.mu.Unlock()
 			if send(s) != nil {
 				return

@@ -1,9 +1,212 @@
-import { useEffect, useRef, useState } from 'react';
-import { MessagesSquare } from 'lucide-react';
+import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
+import { FileCode2, FilePenLine, MessagesSquare, Plug, Search, SquareTerminal, Wrench, type LucideIcon } from 'lucide-react';
+import { AgentWork, type AgentWorkActivity, type AgentWorkItemStatus, type AgentWorkStatus, type AgentWorkThought, type AgentWorkTone } from '../../design-system/AgentWork';
 import { Button } from '../../design-system/Button';
 import { request, type EngineEvent, type Session } from '../../engine';
-import { ChatMessage } from './ChatMessage';
+import { ChatMessage, InlineMarkdownContent, MarkdownContent } from './ChatMessage';
 import { SessionEvent } from './SessionEvent';
+
+type WorkEvent = EngineEvent & { type: 'reasoning' | 'command' | 'mcp' | 'tool' };
+type TimelineItem = { kind: 'event'; event: EngineEvent } | {
+  kind: 'work'; id: string; events: WorkEvent[]; status: AgentWorkStatus; startedAt: string; completedAt?: string;
+};
+
+function isWorkEvent(event: EngineEvent): event is WorkEvent {
+  if (event.type === 'reasoning') return !!event.text.trim();
+  return event.type === 'command' || event.type === 'mcp' || event.type === 'tool';
+}
+
+function isHiddenStatus(event: EngineEvent) {
+  return event.type === 'status' && event.status !== 'warning' && event.status !== 'cancelled';
+}
+
+function projectTimeline(events: EngineEvent[], sessionStatus: Session['status'], updatedAt: string): TimelineItem[] {
+  const items: TimelineItem[] = [];
+  let pending: WorkEvent[] = [];
+  let pendingStartedAt = '';
+  let lastBoundaryAt = '';
+  const flush = (boundary?: EngineEvent) => {
+    if (!pending.length) return;
+    const status: AgentWorkStatus = boundary?.type === 'error' || (!boundary && sessionStatus === 'error')
+      ? 'failed'
+      : !boundary && sessionStatus === 'running' ? 'running' : 'completed';
+    items.push({
+      kind: 'work',
+      id: pending[0].id,
+      events: pending,
+      status,
+      startedAt: pendingStartedAt || pending[0].createdAt,
+      completedAt: status === 'running' ? undefined : boundary?.createdAt ?? updatedAt,
+    });
+    pending = [];
+    pendingStartedAt = '';
+  };
+
+  for (const event of events) {
+    if (isHiddenStatus(event) || (event.type === 'reasoning' && !event.text.trim())) continue;
+    if (isWorkEvent(event)) {
+      if (!pending.length) pendingStartedAt = lastBoundaryAt || event.createdAt;
+      pending.push(event);
+      continue;
+    }
+    flush(event);
+    items.push({ kind: 'event', event });
+    lastBoundaryAt = event.createdAt;
+  }
+  flush();
+  return items;
+}
+
+function formatDuration(milliseconds: number) {
+  const seconds = Math.max(1, Math.round(milliseconds / 1000));
+  if (seconds < 60) return `${seconds} ${seconds === 1 ? 'second' : 'seconds'}`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return remainder ? `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ${remainder} seconds` : `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+}
+
+function useWorkDuration(startedAtValue: string | undefined, completedAtValue: string | undefined, running: boolean) {
+  const [mountedAt] = useState(() => Date.now());
+  const startedAt = startedAtValue ? Date.parse(startedAtValue) : mountedAt;
+  const completedAt = completedAtValue ? Date.parse(completedAtValue) : undefined;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [running, startedAt]);
+  const end = completedAt !== undefined && Number.isFinite(completedAt) ? completedAt : now;
+  return Number.isFinite(startedAt) ? formatDuration(Math.max(0, end - startedAt)) : undefined;
+}
+
+function itemStatus(event: WorkEvent, workStatus: AgentWorkStatus): AgentWorkItemStatus {
+  if (event.status === 'error' || event.status === 'failed') return 'failed';
+  if (workStatus !== 'running') return 'completed';
+  return event.status === 'running' || event.status === 'pending' || event.status === 'started' ? 'running' : 'completed';
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function cleanDisplayValue(value: string) {
+  let text = value.trim();
+  for (let attempt = 0; attempt < 2 && text.startsWith('"') && text.endsWith('"'); attempt += 1) {
+    try {
+      const decoded: unknown = JSON.parse(text);
+      if (typeof decoded !== 'string') break;
+      text = decoded;
+    } catch { break; }
+  }
+  return /[A-Za-z]:\\{2,}/.test(text) ? text.replace(/\\{2,}/g, '\\') : text;
+}
+
+function primaryInput(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return cleanDisplayValue(value);
+  const input = objectValue(value);
+  if (!input) return undefined;
+  for (const key of ['command', 'filePath', 'path', 'directory', 'target', 'pattern', 'query', 'url']) {
+    if (typeof input[key] === 'string' && input[key].trim()) return cleanDisplayValue(input[key]);
+  }
+  return undefined;
+}
+
+function activityDetail(event: WorkEvent) {
+  const data = event.data;
+  const state = objectValue(data?.state);
+  const item = objectValue(data?.item);
+  for (const candidate of [state?.input, data?.args, item, data]) {
+    const detail = primaryInput(candidate);
+    if (detail) return detail;
+  }
+  const firstLine = event.text.trim().split(/\r?\n/, 1)[0];
+  if (!firstLine) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(firstLine);
+    return primaryInput(parsed) ?? cleanDisplayValue(firstLine);
+  } catch {
+    return cleanDisplayValue(firstLine);
+  }
+}
+
+function EventDetails({ event }: { event: WorkEvent }) {
+  return <>
+    {event.text.trim() ? event.type === 'reasoning' ? <MarkdownContent text={event.text} className="agent-work__reasoning-markdown" /> : <pre>{cleanDisplayValue(event.text)}</pre> : null}
+    {event.data && Object.keys(event.data).length > 0 ? <details className="agent-work__native-details"><summary>Event details</summary><pre>{JSON.stringify(event.data, null, 2)}</pre></details> : null}
+  </>;
+}
+
+function activityPresentation(event: WorkEvent): { icon: LucideIcon; tone: AgentWorkTone } {
+  if (event.status === 'error' || event.status === 'failed') return { icon: Wrench, tone: 'danger' };
+  if (event.type === 'command') return { icon: SquareTerminal, tone: 'accent' };
+  if (event.type === 'mcp') return { icon: Plug, tone: 'success' };
+  const name = (event.title || '').toLowerCase();
+  if (/read|file|glob/.test(name)) return { icon: FileCode2, tone: 'muted' };
+  if (/search|grep|find/.test(name)) return { icon: Search, tone: 'muted' };
+  if (/write|edit|patch|apply/.test(name)) return { icon: FilePenLine, tone: 'warning' };
+  return { icon: Wrench, tone: 'muted' };
+}
+
+function ConversationWork({ item }: { item: Extract<TimelineItem, { kind: 'work' }> }) {
+  const durationLabel = useWorkDuration(item.startedAt, item.completedAt, item.status === 'running');
+  const thoughts: AgentWorkThought[] = item.events.filter(event => event.type === 'reasoning').map(event => ({
+    id: event.id,
+    status: itemStatus(event, item.status) === 'running' ? 'running' : 'completed',
+    text: event.text,
+    preview: <InlineMarkdownContent text={event.text} />,
+    details: <EventDetails event={event} />,
+  }));
+  const activities: AgentWorkActivity[] = item.events.filter(event => event.type !== 'reasoning').map(event => {
+    const presentation = activityPresentation(event);
+    return {
+      id: event.id,
+      icon: presentation.icon,
+      label: event.title || (event.type === 'command' ? 'Command' : event.type === 'mcp' ? 'MCP call' : 'Tool call'),
+      detail: activityDetail(event),
+      status: itemStatus(event, item.status),
+      tone: presentation.tone,
+      details: <EventDetails event={event} />,
+    };
+  });
+  return <AgentWork status={item.status} durationLabel={durationLabel} thoughts={thoughts} activities={activities} />;
+}
+
+function ActiveWorkPlaceholder({ startedAt }: { startedAt?: string }) {
+  const durationLabel = useWorkDuration(startedAt, undefined, true);
+  return <AgentWork status="running" durationLabel={durationLabel} />;
+}
+
+function EventSequence({ events, status, updatedAt, renderEvent, showActiveWork = false, activeWorkStartedAt }: {
+  events: EngineEvent[];
+  status: Session['status'];
+  updatedAt: string;
+  renderEvent?: (event: EngineEvent) => ReactNode;
+  showActiveWork?: boolean;
+  activeWorkStartedAt?: string;
+}) {
+  const items = projectTimeline(events, status, updatedAt);
+  const hasActiveWork = items.some(item => item.kind === 'work' && item.status === 'running');
+  const lastItem = items.at(-1);
+  const responding = lastItem?.kind === 'event' && lastItem.event.type === 'assistant';
+  return <>
+    {items.map(item => item.kind === 'work'
+      ? <ConversationWork key={`work/${item.id}`} item={item} />
+      : <Fragment key={item.event.id}>{renderEvent ? renderEvent(item.event) : <SessionEvent event={item.event} />}</Fragment>)}
+    {showActiveWork && status === 'running' && !hasActiveWork && !responding ? <ActiveWorkPlaceholder startedAt={activeWorkStartedAt} /> : null}
+  </>;
+}
+
+function incomingConsultationIds(session: Session) {
+  return new Set(session.events
+    .filter(event => event.type === 'consultation' && event.data?.to === session.id)
+    .map(event => String(event.data?.requestId)));
+}
+
+function visibleConversationEvents(session: Session) {
+  const incoming = incomingConsultationIds(session);
+  return session.events.filter(event => !event.consultationId || !incoming.has(event.consultationId));
+}
 
 function ConsultationActivity({ event, output, sessionId, onSnapshot }: { event: EngineEvent; output: EngineEvent[]; sessionId: string; onSnapshot: (session: Session) => void }) {
   const [cancelling, setCancelling] = useState(false);
@@ -30,13 +233,16 @@ function ConsultationActivity({ event, output, sessionId, onSnapshot }: { event:
       {event.data?.delivery === 'failed' && <p className="form-error">Answer continuation failed.</p>}
       {(active || pendingDelivery) && <Button size="sm" disabled={cancelling} onClick={() => void cancel()}>{cancelling ? 'Cancelling...' : 'Cancel request'}</Button>}
       {error && <p role="alert" className="form-error">{error}</p>}
-      {!!output.length && <details className="consultation-output"><summary>Agent activity</summary><div>{output.map(item => <SessionEvent key={item.id} event={item} />)}</div></details>}
+      {!!output.length && <details className="consultation-output"><summary>Agent activity</summary><div><EventSequence events={output} status={active ? 'running' : failure ? 'error' : 'idle'} updatedAt={output.at(-1)?.createdAt ?? event.createdAt} /></div></details>}
     </div>
   </details>;
 }
 
-export function ConversationEvents({ session, onSnapshot, onAskSide }: {
-  session: Session; onSnapshot: (session: Session) => void; onAskSide?: (messageId: string, passage: string) => void;
+export function ConversationEvents({ session, onSnapshot, onAskSide, working }: {
+  session: Session;
+  onSnapshot: (session: Session) => void;
+  onAskSide?: (messageId: string, passage: string) => void;
+  working?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<{ messageId: string; passage: string; left: number; top: number } | null>(null);
@@ -81,9 +287,12 @@ export function ConversationEvents({ session, onSnapshot, onAskSide }: {
   }, [!!onAskSide, session.id]);
   // Only answering the other agent is background work. A continuation on the
   // requesting side is its response to the user, including in saved histories.
-  const incoming = new Set(session.events
-    .filter(event => event.type === 'consultation' && event.data?.to === session.id)
-    .map(event => String(event.data?.requestId)));
+  const incoming = incomingConsultationIds(session);
+  const visibleEvents = visibleConversationEvents(session);
+  const active = working ?? session.status === 'running';
+  const timelineStatus: Session['status'] = active ? 'running' : session.status;
+  const lastUserEvent = [...visibleEvents].reverse().find(event => event.type === 'user');
+  const activeWorkStartedAt = active && session.status !== 'running' ? undefined : lastUserEvent?.createdAt;
   const grouped = new Map<string, EngineEvent[]>();
   for (const event of session.events) {
     if (!event.consultationId || !incoming.has(event.consultationId)) continue;
@@ -91,9 +300,9 @@ export function ConversationEvents({ session, onSnapshot, onAskSide }: {
     group.push(event); grouped.set(event.consultationId, group);
   }
   return <div ref={root} className="conversation-events">
-    {session.events.filter(event => !event.consultationId || !incoming.has(event.consultationId)).map(event => event.type === 'consultation'
-      ? <ConsultationActivity key={event.id} event={event} output={grouped.get(String(event.data?.requestId)) ?? []} sessionId={session.id} onSnapshot={onSnapshot} />
-      : <SessionEvent key={event.id} event={event} />)}
+    <EventSequence events={visibleEvents} status={timelineStatus} updatedAt={session.updatedAt} showActiveWork={active} activeWorkStartedAt={activeWorkStartedAt} renderEvent={event => event.type === 'consultation'
+      ? <ConsultationActivity event={event} output={grouped.get(String(event.data?.requestId)) ?? []} sessionId={session.id} onSnapshot={onSnapshot} />
+      : <SessionEvent event={event} />} />
     {selection && onAskSide && <Button size="sm" className="selection-action" style={{ left: selection.left, top: selection.top }} onPointerDown={event => event.preventDefault()} onClick={() => {
       onAskSide(selection.messageId, selection.passage); setSelection(null); window.getSelection()?.removeAllRanges();
     }}>Ask side agent</Button>}

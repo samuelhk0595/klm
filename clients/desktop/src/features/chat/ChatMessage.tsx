@@ -26,11 +26,42 @@ const markdownComponents: Components = {
   },
 };
 
+const inlineMarkdownComponents: Components = {
+  p: ({ children }) => <>{children}</>,
+  h1: ({ children }) => <strong>{children}</strong>,
+  h2: ({ children }) => <strong>{children}</strong>,
+  h3: ({ children }) => <strong>{children}</strong>,
+  h4: ({ children }) => <strong>{children}</strong>,
+  h5: ({ children }) => <strong>{children}</strong>,
+  h6: ({ children }) => <strong>{children}</strong>,
+  blockquote: ({ children }) => <span>{children}</span>,
+  ul: ({ children }) => <span>{children}</span>,
+  ol: ({ children }) => <span>{children}</span>,
+  li: ({ children }) => <span>{children} </span>,
+  pre: ({ children }) => <code>{children}</code>,
+  table: ({ children }) => <span>{children}</span>,
+  thead: ({ children }) => <span>{children}</span>,
+  tbody: ({ children }) => <span>{children}</span>,
+  tr: ({ children }) => <span>{children} </span>,
+  th: ({ children }) => <strong>{children}: </strong>,
+  td: ({ children }) => <span>{children} </span>,
+  a: markdownComponents.a,
+  img: markdownComponents.img,
+};
+
+export function MarkdownContent({ text, className = '' }: { text: string; className?: string }) {
+  const markdown = useMemo(() => normalizeFlowchartMarkdown(text), [text]);
+  return <div className={`markdown-body ${className}`.trim()}><Markdown remarkPlugins={markdownPlugins} components={markdownComponents} skipHtml>{markdown}</Markdown></div>;
+}
+
+export function InlineMarkdownContent({ text }: { text: string }) {
+  return <Markdown remarkPlugins={markdownPlugins} components={inlineMarkdownComponents} skipHtml>{text}</Markdown>;
+}
+
 export function ChatMessage({ message }: { message: Message }) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
   const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
-  const markdown = useMemo(() => message.role === 'assistant' ? normalizeFlowchartMarkdown(message.text) : message.text, [message.role, message.text]);
   async function copy() {
     try { await navigator.clipboard.writeText(message.text); setCopied(true); setCopyError(false); }
     catch { setCopyError(true); }
@@ -39,7 +70,7 @@ export function ChatMessage({ message }: { message: Message }) {
     <div className="message-body">
       {message.context && <div className="context-injections">{message.context.map(file => <div key={file}><FileText /><span>Context injection</span><span aria-hidden="true">·</span><span className="context-file">{file}</span></div>)}</div>}
       {message.thought && <details className="thought"><summary><Atom /><strong>Think</strong><span>·</span><span className="thought-preview">{message.thought}</span></summary><p>{message.thought}</p></details>}
-      {message.role === 'assistant' ? <div className="message-text markdown-body"><Markdown remarkPlugins={markdownPlugins} components={markdownComponents} skipHtml>{markdown}</Markdown></div> : <p className="message-text"><MentionText text={message.text} mentions={message.mentions} preparation={message.mentionPreparation} /></p>}
+      {message.role === 'assistant' ? <MarkdownContent text={message.text} className="message-text" /> : <p className="message-text"><MentionText text={message.text} mentions={message.mentions} preparation={message.mentionPreparation} /></p>}
       <div className="message-actions"><IconButton label={copied ? 'Copied' : 'Copy message'} onClick={copy}>{copied ? <Check /> : <Copy />}</IconButton>{message.role === 'assistant' && <><IconButton label="Helpful response" aria-pressed={feedback === 'up'} onClick={() => setFeedback(feedback === 'up' ? null : 'up')}><ThumbsUp /></IconButton><IconButton label="Unhelpful response" aria-pressed={feedback === 'down'} onClick={() => setFeedback(feedback === 'down' ? null : 'down')}><ThumbsDown /></IconButton></>}</div>
       {copyError && <p role="status" className="small muted">Clipboard unavailable. Select the message to copy it.</p>}
     </div>

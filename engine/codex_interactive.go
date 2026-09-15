@@ -23,32 +23,53 @@ type codexInteractive struct {
 	requests map[string]*atomic.Bool
 }
 
-func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
+func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error) {
 	p.app.mu.Lock()
 	native := p.app.state.Native[p.id]
 	sessionModel := p.model
 	p.app.mu.Unlock()
 
-	process, err := startInteractive(p.turn, b, []string{
-		"-c", "features.default_mode_request_user_input=true",
-		"-c", "tools.experimental_request_user_input.enabled=true",
-		"-c", "mcp_servers.klm_linked.url=" + strconv.Quote(p.bridge.url),
-		"-c", "mcp_servers.klm_linked.http_headers={Authorization=" + strconv.Quote("Bearer "+p.bridge.token) + "}",
-		"-c", "mcp_servers.klm_linked.enabled=true",
-		"-c", "mcp_servers.klm_linked.startup_timeout_sec=15",
-		"-c", "mcp_servers.klm_linked.tool_timeout_sec=12",
-		"app-server", "--listen", "stdio://",
-	}, cwd)
-	if err != nil {
-		return err
+	process, reused := (*interactiveProcess)(nil), false
+	toolKey := p.runtimeToolKey()
+	if p.runtime != nil {
+		process, reused = p.runtime.getInteractive("codex", "", "", toolKey)
+	}
+	if !reused {
+		process, err = startInteractive(p.turn, b, []string{
+			"-c", "features.default_mode_request_user_input=true",
+			"-c", "tools.experimental_request_user_input.enabled=true",
+			"-c", "mcp_servers.klm_linked.url=" + strconv.Quote(p.bridge.url),
+			"-c", "mcp_servers.klm_linked.http_headers={Authorization=" + strconv.Quote("Bearer "+p.bridge.token) + "}",
+			"-c", "mcp_servers.klm_linked.enabled=true",
+			"-c", "mcp_servers.klm_linked.startup_timeout_sec=15",
+			"-c", "mcp_servers.klm_linked.tool_timeout_sec=12",
+			"app-server", "--listen", "stdio://",
+		}, cwd, p.runtime)
+		if err != nil {
+			return err
+		}
+		if p.runtime != nil {
+			if err := p.runtime.retainInteractive(process, "codex", "", "", toolKey, nil); err != nil {
+				closeRuntimeInteractive(&runtimeInteractive{process: process})
+				return err
+			}
+		}
 	}
 	p.processesDrained = false
+	cancelSettled := false
 	defer func() {
-		_ = process.Close()
-		for frame := range process.Frames {
-			p.observeCodexMCP(str(frame, "method"), object(frame["params"]))
+		if p.runtime == nil {
+			_ = process.Close()
+			for frame := range process.Frames {
+				p.observeCodexMCP(str(frame, "method"), object(frame["params"]))
+			}
+			p.processesDrained = process.Drained() && !p.processDrainFailed
+		} else {
+			if err != nil && !(p.turn.ctx.Err() != nil && cancelSettled) {
+				p.runtime.discardInteractive(process)
+			}
+			p.processesDrained = true
 		}
-		p.processesDrained = process.Drained() && !p.processDrainFailed
 	}()
 	c := &codexInteractive{p: p, cwd: cwd, items: map[string]map[string]any{},
 		parts: map[string]map[string]bool{}, requests: map[string]*atomic.Bool{}}
@@ -72,8 +93,8 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 			return errors.New("Codex app-server stdin timed out.")
 		}
 	}
-	// Close kills only this child. Give an active native turn a bounded chance
-	// to interrupt first, including when cancellation happens during a write.
+	// Give a cancelled native turn a bounded chance to settle before deciding
+	// whether its persistent app-server can be reused.
 	defer func() {
 		if p.turn.ctx.Err() == nil || c.threadID == "" || c.turnID == "" || p.completed {
 			return
@@ -104,19 +125,25 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 				p.observeCodexMCP(str(frame, "method"), params)
 				if str(frame, "method") == "turn/completed" && str(params, "threadId") == c.threadID &&
 					str(object(params["turn"]), "id") == c.turnID {
+					cancelSettled = true
 					return
 				}
 			}
 		}
 	}()
 
-	if err := c.send(map[string]any{"id": "klm-init", "method": "initialize", "params": map[string]any{
-		"clientInfo":   map[string]any{"name": "klm", "version": "0.1.0"},
-		"capabilities": map[string]any{"experimentalApi": true, "mcpServerOpenaiFormElicitation": false, "requestAttestation": false},
-	}}); err != nil {
-		return err
+	if !reused {
+		if err := c.send(map[string]any{"id": "klm-init", "method": "initialize", "params": map[string]any{
+			"clientInfo":   map[string]any{"name": "klm", "version": "0.1.0"},
+			"capabilities": map[string]any{"experimentalApi": true, "mcpServerOpenaiFormElicitation": false, "requestAttestation": false},
+		}}); err != nil {
+			return err
+		}
 	}
 	phase := "klm-init"
+	if reused {
+		phase = "klm-thread"
+	}
 	mcpBridgeFound := false
 	startup := time.NewTimer(30 * time.Second)
 	defer startup.Stop()
@@ -125,6 +152,22 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 	frames, done := process.Frames, process.Done
 	choiceStop := p.graphStop()
 	choiceInterrupted := false
+	sendThread := func() error {
+		params := map[string]any{"cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": "read-only"}
+		method := "thread/start"
+		if native.ID != "" {
+			method, params["threadId"] = "thread/resume", native.ID
+		}
+		if sessionModel != "" {
+			params["model"] = sessionModel
+		}
+		return c.send(map[string]any{"id": "klm-thread", "method": method, "params": params})
+	}
+	if reused {
+		if err := sendThread(); err != nil {
+			return err
+		}
+	}
 	for {
 		if !choiceInterrupted && p.choiceToolSettled && !p.graphMCPPending() {
 			choiceStop = p.graphStop()
@@ -219,16 +262,8 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 			if err := c.send(map[string]any{"method": "initialized"}); err != nil {
 				return err
 			}
-			params := map[string]any{"cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": "read-only"}
-			method := "thread/start"
-			if native.ID != "" {
-				method, params["threadId"] = "thread/resume", native.ID
-			}
-			if sessionModel != "" {
-				params["model"] = sessionModel
-			}
 			phase = "klm-thread"
-			if err := c.send(map[string]any{"id": phase, "method": method, "params": params}); err != nil {
+			if err := sendThread(); err != nil {
 				return err
 			}
 		case "klm-thread":
@@ -296,6 +331,7 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) error {
 			if err := p.bridge.waitReady(p.turn.ctx); err != nil {
 				return err
 			}
+			p.markRuntimeInfrastructure()
 			phase = "klm-turn"
 			turnParams := map[string]any{
 				"threadId": c.threadID, "input": payload.codexInput(),
@@ -340,7 +376,7 @@ func (p *adapter) finishCodexNative(process *interactiveProcess, b binary, cwd, 
 	if !process.Drained() {
 		return errors.New("Codex owned processes did not drain after native shutdown.")
 	}
-	probe, err := startInteractive(p.turn, b, []string{"app-server", "--listen", "stdio://"}, cwd)
+	probe, err := startInteractive(p.turn, b, []string{"app-server", "--listen", "stdio://"}, cwd, nil)
 	if err != nil {
 		return err
 	}

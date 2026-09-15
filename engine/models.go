@@ -155,7 +155,7 @@ func newCatalogRPC(ctx context.Context, b binary, cwd string, pi bool) (*catalog
 		args = []string{"--mode", "rpc", "--no-extensions", "--no-session"}
 	}
 	t := &turn{ctx: ctx}
-	process, err := startInteractive(t, b, args, cwd)
+	process, err := startInteractive(t, b, args, cwd, nil)
 	if err != nil {
 		return nil, err
 	}

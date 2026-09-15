@@ -4,6 +4,15 @@ import { Button, IconButton } from '../../design-system/Button';
 import { ProjectActionsMenu } from '../projects/ProjectActionsMenu';
 import type { Session, Project } from '../../engine';
 
+function sessionRuntimeState(session: Session) {
+  if (session.status === 'error') return { state: 'error', label: 'Runtime error' };
+  if ((session.permissions?.length ?? 0) > 0) return { state: 'waiting', label: 'Waiting for approval' };
+  if ((session.questions?.length ?? 0) > 0) return { state: 'waiting', label: 'Waiting for input' };
+  if (session.status === 'running') return { state: 'running', label: 'Turn running' };
+  if (session.runtimeActive) return { state: 'active', label: 'Runtime active' };
+  return { state: 'off', label: 'Runtime stopped' };
+}
+
 export function WorkspaceSidebar({ project, sessions, activeId, activeSection, onSelect, onNew, onCreateFolder, onClose, onAgents, onGraphs, onEditProject, onRemoveProject }: {
   project: Project; sessions: Session[]; activeId: string; onSelect: (id: string) => void; onNew: (folder?: string) => void;
   onCreateFolder: (name: string) => Promise<string | null>;
@@ -47,7 +56,10 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, o
         const expanded = search !== null || !collapsed.includes(workspace);
         return <div className="workspace-group" key={workspace}>
           <div className="workspace-folder-row"><button className="workspace-folder" aria-expanded={expanded} onClick={() => setCollapsed(current => current.includes(workspace) ? current.filter(item => item !== workspace) : [...current, workspace])}><Folder />{workspace}</button><IconButton label={`New session in ${workspace}`} onClick={() => { setCollapsed(current => current.filter(item => item !== workspace)); onNew(workspace); }}><Plus /></IconButton></div>
-          {expanded && <div className="session-list">{matches.map(session => <button key={session.id} className={`session-item ${session.id === activeId ? 'is-active' : ''}`} aria-current={session.id === activeId ? 'page' : undefined} onClick={() => onSelect(session.id)}><span>{session.title}</span><small>{session.status === 'running' ? 'Running' : session.harness === 'opencode' ? 'OpenCode' : session.harness === 'pi' ? 'Pi' : 'Codex'}</small></button>)}{matches.length === 0 && <p className="empty-workspace">No sessions</p>}</div>}
+          {expanded && <div className="session-list">{matches.map(session => {
+            const runtime = sessionRuntimeState(session);
+            return <button key={session.id} className={`session-item ${session.id === activeId ? 'is-active' : ''}`} aria-current={session.id === activeId ? 'page' : undefined} onClick={() => onSelect(session.id)}><span>{session.title}</span><i className={`session-runtime-led is-${runtime.state}`} role="img" aria-label={runtime.label} title={runtime.label} /></button>;
+          })}{matches.length === 0 && <p className="empty-workspace">No sessions</p>}</div>}
         </div>;
       })}
     </div>

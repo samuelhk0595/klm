@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 type Harness struct {
@@ -157,6 +158,7 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 func (b *cappedBuffer) String() string { return string(b.data) }
 
 type jsonLines struct {
+	mu      sync.Mutex
 	pending []byte
 	total   int
 	err     error
@@ -165,6 +167,8 @@ type jsonLines struct {
 }
 
 func (l *jsonLines) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if l.err != nil {
 		return 0, l.err
 	}
@@ -186,7 +190,7 @@ func (l *jsonLines) Write(p []byte) (int, error) {
 		if end < 0 {
 			break
 		}
-		if err := l.flush(); err != nil {
+		if err := l.flushLocked(); err != nil {
 			return 0, err
 		}
 		p = p[end+1:]
@@ -201,6 +205,12 @@ func (l *jsonLines) reject(text string) error {
 }
 
 func (l *jsonLines) flush() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.flushLocked()
+}
+
+func (l *jsonLines) flushLocked() error {
 	if l.err != nil {
 		return l.err
 	}
@@ -214,6 +224,12 @@ func (l *jsonLines) flush() error {
 	return nil
 }
 
+func (l *jsonLines) resetTurn() {
+	l.mu.Lock()
+	l.total = 0
+	l.mu.Unlock()
+}
+
 const linkedPromptPrefix = "KLM linked-agent tools are available: linked_discover, linked_read, linked_ask, linked_answer. When the user refers to work in the linked main agent or side agent conversation, retrieve it or consult that agent before continuing. For linked_ask, action=continue means the result is ready: use the answer to respond to the user or continue their task now. Only action=yield means it is still pending: finish the turn so KLM can resume you automatically. A KLM continuation already contains the result and requires no further wait or user follow-up. Do not poll or repeat a pending question.\n\n"
 
 func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd string, payload submission) {
@@ -221,8 +237,13 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	defer t.cancel()
 	p := &adapter{app: a, turn: t, id: s.ID, harness: s.Harness,
 		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true}
+	if s.Role != "graph_node" {
+		p.runtime = a.beginSessionRuntime(s.ID)
+		defer p.runtime.finishTurn()
+	}
 	p.graph = graphBinding(t)
 	defer UnbindGraphAdapter(t)
+	p.stream = newStreamBatch(p)
 	var err error
 	if t.prompt == "" {
 		t.prompt = payload.Text
@@ -275,9 +296,16 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 			default:
 				err = errors.New("Unsupported harness.")
 			}
-			bridge.close()
+			if p.runtime != nil {
+				bridge.unbind(p)
+			} else {
+				bridge.close()
+			}
 		}
 	}
+	// Drain text before final results, consultation answers and graph completion
+	// read the durable session, including when the harness failed or was stopped.
+	err = errors.Join(err, p.stream.close())
 	graphResult := p.finishGraphAdapter(err)
 	if p.graphNode() && graphResult.Error != nil {
 		err = graphResult.Error
@@ -385,12 +413,14 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 }
 
 type adapter struct {
+	stream             *streamBatch
 	graph              *graphAdapterBinding
 	nativeSettled      bool
 	choiceToolSettled  bool
 	processesDrained   bool
 	processDrainFailed bool
 	bridge             *linkedBridge
+	runtime            *sessionRuntime
 	app                *app
 	turn               *turn
 	id                 string
@@ -460,8 +490,8 @@ func contentText(value any) string {
 	return ""
 }
 
-// Stable keys upsert harness items in first-observed order. Only Pi deltas
-// append text; accumulated tool results and completed messages replace text.
+// Stable keys upsert harness items in first-observed order. Native deltas append
+// text; accumulated tool results and completed messages replace text.
 func (p *adapter) put(key, kind, title, text, status string, appendText bool, raw map[string]any) error {
 	id := p.keys[key]
 	if key == "" || id == "" {
@@ -470,37 +500,21 @@ func (p *adapter) put(key, kind, title, text, status string, appendText bool, ra
 			p.keys[key] = id
 		}
 	}
-	p.app.mu.Lock()
-	defer p.app.mu.Unlock()
-	return p.app.commitLocked(func(d *diskState) {
-		s := d.session(p.id)
-		var e *Event
-		for i := len(s.Events) - 1; i >= 0; i-- {
-			if s.Events[i].ID == id {
-				e = &s.Events[i]
-				break
-			}
+	data := map[string]any{"harness": p.harness}
+	for k, v := range raw {
+		data[k] = v
+	}
+	update := streamUpdate{event: Event{ID: id, Type: kind, Title: title, Text: text,
+		Status: status, ConsultationID: p.turn.consultationID, CreatedAt: now(), Data: data}, appendText: appendText}
+	if p.stream != nil {
+		if key != "" && status == "running" && (kind == "assistant" || kind == "reasoning" || appendText) {
+			return p.stream.enqueue(update)
 		}
-		if e == nil {
-			s.Events = append(s.Events, Event{ID: id, Type: kind, ConsultationID: p.turn.consultationID, CreatedAt: now(), Data: map[string]any{"harness": p.harness}})
-			e = &s.Events[len(s.Events)-1]
-		}
-		if title != "" {
-			e.Title = title
-		}
-		if status != "" {
-			e.Status = status
-		}
-		if appendText {
-			e.Text += text
-		} else {
-			e.Text = text
-		}
-		for k, v := range raw {
-			e.Data[k] = v
-		}
-		s.UpdatedAt = now()
-	})
+		// Lifecycle/tool events and final replacements also persist earlier text,
+		// so a delayed batch can never overwrite completion or reorder events.
+		return p.stream.flush(&update)
+	}
+	return p.commitStreamUpdates([]streamUpdate{update})
 }
 
 func (p *adapter) nativeID(id string) error {
