@@ -1,10 +1,10 @@
 import { useRef, useState } from 'react';
 import { ShieldQuestion } from 'lucide-react';
 import { Button } from '../../design-system/Button';
-import { request, type PermissionDecision, type PermissionRequest, type Session } from '../../engine';
+import { request, type PermissionDecision, type PermissionRequest, type SessionResponse } from '../../engine';
 
 export function PermissionCard({ permission, sessionId, projectName, origin, onResolved }: {
-  permission: PermissionRequest; sessionId: string; projectName: string; origin?: string; onResolved: (session: Session) => void;
+  permission: PermissionRequest; sessionId: string; projectName: string; origin?: string; onResolved: (session: SessionResponse) => void;
 }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -14,7 +14,7 @@ export function PermissionCard({ permission, sessionId, projectName, origin, onR
     if (pending.current || permission.resolving) return;
     pending.current = true; setSubmitting(true); setError('');
     try {
-      onResolved(await request<Session>(`/api/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(permission.id)}`, 'POST', { decision }));
+      onResolved(await request<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(permission.id)}`, 'POST', { decision }));
     } catch (error) { setError(error instanceof Error ? error.message : 'Permission decision could not be sent. Please retry.'); }
     finally { pending.current = false; setSubmitting(false); }
   }

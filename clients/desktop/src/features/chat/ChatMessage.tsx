@@ -1,4 +1,4 @@
-import { Atom, Check, Copy, FileText, ThumbsDown, ThumbsUp } from 'lucide-react';
+import { Atom, Check, Copy, FileText, Star } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -58,21 +58,32 @@ export function InlineMarkdownContent({ text }: { text: string }) {
   return <Markdown remarkPlugins={markdownPlugins} components={inlineMarkdownComponents} skipHtml>{text}</Markdown>;
 }
 
-export function ChatMessage({ message }: { message: Message }) {
+export function ChatMessage({ message, onFavorite }: { message: Message; onFavorite?: (favorite: boolean) => Promise<void> }) {
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState(false);
-  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
+  const [favoriting, setFavoriting] = useState(false);
+  const [favoriteError, setFavoriteError] = useState(false);
   async function copy() {
     try { await navigator.clipboard.writeText(message.text); setCopied(true); setCopyError(false); }
     catch { setCopyError(true); }
   }
+  async function favorite() {
+    if (!onFavorite || favoriting) return;
+    setFavoriting(true); setFavoriteError(false);
+    try { await onFavorite(!message.favorite); }
+    catch { setFavoriteError(true); }
+    finally { setFavoriting(false); }
+  }
+  const streaming = message.role === 'assistant' && message.status === 'running';
+  const canFavorite = message.role === 'assistant' && (!message.status || message.status === 'completed') && !!onFavorite;
   return <article data-message-id={message.id} className={`message message--${message.role}`} aria-label={`${message.role === 'user' ? 'Your' : 'Agent'} message`}>
     <div className="message-body">
       {message.context && <div className="context-injections">{message.context.map(file => <div key={file}><FileText /><span>Context injection</span><span aria-hidden="true">·</span><span className="context-file">{file}</span></div>)}</div>}
       {message.thought && <details className="thought"><summary><Atom /><strong>Think</strong><span>·</span><span className="thought-preview">{message.thought}</span></summary><p>{message.thought}</p></details>}
       {message.role === 'assistant' ? <MarkdownContent text={message.text} className="message-text" /> : <p className="message-text"><MentionText text={message.text} mentions={message.mentions} preparation={message.mentionPreparation} /></p>}
-      <div className="message-actions"><IconButton label={copied ? 'Copied' : 'Copy message'} onClick={copy}>{copied ? <Check /> : <Copy />}</IconButton>{message.role === 'assistant' && <><IconButton label="Helpful response" aria-pressed={feedback === 'up'} onClick={() => setFeedback(feedback === 'up' ? null : 'up')}><ThumbsUp /></IconButton><IconButton label="Unhelpful response" aria-pressed={feedback === 'down'} onClick={() => setFeedback(feedback === 'down' ? null : 'down')}><ThumbsDown /></IconButton></>}</div>
+      {!streaming && <div className="message-actions"><IconButton label={copied ? 'Copied' : 'Copy message'} onClick={copy}>{copied ? <Check /> : <Copy />}</IconButton>{canFavorite && <IconButton label={message.favorite ? 'Remove from favorites' : 'Add to favorites'} aria-pressed={!!message.favorite} disabled={favoriting} onClick={() => void favorite()}><Star /></IconButton>}</div>}
       {copyError && <p role="status" className="small muted">Clipboard unavailable. Select the message to copy it.</p>}
+      {favoriteError && <p role="alert" className="small muted">Could not update the favorite. Try again.</p>}
     </div>
   </article>;
 }

@@ -90,6 +90,13 @@ type openCodeServer struct {
 	once         sync.Once
 }
 
+type openCodeSubagent struct {
+	adapter *adapter
+	infos   map[string]map[string]any
+	parts   map[string]map[string]any
+	usage   *openCodeUsage
+}
+
 func (s *openCodeServer) Alive() bool {
 	select {
 	case <-s.processDone:
@@ -793,12 +800,13 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 
 	infos := map[string]map[string]any{}
 	parts := map[string]map[string]any{}
-	putPart := func(part map[string]any) error {
+	children := map[string]*openCodeSubagent{}
+	putPart := func(target *adapter, nativeSessionID string, targetBaseline map[string]bool, targetInfos map[string]map[string]any, part map[string]any, discoverSubagent bool) error {
 		messageID, partID := str(part, "messageID"), str(part, "id")
-		if baseline[messageID] || str(infos[messageID], "role") != "assistant" {
+		if targetBaseline[messageID] || str(targetInfos[messageID], "role") != "assistant" {
 			return nil
 		}
-		if messageID == "" || partID == "" || str(part, "sessionID") != sessionID {
+		if messageID == "" || partID == "" || str(part, "sessionID") != nativeSessionID {
 			return errors.New("OpenCode returned an invalid message part.")
 		}
 		encoded, err := json.Marshal(part)
@@ -821,8 +829,8 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 		case "tool":
 			state := object(part["state"])
 			title, body, status = str(part, "tool"), contentText(state["output"]), str(state, "status")
-			if title == "klm_linked_graph_submit_choice" && status == "completed" {
-				p.graphChoiceToolSettled(state["output"])
+			if target == p && title == "klm_linked_graph_submit_choice" && status == "completed" {
+				target.graphChoiceToolSettled(state["output"])
 			}
 			if status == "" {
 				status = "pending"
@@ -830,7 +838,43 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			if status == "error" {
 				body = humanError(state["error"])
 			}
-			if title == "bash" {
+			toolName := title
+			if discoverSubagent && strings.EqualFold(toolName, "task") {
+				kind = "subagent"
+				input, metadata := object(state["input"]), object(state["metadata"])
+				if description := str(input, "description"); description != "" {
+					title = description
+				} else {
+					title = "Subagent"
+				}
+				nativeChildID := str(metadata, "sessionId")
+				if nativeChildID != "" && (str(metadata, "parentSessionId") == "" || str(metadata, "parentSessionId") == sessionID) {
+					selection := object(metadata["model"])
+					model := ""
+					if providerID, modelID := str(selection, "providerID"), str(selection, "modelID"); providerID != "" && modelID != "" {
+						model = providerID + "/" + modelID
+					}
+					child, err := p.ensureSubagent(nativeChildID, title, model, str(metadata, "variant"))
+					if err != nil {
+						return err
+					}
+					if child != nil {
+						raw["childSessionId"], raw["nativeAgentId"] = child.id, nativeChildID
+						if children[nativeChildID] == nil {
+							windows := map[string]*int64{}
+							for id, window := range usage.windows {
+								windows[id] = window
+							}
+							children[nativeChildID] = &openCodeSubagent{adapter: child, infos: map[string]map[string]any{}, parts: map[string]map[string]any{}, usage: &openCodeUsage{messages: map[string]map[string]any{}, steps: map[string]map[string]map[string]any{}, windows: windows}}
+						}
+						if status == "completed" || status == "error" || status == "cancelled" {
+							if err := p.finishSubagent(child, status); err != nil {
+								return err
+							}
+						}
+					}
+				}
+			} else if title == "bash" {
 				kind = "command"
 				if command := str(object(state["input"]), "command"); command != "" {
 					body = strings.TrimSuffix(command+"\n"+body, "\n")
@@ -839,11 +883,11 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				kind = "mcp"
 			}
 			// Opaque tool names stay intact; do not guess that every custom tool is MCP.
-			raw["tool"], raw["callID"], raw["state"] = title, part["callID"], state
+			raw["tool"], raw["callID"], raw["state"] = toolName, part["callID"], state
 		default:
 			return nil
 		}
-		return p.put("opencode/"+messageID+"/"+partID, kind, title, body, status, false, raw)
+		return target.put("opencode/"+messageID+"/"+partID, kind, title, body, status, false, raw)
 	}
 
 	prompt := map[string]any{"parts": payload.openCodeParts()}
@@ -872,13 +916,69 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	}
 	// Events queued during prompt_async are processed only after submission succeeds.
 	busy, ownedMessage := false, false
+	steering := p.steeringChannel()
+	steeringMessageID, steeringQueueID := "", ""
+	latestSteeringID := ""
+	steeringHTTPPending := false
+	steeringResult := make(chan error, 1)
+	var deferredIdle map[string]any
+	steeringTimer := time.NewTimer(15 * time.Second)
+	steeringTimer.Stop()
+	defer steeringTimer.Stop()
+	var steeringDeadline <-chan time.Time
 	choiceStop := p.graphStop()
 	choiceInterrupted := false
 	for {
 		if p.completed && !p.graphMCPPending() {
 			return nil
 		}
+		nextEvents := events
+		if deferredIdle != nil && steeringMessageID == "" && !steeringHTTPPending {
+			replay := make(chan map[string]any, 1)
+			replay <- deferredIdle
+			deferredIdle, nextEvents = nil, replay
+		}
+		var inputReady <-chan struct{}
+		if !steeringHTTPPending {
+			inputReady = steering
+		}
 		select {
+		case <-inputReady:
+			q, payload, err := p.takeSteering()
+			if err != nil {
+				return err
+			}
+			if q == nil {
+				continue
+			}
+			steeringQueueID = q.ID
+			steeringMessageID = fmt.Sprintf("msg_%012x%s", (uint64(time.Now().UnixMilli())*0x1000+1)&0xffffffffffff, q.ID[:14])
+			latestSteeringID = steeringMessageID
+			steeringHTTPPending = true
+			steeringTimer.Reset(15 * time.Second)
+			steeringDeadline = steeringTimer.C
+			nextPrompt := map[string]any{"messageID": steeringMessageID, "parts": payload.openCodeParts()}
+			if model, ok := prompt["model"]; ok {
+				nextPrompt["model"] = model
+			}
+			if variant, ok := prompt["variant"]; ok {
+				nextPrompt["variant"] = variant
+			}
+			go func() {
+				sendCtx, sendCancel := context.WithTimeout(ctx, 15*time.Second)
+				defer sendCancel()
+				steeringResult <- h.json(sendCtx, http.MethodPost, sessionPath+"/prompt_async", nextPrompt, nil)
+			}()
+		case <-steeringDeadline:
+			return errors.New("OpenCode did not confirm the steering message before the delivery deadline.")
+		case sendErr := <-steeringResult:
+			steeringHTTPPending = false
+			p.app.mu.Lock()
+			p.app.wakeSteeringLocked(p.id)
+			p.app.mu.Unlock()
+			if sendErr != nil && steeringMessageID != "" {
+				return fmt.Errorf("OpenCode message delivery was not confirmed: %w", sendErr)
+			}
 		case <-choiceStop:
 			choiceStop = nil
 			if p.completed {
@@ -896,7 +996,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			return err
 		case err := <-streamFailed:
 			return err
-		case event := <-events:
+		case event := <-nextEvents:
 			typ, properties := str(event, "type"), object(event["properties"])
 			if typ == "message.part.updated" {
 				p.observeOpenCodeMCPPart(object(properties["part"]))
@@ -907,8 +1007,114 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			} else if typ == "message.part.updated" {
 				scopedID = str(object(properties["part"]), "sessionID")
 			} else if typ == "message.part.delta" && scopedID == "" {
-				part := parts[str(properties, "messageID")+"/"+str(properties, "partID")]
+				key := str(properties, "messageID") + "/" + str(properties, "partID")
+				part := parts[key]
 				scopedID = str(part, "sessionID")
+				if scopedID == "" {
+					for nativeID, child := range children {
+						if child.parts[key] != nil {
+							scopedID = nativeID
+							break
+						}
+					}
+				}
+			}
+			if child := children[scopedID]; child != nil {
+				switch typ {
+				case "permission.asked":
+					if err := requestPermission(properties); err != nil {
+						return err
+					}
+				case "permission.replied":
+					id := str(properties, "requestID")
+					permissions[id] = true
+					if err := p.dismissPermission(id); err != nil {
+						return err
+					}
+				case "question.asked":
+					if err := requestQuestion(properties); err != nil {
+						return err
+					}
+				case "question.replied", "question.rejected":
+					id := str(properties, "requestID")
+					if questions[id] != nil {
+						questions[id].Store(false)
+					}
+					if err := p.dismissQuestion(id); err != nil {
+						return err
+					}
+				case "message.updated":
+					info := object(properties["info"])
+					id := str(info, "id")
+					if id == "" {
+						return errors.New("OpenCode returned a subagent message without an identifier.")
+					}
+					child.infos[id] = info
+					child.usage.message(info)
+					if str(info, "role") == "assistant" {
+						if err := child.adapter.resolvedSelection(str(info, "providerID")+"/"+str(info, "modelID"), str(info, "variant")); err != nil {
+							return err
+						}
+					}
+					if info["error"] != nil {
+						if err := child.adapter.failure(map[string]any{"type": typ, "error": info["error"]}); err != nil {
+							return err
+						}
+						if err := p.finishSubagent(child.adapter, "error"); err != nil {
+							return err
+						}
+					}
+					for _, part := range child.parts {
+						if str(part, "messageID") == id {
+							if err := putPart(child.adapter, scopedID, nil, child.infos, part, false); err != nil {
+								return err
+							}
+						}
+					}
+					if err := child.adapter.setUsage(child.usage.snapshot()); err != nil {
+						return err
+					}
+				case "message.part.updated":
+					part := object(properties["part"])
+					messageID, partID := str(part, "messageID"), str(part, "id")
+					if messageID == "" || partID == "" {
+						return errors.New("OpenCode returned a subagent part without identifiers.")
+					}
+					child.parts[messageID+"/"+partID] = part
+					child.usage.part(part)
+					if err := putPart(child.adapter, scopedID, nil, child.infos, part, false); err != nil {
+						return err
+					}
+					if str(part, "type") == "step-finish" {
+						if err := child.adapter.setUsage(child.usage.snapshot()); err != nil {
+							return err
+						}
+					}
+				case "message.part.delta":
+					if str(properties, "field") != "text" {
+						continue
+					}
+					part := child.parts[str(properties, "messageID")+"/"+str(properties, "partID")]
+					if part == nil || (str(part, "type") != "text" && str(part, "type") != "reasoning") {
+						continue
+					}
+					delta := str(properties, "delta")
+					if len(str(part, "text"))+len(delta) > openCodeFrameLimit {
+						return errors.New("OpenCode subagent text part exceeded the 2 MiB limit.")
+					}
+					part["text"] = str(part, "text") + delta
+					if err := putPart(child.adapter, scopedID, nil, child.infos, part, false); err != nil {
+						return err
+					}
+				case "session.error":
+					if err := child.adapter.failure(map[string]any{"type": typ, "error": properties["error"]}); err != nil {
+						return err
+					}
+					if err := p.finishSubagent(child.adapter, "error"); err != nil {
+						return err
+					}
+				}
+				continue
 			}
 			if scopedID != sessionID {
 				if p.graphOwnsNativeSession(scopedID) {
@@ -987,6 +1193,14 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				if id == "" || baseline[id] {
 					continue
 				}
+				if id == steeringMessageID && str(info, "role") == "user" {
+					if err := p.finishSteering(steeringQueueID, ""); err != nil {
+						return err
+					}
+					steeringMessageID, steeringQueueID = "", ""
+					steeringTimer.Stop()
+					steeringDeadline = nil
+				}
 				ownedMessage = true
 				infos[id] = info
 				usage.message(info)
@@ -1003,7 +1217,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				}
 				for _, part := range parts {
 					if str(part, "messageID") == id {
-						if err := putPart(part); err != nil {
+						if err := putPart(p, sessionID, baseline, infos, part, true); err != nil {
 							return err
 						}
 					}
@@ -1024,7 +1238,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 						return err
 					}
 				}
-				if err := putPart(part); err != nil {
+				if err := putPart(p, sessionID, baseline, infos, part, true); err != nil {
 					return err
 				}
 			case "message.part.delta":
@@ -1041,7 +1255,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 					return errors.New("OpenCode text part exceeded the 2 MiB limit.")
 				}
 				part["text"] = str(part, "text") + delta
-				if err := putPart(part); err != nil {
+				if err := putPart(p, sessionID, baseline, infos, part, true); err != nil {
 					return err
 				}
 			case "session.status", "session.idle":
@@ -1051,6 +1265,10 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 					continue
 				}
 				if (typ != "session.idle" && status != "idle") || (!busy && !ownedMessage) {
+					continue
+				}
+				if steeringMessageID != "" || steeringHTTPPending {
+					deferredIdle = event
 					continue
 				}
 				// Retain only this turn, then reconcile oldest first for UI ordering.
@@ -1063,6 +1281,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				}
 				terminalAssistant, incomplete := false, false
 				latestCreated, latestID := float64(-1), ""
+				latestParentID := ""
 				for i := len(history) - 1; i >= 0; i-- {
 					message := history[i]
 					info := object(message["info"])
@@ -1085,6 +1304,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 					created, _ := object(info["time"])["created"].(float64)
 					if created > latestCreated || (created == latestCreated && id > latestID) {
 						latestCreated, latestID = created, id
+						latestParentID = str(info, "parentID")
 						finish := str(info, "finish")
 						terminalAssistant = completed && finish != "" && finish != "tool-calls" && finish != "unknown"
 						if choiceInterrupted && completed && str(object(info["error"]), "name") == "MessageAbortedError" {
@@ -1107,13 +1327,16 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 								incomplete = true
 							}
 						}
-						if err := putPart(part); err != nil {
+						if err := putPart(p, sessionID, baseline, infos, part, true); err != nil {
 							return err
 						}
 					}
 				}
 				if err := p.setUsage(usage.snapshot()); err != nil {
 					return err
+				}
+				if latestSteeringID != "" && (latestParentID != latestSteeringID || incomplete || !terminalAssistant) {
+					continue
 				}
 				if incomplete || !terminalAssistant {
 					return errors.New("OpenCode became idle without a completed assistant response.")

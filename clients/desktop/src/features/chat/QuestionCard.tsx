@@ -1,10 +1,10 @@
 import { useRef, useState } from 'react';
 import { MessageCircle } from 'lucide-react';
 import { Button } from '../../design-system/Button';
-import { request, type QuestionRequest, type Session } from '../../engine';
+import { request, type QuestionRequest, type SessionResponse } from '../../engine';
 
 export function QuestionCard({ question, sessionId, origin, onResolved }: {
-  question: QuestionRequest; sessionId: string; origin?: string; onResolved: (session: Session) => void;
+  question: QuestionRequest; sessionId: string; origin?: string; onResolved: (session: SessionResponse) => void;
 }) {
   const [responses, setResponses] = useState(() => question.items.map(() => ({ selected: [] as string[], custom: '' })));
   const [submitting, setSubmitting] = useState(false);
@@ -21,7 +21,7 @@ export function QuestionCard({ question, sessionId, origin, onResolved }: {
     if (pending.current || question.resolving || (!cancelled && !ready)) return;
     pending.current = true; setSubmitting(true); setError('');
     try {
-      const snapshot = await request<Session>(`/api/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(question.id)}/reply`, 'POST', cancelled ? { cancelled: true } : { answers });
+      const snapshot = await request<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(question.id)}/reply`, 'POST', cancelled ? { cancelled: true } : { answers });
       onResolved(snapshot);
     } catch (error) { setError(error instanceof Error ? error.message : 'Could not send the answer. Please retry.'); }
     finally { pending.current = false; setSubmitting(false); }

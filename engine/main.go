@@ -16,6 +16,7 @@ import (
 )
 
 type turn struct {
+	steerWake           chan struct{} // protected by app.mu
 	graphNotificationID string
 	prompt              string // complete submission; graphConversationHooks prepends internal instructions
 	consultationID      string
@@ -28,26 +29,28 @@ type turn struct {
 }
 
 type app struct {
-	authoringMu   sync.Mutex
-	mu            sync.Mutex
-	dir           string
-	state         diskState
-	storageErr    error
-	harnesses     []Harness
-	binaries      map[string]binary
-	runs          map[string]*turn
-	runtimes      map[string]*sessionRuntime
-	graphRuns     map[string]*graphExecution // graph run ID -> lifetime independent of chat turns
-	graphStarting map[string]bool            // conversation reservations while capturing current definitions
-	listeners     map[string]map[chan struct{}]bool
-	picker        chan struct{}
-	ctx           context.Context
-	closing       bool
-	wg            sync.WaitGroup
-	catalogMu     sync.Mutex
-	catalogs      map[string]catalogCache
-	quotaMu       sync.Mutex
-	quotas        map[string]quotaCache
+	authoringMu    sync.Mutex
+	mu             sync.Mutex
+	dir            string
+	state          diskState
+	storageErr     error
+	harnesses      []Harness
+	binaries       map[string]binary
+	runs           map[string]*turn
+	runtimes       map[string]*sessionRuntime
+	graphRuns      map[string]*graphExecution // graph run ID -> lifetime independent of chat turns
+	graphStarting  map[string]bool            // conversation reservations while capturing current definitions
+	listeners      map[string]map[chan struct{}]bool
+	historyJournal map[string]*sessionJournal
+	journalBase    uint64
+	picker         chan struct{}
+	ctx            context.Context
+	closing        bool
+	wg             sync.WaitGroup
+	catalogMu      sync.Mutex
+	catalogs       map[string]catalogCache
+	quotaMu        sync.Mutex
+	quotas         map[string]quotaCache
 }
 
 func main() {
@@ -101,6 +104,10 @@ func runEngine(dir string) error {
 	}
 	for i := range state.Sessions {
 		s := &state.Sessions[i]
+		if len(s.Queue) > 0 {
+			pauseMessageQueue(s, "Engine restarted. Send queued messages when ready.")
+			interrupted = true
+		}
 		if len(s.Questions) > 0 {
 			s.Questions = nil
 			s.UpdatedAt = now()
@@ -117,6 +124,9 @@ func runEngine(dir string) error {
 			entry := event("error", "Execution interrupted by engine restart.")
 			entry.ConsultationID = interruptedConsultations[s.ID]
 			s.Events = append(s.Events, entry)
+			if s.Role == sessionRoleSubagent {
+				syncSubagentParent(&state, s, "interrupted")
+			}
 			interrupted = true
 		}
 	}
@@ -129,7 +139,8 @@ func runEngine(dir string) error {
 	defer cancel()
 	harnesses, binaries := discoverHarnesses()
 	a := &app{dir: dir, state: state, harnesses: harnesses, binaries: binaries,
-		runs: map[string]*turn{}, runtimes: map[string]*sessionRuntime{}, graphRuns: map[string]*graphExecution{}, listeners: map[string]map[chan struct{}]bool{}, picker: make(chan struct{}, 1), ctx: ctx}
+		runs: map[string]*turn{}, runtimes: map[string]*sessionRuntime{}, graphRuns: map[string]*graphExecution{}, listeners: map[string]map[chan struct{}]bool{},
+		historyJournal: map[string]*sessionJournal{}, journalBase: state.GraphRevision, picker: make(chan struct{}, 1), ctx: ctx}
 	go a.expireConsultations()
 	a.mu.Lock()
 	a.scheduleLinkedLocked()

@@ -73,7 +73,7 @@ func (p *adapter) setUsage(usage *SessionUsage) error {
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
 	s := p.app.state.session(p.id)
-	if s == nil || p.app.runs[p.id] != p.turn || reflect.DeepEqual(s.Usage, usage) {
+	if s == nil || (!p.subagent && p.app.runs[p.id] != p.turn) || reflect.DeepEqual(s.Usage, usage) {
 		return nil
 	}
 	return p.app.commitLocked(func(d *diskState) {

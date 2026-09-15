@@ -9,6 +9,7 @@ export type Project = {
   folder: string;
   icon: string;
   folders: string[];
+  archivedFolders: string[];
 };
 
 export type Harness = {
@@ -21,10 +22,11 @@ export type Harness = {
 export type EngineEvent = {
 	consultationId?: string;
   id: string;
-  type: 'user' | 'assistant' | 'reasoning' | 'command' | 'mcp' | 'tool' | 'error' | 'status' | 'consultation';
+  type: 'user' | 'assistant' | 'reasoning' | 'command' | 'mcp' | 'tool' | 'error' | 'status' | 'consultation' | 'subagent';
   text: string;
   title?: string;
   status?: string;
+  favorite?: boolean;
   createdAt: string;
   data?: Record<string, unknown> & { mentions?: FileMention[]; mentionPreparation?: MentionPreparation[] };
 };
@@ -35,8 +37,11 @@ export type SessionUsage = {
   context: { tokens: number | null; window: number | null } | null;
 };
 
+export type QueuedMessage = { id: string; text: string; mode: "queue" | "steer"; status: "queued" | "steering" | "sending" | "paused" | "uncertain"; error?: string };
+
 export type Session = {
-  role?: string;
+  queue?: QueuedMessage[] | null;
+  role?: 'side_agent' | 'subagent' | 'graph_node';
   selectedGraphId?: string;
   graph?: ConversationGraphState;
   parentId?: string;
@@ -51,8 +56,10 @@ export type Session = {
   resolvedModel?: string;
   resolvedEffort?: string;
   status: 'idle' | 'running' | 'error';
+  archived?: boolean;
   runtimeActive?: boolean;
   events: EngineEvent[];
+  history?: { revision: number; startIndex: number; total: number; nextCursor?: string; hasMore: boolean };
   permissions?: PermissionRequest[];
   questions?: QuestionRequest[];
   usage?: SessionUsage;
@@ -61,6 +68,19 @@ export type Session = {
 };
 
 export type SourceReference = { sessionId: string; messageId: string; passage: string };
+
+export type SessionSummary = Omit<Session, 'events' | 'history' | 'sources'>;
+export type EventPage = {
+  sessionId: string; revision: number; startIndex: number; endIndex: number;
+  total: number; events: EngineEvent[] | null; nextCursor?: string; hasMore: boolean;
+};
+export type SessionUpdate = {
+  kind: 'reset' | 'delta'; revision: number; summary: SessionSummary; total: number;
+  changes: { index: number; revision: number; event: EngineEvent }[];
+  history?: EventPage;
+};
+export type SessionResponse = Session | SessionUpdate;
+export type EngineSnapshot = Omit<EngineState, 'sessions'> & { sessions: SessionSummary[]; revision?: number };
 
 export type ConversationGraphState = {
   sessionId: string;
@@ -139,6 +159,7 @@ export type EngineState = {
 
 export type ModelOption = { id: string; name: string; provider: string; providerName: string; efforts: string[]; defaultEffort?: string };
 export type ModelCatalog = { models: ModelOption[]; connectedProviders: { id: string; name: string; authType: string }[]; defaultModel?: string; defaultEffort?: string; effortLabel: string };
+export type SessionMetadata = { sessionId: string; gitBranch?: string };
 export type QuotaSnapshot = { source: string; observedAt: string; stale?: boolean; windows: { name: string; usedPercent: number; resetsAt: number }[] };
 
 export async function request<T>(path: string, method = 'GET', body?: unknown, timeoutMs = 15000, signal?: AbortSignal): Promise<T> {

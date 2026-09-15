@@ -1,0 +1,35 @@
+import { useEffect, useRef, useState } from 'react';
+import { X } from 'lucide-react';
+import { Button, IconButton } from '../../design-system/Button';
+import type { Session } from '../../engine';
+
+export function RenameSessionDialog({ session, onRename, onClose }: {
+  session: Session;
+  onRename: (title: string) => Promise<string | null>;
+  onClose: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [title, setTitle] = useState(session.title);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { dialog.current?.showModal(); }, []);
+  return <dialog ref={dialog} className="settings-dialog add-project-dialog" aria-labelledby="rename-session-title" onCancel={event => { if (busy) event.preventDefault(); else onClose(); }} onClose={onClose}>
+    <form onSubmit={async event => {
+      event.preventDefault();
+      const next = title.trim();
+      if (!next || busy) return;
+      setBusy(true); setError('');
+      try {
+        const failure = await onRename(next);
+        if (failure) setError(failure); else onClose();
+      } catch (error) { setError(error instanceof Error ? error.message : 'Could not rename the session.'); }
+      finally { setBusy(false); }
+    }}>
+      <div className="dialog-heading"><h2 id="rename-session-title">Rename session</h2><IconButton label="Cancel renaming session" disabled={busy} onClick={onClose}><X /></IconButton></div>
+      <label className="project-field" htmlFor="rename-session-name">Session name</label>
+      <input id="rename-session-name" autoFocus required maxLength={200} value={title} onChange={event => setTitle(event.target.value)} disabled={busy} />
+      {error && <p role="alert" className="form-error">{error}</p>}
+      <div className="dialog-actions"><Button disabled={busy} onClick={onClose}>Cancel</Button><Button type="submit" variant="primary" disabled={busy || !title.trim()}>{busy ? 'Renaming...' : 'Rename'}</Button></div>
+    </form>
+  </dialog>;
+}

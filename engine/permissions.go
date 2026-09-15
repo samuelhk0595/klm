@@ -129,6 +129,11 @@ func (a *app) permissionDecision(w http.ResponseWriter, r *http.Request) {
 	}
 	id, requestID := r.PathValue("id"), r.PathValue("permissionID")
 	a.mu.Lock()
+	if s := a.state.session(id); s != nil && s.Role == sessionRoleSubagent {
+		a.mu.Unlock()
+		fail(w, 404, "Conversation not found.")
+		return
+	}
 	t := a.runs[id]
 	if t == nil || t.ctx.Err() != nil || t.approvals[requestID] == nil {
 		a.mu.Unlock()
@@ -207,5 +212,5 @@ func (a *app) permissionDecision(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
-	respond(w, 200, a.state.session(id))
+	respond(w, 200, a.currentSessionUpdateLocked(id))
 }

@@ -573,5 +573,5 @@ func (a *app) updateModelSettings(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
-	respond(w, 200, a.state.session(s.ID))
+	respond(w, 200, a.currentSessionUpdateLocked(s.ID))
 }

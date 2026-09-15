@@ -43,8 +43,17 @@ export function ModelPicker({ session, disabled, onSave }: {
 
   const connected = new Set(catalog?.connectedProviders?.map(provider => provider.id) ?? []);
   const models = catalog?.models.filter(item => connected.has(item.provider)) ?? [];
-  const current = models.find(item => item.id === (session.model || session.resolvedModel || catalog?.defaultModel));
-  const currentEffort = session.effort || session.resolvedEffort || current?.defaultEffort || (!session.model ? catalog?.defaultEffort : '') || '';
+  const currentModelId = session.model || catalog?.defaultModel || session.resolvedModel || '';
+  const current = models.find(item => item.id === currentModelId);
+  let currentEffort = !catalog ? session.effort || (currentModelId === session.resolvedModel ? session.resolvedEffort : '') || '' : '';
+  if (current?.efforts.length) {
+    if (session.effort && current.efforts.includes(session.effort)) currentEffort = session.effort;
+    else {
+      currentEffort = current.defaultEffort ?? '';
+      if (currentModelId === catalog?.defaultModel && catalog.defaultEffort && current.efforts.includes(catalog.defaultEffort)) currentEffort = catalog.defaultEffort;
+      else if (!currentEffort && currentModelId === session.resolvedModel && session.resolvedEffort && current.efforts.includes(session.resolvedEffort)) currentEffort = session.resolvedEffort;
+    }
+  }
   const efforts = [...(current?.efforts ?? [])].sort((a, b) => effortRank(a) - effortRank(b));
   const effortIndex = Math.max(0, efforts.indexOf(previewEffort));
   const filtered = models.filter(option => `${option.name} ${option.id} ${option.providerName}`.toLowerCase().includes(search.toLowerCase()));
@@ -68,7 +77,7 @@ export function ModelPicker({ session, disabled, onSave }: {
   }
   function chooseModel(id: string) {
     const next = models.find(option => option.id === (id || catalog?.defaultModel));
-    const effort = next?.efforts.includes(session.effort ?? '') ? session.effort! : '';
+    const effort = next?.id === currentModelId && next.efforts.includes(session.effort ?? '') ? session.effort! : '';
     void save(id, effort, true);
   }
   function navigateModels(event: KeyboardEvent<HTMLElement>) {
@@ -86,7 +95,7 @@ export function ModelPicker({ session, disabled, onSave }: {
 
   return <div className="model-picker-controls">
     <Menu label="Models" className="model-menu" open={menu === 'model'} onOpenChange={open => openMenu('model', open)} trigger={props => <Button {...props} variant="ghost" size="sm" className="model-picker-trigger" disabled={locked} aria-label="Choose model">
-      <HarnessIcon harness={session.harness} /><span className="model-picker-name">{current?.name || session.model || session.resolvedModel || 'Harness default'}</span><ChevronDown />
+      <HarnessIcon harness={session.harness} /><span className="model-picker-name">{current?.name || currentModelId || (loading ? 'Loading model...' : 'Model unavailable')}</span><ChevronDown />
     </Button>}>
       <div className="model-menu-search"><input data-menu-autofocus type="search" aria-label="Search models" placeholder="Search models" value={search} onChange={event => { setSearch(event.target.value); modelList.current?.scrollTo({ top: 0 }); }} onKeyDown={navigateModels} disabled={saving} /><IconButton label="Refresh models" disabled={loading || saving} onClick={() => setRefresh(value => value + 1)}><RefreshCw /></IconButton></div>
       {error && <p className="form-error menu-feedback" role="alert">{error}</p>}

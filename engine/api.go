@@ -11,10 +11,10 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -72,6 +72,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("PATCH /api/projects/{id}", a.updateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", a.removeProject)
 	mux.HandleFunc("POST /api/projects/{id}/folders", a.createFolder)
+	mux.HandleFunc("PATCH /api/projects/{id}/folders", a.patchFolder)
 	mux.HandleFunc("GET /api/projects/{id}/paths", a.projectPaths)
 	mux.HandleFunc("GET /api/projects/{id}/authoring", a.authoring)
 	mux.HandleFunc("GET /api/projects/{id}/models/{harness}", a.projectModels)
@@ -92,10 +93,16 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/consultations/{requestID}/cancel", a.chatSessionHandler(a.cancelConsultation))
 	mux.HandleFunc("PATCH /api/sessions/{id}", a.chatSessionHandler(a.patchSession))
 	mux.HandleFunc("GET /api/sessions/{id}/models", a.getModels)
+	mux.HandleFunc("GET /api/sessions/{id}/metadata", a.chatSessionHandler(a.getSessionMetadata))
 	mux.HandleFunc("PATCH /api/sessions/{id}/settings", a.chatSessionHandler(a.updateModelSettings))
 	mux.HandleFunc("GET /api/sessions/{id}/quota", a.getQuota)
 	mux.HandleFunc("POST /api/sessions/{id}/messages", a.chatSessionHandler(a.message))
+	mux.HandleFunc("POST /api/sessions/{id}/queue/{messageID}/send", a.chatSessionHandler(a.changeQueuedMessage))
+	mux.HandleFunc("DELETE /api/sessions/{id}/queue/{messageID}", a.chatSessionHandler(a.changeQueuedMessage))
+	mux.HandleFunc("GET /api/sessions/{id}/history", a.chatSessionHandler(a.history))
+	mux.HandleFunc("GET /api/sessions/{id}/export", a.chatSessionHandler(a.exportSession))
 	mux.HandleFunc("GET /api/sessions/{id}/events", a.chatSessionHandler(a.events))
+	mux.HandleFunc("PATCH /api/sessions/{id}/events/{eventID}", a.chatSessionHandler(a.patchEvent))
 	mux.HandleFunc("POST /api/sessions/{id}/stop", a.chatSessionHandler(a.stop))
 	mux.HandleFunc("POST /api/sessions/{id}/permissions/{permissionID}", a.permissionDecision)
 	mux.HandleFunc("POST /api/sessions/{id}/questions/{questionID}/reply", a.answerQuestion)
@@ -104,21 +111,11 @@ func (a *app) routes() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if !publicAPIHost(r.Host) {
-			fail(w, 403, "Invalid engine host; use this computer's address on port "+apiPort+".")
-			return
-		}
-		if origin := r.Header.Get("Origin"); origin != "" {
-			if !publicAPIOrigin(origin, r.Host) {
-				fail(w, 403, "Origin is not an allowed KLM client.")
-				return
-			}
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Add("Vary", "Origin")
-		}
+		// Public clients may use any domain/IP, including reverse proxies and tunnels.
+		w.Header().Set("Access-Control-Allow-Origin", "*")
 		if r.Method == http.MethodOptions {
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PATCH, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "*")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -140,38 +137,6 @@ func (a *app) routes() http.Handler {
 	})
 }
 
-// Deliberately separate from loopbackHost: the authenticated harness bridge keeps
-// its original local-only host and peer validation.
-func publicAPIHost(authority string) bool {
-	host, port, err := net.SplitHostPort(authority)
-	if err != nil || port != apiPort {
-		return false
-	}
-	if ip := net.ParseIP(host); ip != nil {
-		return !ip.IsUnspecified() && !ip.IsMulticast()
-	}
-	name, _ := os.Hostname()
-	return strings.EqualFold(host, "localhost") || (name != "" && strings.EqualFold(host, name))
-}
-
-func publicAPIOrigin(origin, authority string) bool {
-	if origin == "tauri://localhost" || origin == "http://tauri.localhost" || origin == "https://tauri.localhost" {
-		return true
-	}
-	u, err := url.Parse(origin)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil ||
-		u.Host == "" || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
-		return false
-	}
-	host, _, err := net.SplitHostPort(authority)
-	if (u.Port() == "5173" || u.Port() == "4173") &&
-		(loopbackHost(u.Host) || developmentBuild && err == nil && strings.EqualFold(u.Hostname(), host)) {
-		return true
-	}
-	return err == nil && u.Scheme == "http" && u.Port() == webPort &&
-		(strings.EqualFold(u.Hostname(), host) || (loopbackHost(u.Host) && loopbackHost(authority)))
-}
-
 func (a *app) health(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -191,7 +156,7 @@ func (a *app) health(w http.ResponseWriter, r *http.Request) {
 func (a *app) getState(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	projects := []Project{}
-	sessions := []Session{}
+	sessions := []SessionSummary{}
 	visible := map[string]bool{}
 	for _, project := range a.state.Projects {
 		if !project.Removed {
@@ -201,14 +166,15 @@ func (a *app) getState(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, session := range a.state.Sessions {
 		if visible[session.ProjectID] && session.GraphRunID == "" {
-			sessions = append(sessions, *a.sessionViewLocked(session.ID))
+			sessions = append(sessions, *a.sessionSummaryLocked(session.ID))
 		}
 	}
 	state := struct {
-		Projects  []Project `json:"projects"`
-		Sessions  []Session `json:"sessions"`
-		Harnesses []Harness `json:"harnesses"`
-	}{projects, sessions, a.harnesses}
+		Projects  []Project        `json:"projects"`
+		Sessions  []SessionSummary `json:"sessions"`
+		Harnesses []Harness        `json:"harnesses"`
+		Revision  uint64           `json:"revision"`
+	}{projects, sessions, a.harnesses, a.state.GraphRevision}
 	a.mu.Unlock()
 	respond(w, 200, state)
 }
@@ -270,12 +236,12 @@ func (a *app) createProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "Icon must be a PNG data URL, at most 128 KiB and 1024 by 1024 pixels.")
 		return
 	}
-	p := Project{ID: newID(), Name: name, Folder: folder, Icon: body.Icon, Folders: []string{}}
+	p := Project{ID: newID(), Name: name, Folder: folder, Icon: body.Icon, Folders: []string{}, ArchivedFolders: []string{}}
 	a.mu.Lock()
 	for _, previous := range a.state.Projects {
 		sameFolder := previous.Folder == folder || (runtime.GOOS == "windows" && strings.EqualFold(previous.Folder, folder))
 		if previous.Removed && sameFolder {
-			p.ID, p.Folders = previous.ID, previous.Folders
+			p.ID, p.Folders, p.ArchivedFolders = previous.ID, previous.Folders, previous.ArchivedFolders
 			break
 		}
 	}
@@ -401,13 +367,82 @@ func (a *app) createFolder(w http.ResponseWriter, r *http.Request) {
 	respond(w, 201, a.state.project(id))
 }
 
+func (a *app) patchFolder(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name     string `json:"name"`
+		Archived *bool  `json:"archived"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.Archived == nil {
+		fail(w, 400, "Provide archived to update the folder.")
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p := a.state.project(r.PathValue("id"))
+	if p == nil || p.Removed {
+		fail(w, 404, "Project not found.")
+		return
+	}
+	name := ""
+	for _, folder := range p.Folders {
+		if strings.EqualFold(folder, strings.TrimSpace(body.Name)) {
+			name = folder
+			break
+		}
+	}
+	if name == "" {
+		fail(w, 404, "Session folder not found.")
+		return
+	}
+	isArchived := false
+	for _, folder := range p.ArchivedFolders {
+		if folder == name {
+			isArchived = true
+			break
+		}
+	}
+	if isArchived != *body.Archived {
+		id := p.ID
+		if err := a.commitLocked(func(d *diskState) {
+			project := d.project(id)
+			if *body.Archived {
+				project.ArchivedFolders = append(project.ArchivedFolders, name)
+				return
+			}
+			folders := project.ArchivedFolders[:0]
+			for _, folder := range project.ArchivedFolders {
+				if folder != name {
+					folders = append(folders, folder)
+				}
+			}
+			project.ArchivedFolders = folders
+		}); err != nil {
+			fail(w, 503, err.Error())
+			return
+		}
+	}
+	respond(w, 200, a.state.project(p.ID))
+}
+
+func folderArchived(p *Project, name string) bool {
+	for _, folder := range p.ArchivedFolders {
+		if folder == name {
+			return true
+		}
+	}
+	return false
+}
+
 func workspace(p *Project, name string) (string, bool) {
 	name = strings.TrimSpace(name)
 	if name == "" || name == "Ungrouped" {
 		return "Ungrouped", true
 	}
 	for _, f := range p.Folders {
-		if f == name {
+		if f == name && !folderArchived(p, f) {
 			return f, true
 		}
 	}
@@ -464,19 +499,20 @@ func (a *app) createSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
-	respond(w, 201, a.sessionViewLocked(s.ID))
+	respond(w, 201, a.currentSessionUpdateLocked(s.ID))
 }
 
 func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Title     *string `json:"title"`
 		Workspace *string `json:"workspace"`
+		Archived  *bool   `json:"archived"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if body.Title == nil && body.Workspace == nil {
-		fail(w, 400, "Provide title or workspace.")
+	if body.Title == nil && body.Workspace == nil && body.Archived == nil {
+		fail(w, 400, "Provide title, workspace, or archived.")
 		return
 	}
 	a.mu.Lock()
@@ -484,6 +520,10 @@ func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
 	s := a.state.session(r.PathValue("id"))
 	if s == nil {
 		fail(w, 404, "Session not found.")
+		return
+	}
+	if body.Archived != nil && s.ParentID != "" {
+		fail(w, 400, "Only top-level sessions can be archived.")
 		return
 	}
 	title, group := s.Title, s.Workspace
@@ -506,20 +546,74 @@ func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
 	if err := a.commitLocked(func(d *diskState) {
 		s := d.session(id)
 		s.Title, s.Workspace, s.UpdatedAt = title, group, now()
+		if body.Archived != nil {
+			s.Archived = *body.Archived
+		}
 	}); err != nil {
 		fail(w, 503, err.Error())
 		return
 	}
-	respond(w, 200, a.sessionViewLocked(id))
+	respond(w, 200, a.currentSessionUpdateLocked(id))
+}
+
+func (a *app) patchEvent(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Favorite *bool `json:"favorite"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.Favorite == nil {
+		fail(w, 400, "Provide favorite to update the message.")
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s := a.state.session(r.PathValue("id"))
+	if s == nil {
+		fail(w, 404, "Session not found.")
+		return
+	}
+	eventID := r.PathValue("eventID")
+	index := -1
+	for i := range s.Events {
+		if s.Events[i].ID == eventID {
+			index = i
+			break
+		}
+	}
+	if index < 0 || s.Events[index].Type != "assistant" {
+		fail(w, 404, "Assistant message not found.")
+		return
+	}
+	if status := s.Events[index].Status; status != "" && status != "completed" {
+		fail(w, 409, "Only completed responses can be favorited.")
+		return
+	}
+	id := s.ID
+	if err := a.commitLocked(func(d *diskState) {
+		session := d.session(id)
+		session.Events[index].Favorite = *body.Favorite
+		session.UpdatedAt = now()
+	}); err != nil {
+		fail(w, 503, err.Error())
+		return
+	}
+	respond(w, 200, a.state.session(id).Events[index])
 }
 
 func (a *app) message(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Text     string
+		Mode     string            `json:"mode"`
 		Sources  []SourceReference `json:"sources"`
 		Mentions []Mention         `json:"mentions"`
 	}
 	if !decode(w, r, &body) {
+		return
+	}
+	if body.Mode != "" && body.Mode != "queue" && body.Mode != "steer" {
+		fail(w, 400, "Message mode must be queue or steer.")
 		return
 	}
 	if strings.TrimSpace(body.Text) == "" || len(body.Text) > 128<<10 || !utf8.ValidString(body.Text) || strings.ContainsRune(body.Text, 0) {
@@ -543,12 +637,8 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "Engine is shutting down.")
 		return
 	}
-	if a.runs[s.ID] != nil {
-		a.mu.Unlock()
-		fail(w, 409, "Session already has a running turn.")
-		return
-	}
-	b, ok := a.binaries[s.Harness]
+
+	_, ok := a.binaries[s.Harness]
 	if !ok {
 		a.mu.Unlock()
 		fail(w, 400, "Harness is not installed.")
@@ -582,11 +672,7 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "Submission interrupted or engine unavailable. Retry the message.")
 		return
 	}
-	if a.runs[id] != nil {
-		a.mu.Unlock()
-		fail(w, 409, "Session already has a running turn.")
-		return
-	}
+
 	prompt, err := a.focusedPrompt(s, body.Text, body.Sources)
 	if err != nil {
 		a.mu.Unlock()
@@ -600,36 +686,36 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	payload.Text = prompt
+	if len(s.Queue) >= 32 {
+		a.mu.Unlock()
+		fail(w, 409, "Message queue is full. Remove a pending message first.")
+		return
+	}
+	mode, status := body.Mode, "queued"
+	if mode == "" {
+		mode = "queue"
+	}
+	if mode == "steer" {
+		status = "steering"
+	}
+	q := QueuedMessage{ID: newID(), Text: body.Text, Mode: mode, Status: status, Sources: body.Sources, Mentions: body.Mentions}
 	if err := a.commitLocked(func(d *diskState) {
-		s := d.session(id)
-		s.Status, s.UpdatedAt = "running", now()
-		s.Permissions = nil
-		s.Questions = nil
-		e := event("user", body.Text)
-		e.Data = map[string]any{}
-		if len(body.Sources) > 0 {
-			e.Data["sources"] = body.Sources
-			s.Sources = append(s.Sources, body.Sources...)
+		next := d.session(id)
+		next.Queue = append(next.Queue, q)
+		next.UpdatedAt = now()
+		if d.QueuePayloads == nil {
+			d.QueuePayloads = map[string]queuedPayload{}
 		}
-		if len(body.Mentions) > 0 {
-			e.Data["mentions"] = body.Mentions
-			e.Data["mentionPreparation"] = payload.Preparation
-		}
-		s.Events = append(s.Events, e)
+		d.QueuePayloads[q.ID] = queuedPayload{Submission: payload, Harness: harness, Directory: folder}
 	}); err != nil {
 		a.mu.Unlock()
 		fail(w, 503, err.Error())
 		return
 	}
-	snapshot := *a.state.session(id)
-	response := a.sessionViewLocked(id)
-	native := a.state.Native[id]
-	ctx, cancel := context.WithCancel(a.ctx)
-	t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{})}
-	a.runs[id] = t
-	a.wg.Add(1)
+	a.wakeSteeringLocked(id)
+	a.scheduleMessagesLocked()
+	response := a.currentSessionUpdateLocked(id)
 	a.mu.Unlock()
-	go a.execute(t, snapshot, native, b, cwd, payload)
 	respond(w, 202, response)
 }
 
@@ -642,6 +728,18 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := a.runs[id]
+	if err := a.commitLocked(func(d *diskState) {
+		s := d.session(id)
+		for i := range s.Queue {
+			if s.Queue[i].Status == "queued" || s.Queue[i].Status == "steering" {
+				s.Queue[i].Status, s.Queue[i].Error = "paused", "Execution stopped. Send queued messages when ready."
+			}
+		}
+	}); err != nil {
+		a.mu.Unlock()
+		fail(w, 503, err.Error())
+		return
+	}
 	if err := a.cancelLinkedLocked(id); err != nil {
 		a.mu.Unlock()
 		fail(w, 503, err.Error())
@@ -662,7 +760,7 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.mu.Lock()
-	s := *a.sessionViewLocked(id)
+	s := a.currentSessionUpdateLocked(id)
 	err := a.storageErr
 	a.mu.Unlock()
 	if err != nil {
@@ -675,9 +773,10 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 func (a *app) events(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ch := make(chan struct{}, 1)
+	since, resumable := parseEventRevision(r)
 	a.mu.Lock()
-	s := a.sessionViewLocked(id)
-	if s == nil {
+	update := a.sessionUpdateLocked(id, since, !resumable)
+	if update == nil {
 		a.mu.Unlock()
 		fail(w, 404, "Session not found.")
 		return
@@ -698,20 +797,22 @@ func (a *app) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("X-Accel-Buffering", "no")
 	controller := http.NewResponseController(w)
-	send := func(snapshot *Session) error {
+	send := func(update *SessionUpdate) error {
 		_ = controller.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		b, err := json.Marshal(snapshot)
+		b, err := json.Marshal(update)
 		if err != nil {
 			return err
 		}
-		if _, err := w.Write(append(append([]byte("data: "), b...), '\n', '\n')); err != nil {
+		prefix := []byte("id: " + strconv.FormatUint(update.Revision, 10) + "\ndata: ")
+		if _, err := w.Write(append(append(prefix, b...), '\n', '\n')); err != nil {
 			return err
 		}
 		return controller.Flush()
 	}
-	if send(s) != nil {
+	if send(update) != nil {
 		return
 	}
+	since = update.Revision
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 	for {
@@ -720,11 +821,12 @@ func (a *app) events(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ch:
 			a.mu.Lock()
-			s = a.sessionViewLocked(id)
+			update = a.sessionUpdateLocked(id, since, false)
 			a.mu.Unlock()
-			if send(s) != nil {
+			if update == nil || send(update) != nil {
 				return
 			}
+			since = update.Revision
 		case <-heartbeat.C:
 			_ = controller.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
@@ -743,8 +845,9 @@ func (a *app) chatSessionHandler(handler http.HandlerFunc) http.HandlerFunc {
 		a.mu.Lock()
 		s := a.state.session(r.PathValue("id"))
 		private := s != nil && s.GraphRunID != ""
+		readOnly := s != nil && s.Role == sessionRoleSubagent && r.Method != http.MethodGet
 		a.mu.Unlock()
-		if private {
+		if private || readOnly {
 			fail(w, 404, "Conversation not found.")
 			return
 		}

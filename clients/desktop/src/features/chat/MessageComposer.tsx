@@ -1,14 +1,16 @@
-import { ArrowUp, FileText, Folder, Square } from 'lucide-react';
+import { ArrowUp, FileText, Folder, ListPlus, Square } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { IconButton } from '../../design-system/Button';
+import { Button, IconButton } from '../../design-system/Button';
 import { request, type FileMention, type ProjectPath } from '../../engine';
 import { mentionQuery } from './mentions';
 import { MentionEditor, type MentionEditorHandle } from './MentionEditor';
 
+export type SendMode = 'queue' | 'steer';
+
 export type ComposerDraft = { text: string; mentions: FileMention[] };
 
 export function MessageComposer({ onSend, draft, onDraftChange, projectId, disabled = false, running = false, onStop, modelControl, graphControl, placeholder = 'Message the agent' }: {
-  onSend: (draft: ComposerDraft) => void | Promise<boolean | void>; draft: ComposerDraft; onDraftChange: (draft: ComposerDraft) => void;
+  onSend: (draft: ComposerDraft, mode?: SendMode) => void | Promise<boolean | void>; draft: ComposerDraft; onDraftChange: (draft: ComposerDraft) => void;
   projectId?: string;
   disabled?: boolean; running?: boolean; onStop?: () => void;
   modelControl?: ReactNode;
@@ -52,11 +54,11 @@ export function MessageComposer({ onSend, draft, onDraftChange, projectId, disab
     editor.current?.insertMention(path, query);
     setDismissed(queryKey);
   }
-  async function send() {
-    if (!text.trim() || disabled || running || sending.current) return;
+  async function send(mode: SendMode = 'queue') {
+    if (!text.trim() || disabled || sending.current) return;
     sending.current = true; setSubmitting(true); setError('');
     try {
-      const accepted = await onSend(draft);
+      const accepted = await onSend(draft, mode);
       if (accepted !== false) onDraftChange({ text: '', mentions: [] });
     } catch (error) { setError(error instanceof Error ? error.message : 'Message could not be sent. Retry.'); }
     finally { sending.current = false; setSubmitting(false); }
@@ -92,6 +94,6 @@ export function MessageComposer({ onSend, draft, onDraftChange, projectId, disab
       } else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); }
     }} />
     {error && <p role="alert" className="form-error composer-error">{error}</p>}
-    <div className="composer-controls">{graphControl && <div className="composer-graph-control">{graphControl}</div>}<div className="composer-model-controls">{modelControl}{running && onStop ? <IconButton label="Stop response" variant="outline" onClick={onStop}><Square /></IconButton> : <IconButton label="Send message" variant="soft" type="submit" disabled={!text.trim() || disabled || submitting} className="send-button"><ArrowUp /></IconButton>}</div></div>
+    <div className="composer-controls">{graphControl && <div className="composer-graph-control">{graphControl}</div>}<div className="composer-model-controls">{modelControl}{running && text.trim() && <Button size="sm" disabled={disabled || submitting} onClick={() => void send('steer')}>Send now</Button>}{running && onStop && <IconButton label="Stop response" variant="outline" onClick={onStop}><Square /></IconButton>}<IconButton label={running ? 'Queue message' : 'Send message'} variant="soft" type="submit" disabled={!text.trim() || disabled || submitting} className="send-button">{running ? <ListPlus /> : <ArrowUp />}</IconButton></div></div>
   </form>;
 }

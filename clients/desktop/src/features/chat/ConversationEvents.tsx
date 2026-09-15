@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
-import { FileCode2, FilePenLine, MessagesSquare, Plug, Search, SquareTerminal, Wrench, type LucideIcon } from 'lucide-react';
+import { Bot, FileCode2, FilePenLine, MessagesSquare, Plug, Search, SquareTerminal, Wrench, type LucideIcon } from 'lucide-react';
 import { AgentWork, type AgentWorkActivity, type AgentWorkItemStatus, type AgentWorkStatus, type AgentWorkThought, type AgentWorkTone } from '../../design-system/AgentWork';
 import { Button } from '../../design-system/Button';
-import { request, type EngineEvent, type Session } from '../../engine';
+import { request, type EngineEvent, type Session, type SessionResponse } from '../../engine';
 import { ChatMessage, InlineMarkdownContent, MarkdownContent } from './ChatMessage';
 import { SessionEvent } from './SessionEvent';
 
@@ -208,7 +208,7 @@ function visibleConversationEvents(session: Session) {
   return session.events.filter(event => !event.consultationId || !incoming.has(event.consultationId));
 }
 
-function ConsultationActivity({ event, output, sessionId, onSnapshot }: { event: EngineEvent; output: EngineEvent[]; sessionId: string; onSnapshot: (session: Session) => void }) {
+function ConsultationActivity({ event, output, sessionId, onSnapshot }: { event: EngineEvent; output: EngineEvent[]; sessionId: string; onSnapshot: (session: SessionResponse) => void }) {
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState('');
   const requestId = typeof event.data?.requestId === 'string' ? event.data.requestId : '';
@@ -219,7 +219,7 @@ function ConsultationActivity({ event, output, sessionId, onSnapshot }: { event:
   async function cancel() {
     if (cancelling) return;
     setCancelling(true); setError('');
-    try { onSnapshot(await request<Session>(`/api/sessions/${encodeURIComponent(sessionId)}/consultations/${encodeURIComponent(requestId)}/cancel`, 'POST', {})); }
+    try { onSnapshot(await request<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/consultations/${encodeURIComponent(requestId)}/cancel`, 'POST', {})); }
     catch (error) { setError(error instanceof Error ? error.message : 'Could not cancel the consultation.'); }
     finally { setCancelling(false); }
   }
@@ -238,14 +238,38 @@ function ConsultationActivity({ event, output, sessionId, onSnapshot }: { event:
   </details>;
 }
 
-export function ConversationEvents({ session, onSnapshot, onAskSide, working }: {
+function subagentEventLabel(event: EngineEvent | undefined) {
+  if (!event) return '';
+  const title = event.title?.trim() ?? '';
+  const text = event.text.trim().split(/\r?\n/, 1)[0];
+  return title && title !== 'Command' ? title : text || title || event.type;
+}
+
+function SubagentActivity({ event, session, onOpen }: { event: EngineEvent; session?: Session; onOpen?: (sessionId: string) => void }) {
+  const childSessionId = typeof event.data?.childSessionId === 'string' ? event.data.childSessionId : '';
+  const running = ['running', 'pending', 'started'].includes(event.status ?? 'running') && (!session || session.status === 'running');
+  const detail = running ? subagentEventLabel(session?.events.at(-1)) || 'starting' : 'completed';
+  return <button type="button" className={`subagent-activity ${running ? 'is-running' : ''}`} disabled={!childSessionId || !onOpen} onClick={() => onOpen?.(childSessionId)}>
+    <span className="subagent-activity-icon"><Bot aria-hidden="true" /></span>
+    <span className="subagent-activity-copy"><strong>{event.title || 'Subagent'}</strong><small title={detail}>{detail}</small></span>
+  </button>;
+}
+
+export function ConversationEvents({ session, subagents, onSnapshot, onEventChange, onAskSide, onOpenSubagent, working }: {
   session: Session;
-  onSnapshot: (session: Session) => void;
+  subagents?: Session[];
+  onSnapshot: (session: SessionResponse) => void;
+  onEventChange?: (sessionId: string, event: EngineEvent) => void;
   onAskSide?: (messageId: string, passage: string) => void;
+  onOpenSubagent?: (sessionId: string) => void;
   working?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [selection, setSelection] = useState<{ messageId: string; passage: string; left: number; top: number } | null>(null);
+  async function favorite(event: EngineEvent, value: boolean) {
+    const next = await request<EngineEvent>(`/api/sessions/${encodeURIComponent(session.id)}/events/${encodeURIComponent(event.id)}`, 'PATCH', { favorite: value });
+    onEventChange?.(session.id, next);
+  }
   useEffect(() => {
     if (!onAskSide) return;
     const readSelection = () => {
@@ -302,7 +326,8 @@ export function ConversationEvents({ session, onSnapshot, onAskSide, working }: 
   return <div ref={root} className="conversation-events">
     <EventSequence events={visibleEvents} status={timelineStatus} updatedAt={session.updatedAt} showActiveWork={active} activeWorkStartedAt={activeWorkStartedAt} renderEvent={event => event.type === 'consultation'
       ? <ConsultationActivity event={event} output={grouped.get(String(event.data?.requestId)) ?? []} sessionId={session.id} onSnapshot={onSnapshot} />
-      : <SessionEvent event={event} />} />
+      : event.type === 'subagent' ? <SubagentActivity event={event} session={subagents?.find(item => item.id === event.data?.childSessionId)} onOpen={onOpenSubagent} />
+      : <SessionEvent event={event} onFavorite={onEventChange && event.type === 'assistant' ? value => favorite(event, value) : undefined} />} />
     {selection && onAskSide && <Button size="sm" className="selection-action" style={{ left: selection.left, top: selection.top }} onPointerDown={event => event.preventDefault()} onClick={() => {
       onAskSide(selection.messageId, selection.passage); setSelection(null); window.getSelection()?.removeAllRanges();
     }}>Ask side agent</Button>}
