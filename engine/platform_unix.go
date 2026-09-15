@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 )
 
@@ -56,21 +57,80 @@ func killTree(p *os.Process) error { return syscall.Kill(-p.Pid, syscall.SIGKILL
 
 // Process groups retain the existing cancellation behavior but are not secure
 // containment: a descendant can setsid/setpgid. Never advertise graph drainage.
-type ownedProcess struct{ cmd *exec.Cmd }
+type runtimeProcessGroup struct {
+	mu     sync.Mutex
+	groups map[int]bool
+	closed bool
+}
+
+type ownedProcess struct {
+	cmd       *exec.Cmd
+	group     *runtimeProcessGroup
+	exclusive bool
+}
+
+func newRuntimeProcessGroup() (*runtimeProcessGroup, error) {
+	return &runtimeProcessGroup{groups: map[int]bool{}}, nil
+}
 
 func prepareOwnedProcess(cmd *exec.Cmd) (*ownedProcess, error) {
+	group, _ := newRuntimeProcessGroup()
 	configureProcess(cmd)
-	return &ownedProcess{cmd: cmd}, nil
+	return &ownedProcess{cmd: cmd, group: group, exclusive: true}, nil
 }
-func (o *ownedProcess) Attach() error { return nil }
+
+func prepareSessionOwnedProcess(cmd *exec.Cmd, group *runtimeProcessGroup) (*ownedProcess, error) {
+	configureProcess(cmd)
+	return &ownedProcess{cmd: cmd, group: group}, nil
+}
+func (o *ownedProcess) Attach() error {
+	o.group.mu.Lock()
+	defer o.group.mu.Unlock()
+	if o.group.closed {
+		return errors.New("Owned harness runtime closed before process assignment.")
+	}
+	o.group.groups[o.cmd.Process.Pid] = true
+	return nil
+}
 func (o *ownedProcess) Stop() error {
 	if o.cmd.Process == nil {
 		return nil
+	}
+	if !o.exclusive {
+		return o.cmd.Process.Kill()
 	}
 	return killTree(o.cmd.Process)
 }
 func (o *ownedProcess) Close() error  { return o.Stop() }
 func (o *ownedProcess) Drained() bool { return false }
+
+func (g *runtimeProcessGroup) BeginTurn()          {}
+func (g *runtimeProcessGroup) EndTurn()            {}
+func (g *runtimeProcessGroup) MarkInfrastructure() {}
+
+// Portable process groups cannot safely distinguish infrastructure from useful
+// descendants. Use the bounded idle lifetime rather than pinning them forever.
+func (g *runtimeProcessGroup) HasWorkload() bool { return false }
+func (g *runtimeProcessGroup) Close() error {
+	g.mu.Lock()
+	if g.closed {
+		g.mu.Unlock()
+		return nil
+	}
+	g.closed = true
+	groups := make([]int, 0, len(g.groups))
+	for id := range g.groups {
+		groups = append(groups, id)
+	}
+	g.mu.Unlock()
+	var err error
+	for _, id := range groups {
+		if killErr := syscall.Kill(-id, syscall.SIGKILL); killErr != nil && !errors.Is(killErr, syscall.ESRCH) {
+			err = errors.Join(err, killErr)
+		}
+	}
+	return err
+}
 
 func pickerCommand(ctx context.Context) (*exec.Cmd, error) {
 	return nil, errors.New("native directory picker is currently Windows-only")

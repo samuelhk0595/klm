@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 )
 
 type Harness struct {
@@ -157,6 +158,7 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 func (b *cappedBuffer) String() string { return string(b.data) }
 
 type jsonLines struct {
+	mu      sync.Mutex
 	pending []byte
 	total   int
 	err     error
@@ -165,6 +167,8 @@ type jsonLines struct {
 }
 
 func (l *jsonLines) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if l.err != nil {
 		return 0, l.err
 	}
@@ -186,7 +190,7 @@ func (l *jsonLines) Write(p []byte) (int, error) {
 		if end < 0 {
 			break
 		}
-		if err := l.flush(); err != nil {
+		if err := l.flushLocked(); err != nil {
 			return 0, err
 		}
 		p = p[end+1:]
@@ -201,6 +205,12 @@ func (l *jsonLines) reject(text string) error {
 }
 
 func (l *jsonLines) flush() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.flushLocked()
+}
+
+func (l *jsonLines) flushLocked() error {
 	if l.err != nil {
 		return l.err
 	}
@@ -214,6 +224,12 @@ func (l *jsonLines) flush() error {
 	return nil
 }
 
+func (l *jsonLines) resetTurn() {
+	l.mu.Lock()
+	l.total = 0
+	l.mu.Unlock()
+}
+
 const linkedPromptPrefix = "KLM linked-agent tools are available: linked_discover, linked_read, linked_ask, linked_answer. When the user refers to work in the linked main agent or side agent conversation, retrieve it or consult that agent before continuing. For linked_ask, action=continue means the result is ready: use the answer to respond to the user or continue their task now. Only action=yield means it is still pending: finish the turn so KLM can resume you automatically. A KLM continuation already contains the result and requires no further wait or user follow-up. Do not poll or repeat a pending question.\n\n"
 
 func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd string, payload submission) {
@@ -221,6 +237,10 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	defer t.cancel()
 	p := &adapter{app: a, turn: t, id: s.ID, harness: s.Harness,
 		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true}
+	if s.Role != "graph_node" {
+		p.runtime = a.beginSessionRuntime(s.ID)
+		defer p.runtime.finishTurn()
+	}
 	p.graph = graphBinding(t)
 	defer UnbindGraphAdapter(t)
 	var err error
@@ -275,7 +295,11 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 			default:
 				err = errors.New("Unsupported harness.")
 			}
-			bridge.close()
+			if p.runtime != nil {
+				bridge.unbind(p)
+			} else {
+				bridge.close()
+			}
 		}
 	}
 	graphResult := p.finishGraphAdapter(err)
@@ -391,6 +415,7 @@ type adapter struct {
 	processesDrained   bool
 	processDrainFailed bool
 	bridge             *linkedBridge
+	runtime            *sessionRuntime
 	app                *app
 	turn               *turn
 	id                 string

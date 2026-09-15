@@ -37,7 +37,7 @@ function mergeSessions(current: Session[], incoming: Session[]): Session[] {
     const previous = sessions.get(session.id);
     const base = !previous || version(session.updatedAt) > version(previous.updatedAt) ? session : previous;
     const graph = mergeGraphState(previous?.graph, session.graph);
-    sessions.set(session.id, { ...base, ...(graph ? { graph, selectedGraphId: graph.selectedGraphId } : {}) });
+    sessions.set(session.id, { ...base, runtimeActive: session.runtimeActive, ...(graph ? { graph, selectedGraphId: graph.selectedGraphId } : {}) });
   }
   return [...sessions.values()];
 }
@@ -215,7 +215,7 @@ export function App() {
     catch (error) { setGraphErrors(current => ({ ...current, [id]: errorMessage(error) })); }
     finally { graphSelectionPending.current.delete(id); setSelectingGraphs(current => ({ ...current, [id]: false })); }
   }
-  const streamIds = JSON.stringify(sessions.filter(item => item.role !== 'graph_node' && (item.status === 'running' || item.graph?.run?.active || item.id === activeId || (sideVisible && item.id === sideSession?.id))).map(item => item.id).sort());
+  const streamIds = JSON.stringify(sessions.filter(item => item.role !== 'graph_node' && (item.status === 'running' || item.runtimeActive || item.graph?.run?.active || item.id === activeId || (sideVisible && item.id === sideSession?.id))).map(item => item.id).sort());
   useEffect(() => {
     const ids = new Set<string>(JSON.parse(streamIds) as string[]);
     for (const [id, source] of streams.current) {

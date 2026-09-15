@@ -3,7 +3,8 @@
 package main
 
 const (
-	apiPort     = "7331"
-	webPort     = "7332"
-	dataDirName = "engine"
+	apiPort          = "7331"
+	webPort          = "7332"
+	dataDirName      = "engine"
+	developmentBuild = false
 )

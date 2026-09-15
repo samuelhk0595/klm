@@ -22,7 +22,14 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
 .session-list { padding: 4px 4px 4px 16px; }
 .session-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; }
 .session-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-item small { color: var(--color-muted); font-size: 11px; }
+.session-runtime-led { width: 7px; height: 7px; flex-shrink: 0; border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1px var(--color-faint); }
+.session-runtime-led.is-active, .session-runtime-led.is-running { background: var(--color-success); box-shadow: 0 0 6px color-mix(in srgb, var(--color-success) 70%, transparent); }
+.session-runtime-led.is-running { animation: session-runtime-pulse 1s ease-in-out infinite; }
+.session-runtime-led.is-waiting { background: var(--color-warning); box-shadow: 0 0 6px color-mix(in srgb, var(--color-warning) 70%, transparent); animation: session-runtime-wait 1s steps(1, end) infinite; }
+.session-runtime-led.is-error { background: var(--color-danger); box-shadow: 0 0 6px color-mix(in srgb, var(--color-danger) 70%, transparent); }
+@keyframes session-runtime-pulse { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+@keyframes session-runtime-wait { 0%, 24.99% { opacity: 0; } 25%, 37.49% { opacity: 1; } 37.5%, 49.99% { opacity: 0; } 50%, 62.49% { opacity: 1; } 62.5%, 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .session-runtime-led.is-running, .session-runtime-led.is-waiting { animation: none; } }
 .session-item:hover { background: var(--color-subtle); }
 .session-item.is-active { background: var(--color-selected); }
 .empty-workspace { padding: 6px 8px; color: var(--color-muted); font-size: 12px; }

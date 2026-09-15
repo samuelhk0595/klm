@@ -51,6 +51,7 @@ export type Session = {
   resolvedModel?: string;
   resolvedEffort?: string;
   status: 'idle' | 'running' | 'error';
+  runtimeActive?: boolean;
   events: EngineEvent[];
   permissions?: PermissionRequest[];
   questions?: QuestionRequest[];

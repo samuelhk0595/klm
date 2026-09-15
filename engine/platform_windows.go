@@ -83,20 +83,25 @@ var (
 	resumeOwnedProcess  = syscall.NewLazyDLL("ntdll.dll").NewProc("NtResumeProcess")
 )
 
-type ownedProcess struct {
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	job     syscall.Handle
-	stopped bool
-	drained bool
+type runtimeProcessGroup struct {
+	mu             sync.Mutex
+	job            syscall.Handle
+	closed         bool
+	drained        bool
+	turnActive     bool
+	infrastructure map[uintptr]bool
+	workload       map[uintptr]bool
 }
 
-// Launch suspended: assigning a job after an ordinary Start leaves a child-spawn
-// race. No target user code runs until assignment has succeeded. No breakaway
-// flags are granted; engine crashes close the non-inherited kill-on-close job.
-func prepareOwnedProcess(cmd *exec.Cmd) (*ownedProcess, error) {
-	configureProcess(cmd)
-	cmd.SysProcAttr.CreationFlags |= 0x4 // CREATE_SUSPENDED
+type ownedProcess struct {
+	mu        sync.Mutex
+	cmd       *exec.Cmd
+	group     *runtimeProcessGroup
+	exclusive bool
+	stopped   bool
+}
+
+func newRuntimeProcessGroup() (*runtimeProcessGroup, error) {
 	job, _, err := createJobObject.Call(0, 0)
 	if job == 0 {
 		return nil, errors.New("Cannot create the owned harness job.")
@@ -123,7 +128,27 @@ func prepareOwnedProcess(cmd *exec.Cmd) (*ownedProcess, error) {
 		syscall.CloseHandle(syscall.Handle(job))
 		return nil, fmt.Errorf("Cannot configure the owned harness job: %w", err)
 	}
-	return &ownedProcess{cmd: cmd, job: syscall.Handle(job)}, nil
+	return &runtimeProcessGroup{job: syscall.Handle(job), infrastructure: map[uintptr]bool{}, workload: map[uintptr]bool{}}, nil
+}
+
+func prepareOwnedProcess(cmd *exec.Cmd) (*ownedProcess, error) {
+	group, err := newRuntimeProcessGroup()
+	if err != nil {
+		return nil, err
+	}
+	return prepareRuntimeOwnedProcess(cmd, group, true), nil
+}
+
+func prepareSessionOwnedProcess(cmd *exec.Cmd, group *runtimeProcessGroup) (*ownedProcess, error) {
+	return prepareRuntimeOwnedProcess(cmd, group, false), nil
+}
+
+func prepareRuntimeOwnedProcess(cmd *exec.Cmd, group *runtimeProcessGroup, exclusive bool) *ownedProcess {
+	// Launch suspended: assigning a job after an ordinary Start leaves a
+	// child-spawn race. No target code runs until assignment has succeeded.
+	configureProcess(cmd)
+	cmd.SysProcAttr.CreationFlags |= 0x4 // CREATE_SUSPENDED
+	return &ownedProcess{cmd: cmd, group: group, exclusive: exclusive}
 }
 
 func (o *ownedProcess) Attach() error {
@@ -133,6 +158,12 @@ func (o *ownedProcess) Attach() error {
 		_ = o.cmd.Process.Kill()
 		return errors.New("Owned harness was cancelled before job assignment.")
 	}
+	o.group.mu.Lock()
+	defer o.group.mu.Unlock()
+	if o.group.closed || o.group.job == 0 {
+		_ = o.cmd.Process.Kill()
+		return errors.New("Owned harness runtime closed before job assignment.")
+	}
 	// This PID comes directly from the still-suspended process we just created.
 	h, err := syscall.OpenProcess(0x0100|0x0800|0x0001, false, uint32(o.cmd.Process.Pid))
 	if err != nil {
@@ -140,7 +171,7 @@ func (o *ownedProcess) Attach() error {
 		return errors.New("Cannot open the suspended owned harness.")
 	}
 	defer syscall.CloseHandle(h)
-	if ok, _, _ := assignProcessToJob.Call(uintptr(o.job), uintptr(h)); ok == 0 {
+	if ok, _, _ := assignProcessToJob.Call(uintptr(o.group.job), uintptr(h)); ok == 0 {
 		_ = o.cmd.Process.Kill()
 		return errors.New("Cannot contain the harness in its owned job; execution was refused.")
 	}
@@ -158,29 +189,123 @@ func (o *ownedProcess) Stop() error {
 		return nil
 	}
 	o.stopped = true
-	if o.job != 0 {
-		if ok, _, err := terminateJobObject.Call(uintptr(o.job), 1); ok == 0 {
-			if o.cmd.Process != nil {
-				_ = o.cmd.Process.Kill()
-			}
-			return fmt.Errorf("Cannot terminate the owned harness job: %w", err)
-		}
+	if o.exclusive {
+		return o.group.Close()
 	}
-	// Also covers cancellation between Start and Attach, while still suspended.
 	if o.cmd.Process != nil {
-		_ = o.cmd.Process.Kill()
+		return o.cmd.Process.Kill()
 	}
 	return nil
 }
 
-func (o *ownedProcess) Close() error {
-	stopErr := o.Stop()
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	if o.job == 0 {
-		return stopErr
+func (o *ownedProcess) Close() error { return o.Stop() }
+
+func (o *ownedProcess) Drained() bool {
+	if !o.exclusive {
+		return false
 	}
-	defer func() { syscall.CloseHandle(o.job); o.job = 0 }()
+	o.group.mu.Lock()
+	defer o.group.mu.Unlock()
+	return o.group.drained
+}
+
+func (g *runtimeProcessGroup) BeginTurn() {
+	g.mu.Lock()
+	g.turnActive = true
+	g.mu.Unlock()
+}
+
+func (g *runtimeProcessGroup) EndTurn() {
+	g.mu.Lock()
+	g.turnActive = false
+	g.mu.Unlock()
+}
+
+func (g *runtimeProcessGroup) activeProcessesLocked() (map[uintptr]bool, error) {
+	const capacity = 4096
+	buffer := make([]byte, 8+capacity*int(unsafe.Sizeof(uintptr(0))))
+	var returned uint32
+	ok, _, _ := queryJobInformation.Call(uintptr(g.job), 3, uintptr(unsafe.Pointer(&buffer[0])), uintptr(len(buffer)), uintptr(unsafe.Pointer(&returned)))
+	if ok == 0 {
+		return nil, errors.New("Cannot inspect the session runtime process list.")
+	}
+	header := (*[2]uint32)(unsafe.Pointer(&buffer[0]))
+	if header[0] > capacity || header[1] > header[0] {
+		return nil, errors.New("Session runtime process list exceeded its supported size.")
+	}
+	active := make(map[uintptr]bool, header[1])
+	base := uintptr(unsafe.Pointer(&buffer[0])) + 8
+	step := unsafe.Sizeof(uintptr(0))
+	for i := uintptr(0); i < uintptr(header[1]); i++ {
+		pid := *(*uintptr)(unsafe.Pointer(base + i*step))
+		if pid != 0 {
+			active[pid] = true
+		}
+	}
+	return active, nil
+}
+
+func (g *runtimeProcessGroup) MarkInfrastructure() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed {
+		return
+	}
+	active, err := g.activeProcessesLocked()
+	if err != nil {
+		return
+	}
+	for pid := range active {
+		if !g.workload[pid] {
+			g.infrastructure[pid] = true
+		}
+	}
+}
+
+func (g *runtimeProcessGroup) HasWorkload() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed || g.turnActive {
+		return false
+	}
+	active, err := g.activeProcessesLocked()
+	if err != nil {
+		return true
+	}
+	for pid := range g.infrastructure {
+		if !active[pid] {
+			delete(g.infrastructure, pid)
+		}
+	}
+	for pid := range g.workload {
+		if !active[pid] {
+			delete(g.workload, pid)
+		}
+	}
+	for pid := range active {
+		if !g.infrastructure[pid] {
+			g.workload[pid] = true
+		}
+	}
+	return len(g.workload) > 0
+}
+
+func (g *runtimeProcessGroup) Close() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed {
+		return nil
+	}
+	g.closed = true
+	defer func() {
+		if g.job != 0 {
+			syscall.CloseHandle(g.job)
+			g.job = 0
+		}
+	}()
+	if ok, _, err := terminateJobObject.Call(uintptr(g.job), 1); ok == 0 {
+		return fmt.Errorf("Cannot terminate the owned harness job: %w", err)
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		accounting := struct {
@@ -190,25 +315,19 @@ func (o *ownedProcess) Close() error {
 			ActiveProcesses          uint32
 			TotalTerminatedProcesses uint32
 		}{}
-		ok, _, _ := queryJobInformation.Call(uintptr(o.job), 1, uintptr(unsafe.Pointer(&accounting)), unsafe.Sizeof(accounting), 0)
+		ok, _, _ := queryJobInformation.Call(uintptr(g.job), 1, uintptr(unsafe.Pointer(&accounting)), unsafe.Sizeof(accounting), 0)
 		if ok == 0 {
 			return errors.New("Cannot confirm owned harness job drainage.")
 		}
 		if accounting.ActiveProcesses == 0 {
-			o.drained = true
-			return stopErr
+			g.drained = true
+			return nil
 		}
 		if time.Now().After(deadline) {
 			return errors.New("Owned harness job drainage is unconfirmed.")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-}
-
-func (o *ownedProcess) Drained() bool {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.drained
 }
 
 const directoryPickerScript = `

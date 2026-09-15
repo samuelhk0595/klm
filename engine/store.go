@@ -52,6 +52,7 @@ type Session struct {
 	ResolvedModel   string                  `json:"resolvedModel,omitempty"`
 	ResolvedEffort  string                  `json:"resolvedEffort,omitempty"`
 	Status          string                  `json:"status"`
+	RuntimeActive   bool                    `json:"runtimeActive,omitempty"` // HTTP/SSE view only
 	Events          []Event                 `json:"events"`
 	Permissions     []Permission            `json:"permissions,omitempty"`
 	Questions       []QuestionRequest       `json:"questions,omitempty"`

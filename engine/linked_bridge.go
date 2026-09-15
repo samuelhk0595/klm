@@ -12,21 +12,44 @@ import (
 	"time"
 )
 
-// A private, turn-scoped Streamable HTTP MCP server. The capability is never
-// persisted, and no caller can supply an arbitrary target conversation ID.
+// A private Streamable HTTP MCP server. Ordinary conversations retain it with
+// their runtime; graph nodes retain the stricter turn-scoped lifetime.
 type linkedBridge struct {
 	url    string
 	token  string
 	server *http.Server
 	ready  chan struct{}
 	once   sync.Once
+	mu     sync.RWMutex
 	p      *adapter
+	tools  []map[string]any
+}
+
+func (b *linkedBridge) adapter() *adapter {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.p
+}
+
+func (b *linkedBridge) bind(p *adapter) {
+	b.mu.Lock()
+	b.p = p
+	b.tools = p.bridgeTools()
+	b.mu.Unlock()
+}
+
+func (b *linkedBridge) unbind(p *adapter) {
+	b.mu.Lock()
+	if b.p == p {
+		b.p = nil
+	}
+	b.mu.Unlock()
 }
 
 // Only the bridge installed by this adapter is covered by the internal-tool
 // policy. A similarly named external server or an unready bridge is not trusted.
 func (p *adapter) ownsLinkedBridge(server string) bool {
-	if server != "klm_linked" || p.bridge == nil || p.bridge.p != p || p.turn.ctx.Err() != nil {
+	if server != "klm_linked" || p.bridge == nil || p.bridge.adapter() != p || p.turn.ctx.Err() != nil {
 		return false
 	}
 	select {
@@ -89,12 +112,20 @@ func (p *adapter) startLinkedBridge() (*linkedBridge, error) {
 			return nil, err
 		}
 	}
+	if p.runtime != nil {
+		return p.runtime.linkedBridge(p)
+	}
+	return newLinkedBridge(p, p.turn.ctx)
+}
+
+func newLinkedBridge(p *adapter, ctx context.Context) (*linkedBridge, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, errors.New("Could not start the linked-agent bridge.")
 	}
-	b := &linkedBridge{url: "http://" + l.Addr().String() + "/mcp", token: newID() + newID(), ready: make(chan struct{}), p: p}
-	b.server = &http.Server{Handler: http.HandlerFunc(b.serve), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 12 * time.Second, IdleTimeout: 30 * time.Second, BaseContext: func(net.Listener) context.Context { return p.turn.ctx }}
+	b := &linkedBridge{url: "http://" + l.Addr().String() + "/mcp", token: newID() + newID(), ready: make(chan struct{})}
+	b.bind(p)
+	b.server = &http.Server{Handler: http.HandlerFunc(b.serve), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 12 * time.Second, IdleTimeout: 30 * time.Second, BaseContext: func(net.Listener) context.Context { return ctx }}
 	go func() { _ = b.server.Serve(l) }()
 	return b, nil
 }
@@ -138,6 +169,7 @@ func (b *linkedBridge) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var result any
+	p := b.adapter()
 	switch message.Method {
 	case "initialize":
 		var params struct {
@@ -153,15 +185,26 @@ func (b *linkedBridge) serve(w http.ResponseWriter, r *http.Request) {
 		result = map[string]any{}
 	case "tools/list":
 		b.once.Do(func() { close(b.ready) })
-		result = map[string]any{"tools": b.p.bridgeTools()}
+		b.mu.RLock()
+		tools := append([]map[string]any{}, b.tools...)
+		b.mu.RUnlock()
+		result = map[string]any{"tools": tools}
 	case "klm/graph/gate":
-		if err := b.p.graphGate(); err != nil {
+		if p == nil {
+			respond(w, 200, map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{"code": -32000, "message": "Harness turn is not active."}})
+			return
+		}
+		if err := p.graphGate(); err != nil {
 			respond(w, 200, map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{"code": -32000, "message": err.Error()}})
 			return
 		}
 		result = map[string]any{"allowed": true}
 	case "klm/graph/opencode":
-		if err := b.p.openCodeGraphGate(message.Params); err != nil {
+		if p == nil {
+			respond(w, 200, map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{"code": -32000, "message": "Harness turn is not active."}})
+			return
+		}
+		if err := p.openCodeGraphGate(message.Params); err != nil {
 			respond(w, 200, map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{"code": -32000, "message": err.Error()}})
 			return
 		}
@@ -192,17 +235,21 @@ func (b *linkedBridge) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *linkedBridge) call(ctx context.Context, name string, raw json.RawMessage, callIDs ...string) (any, error) {
+	p := b.adapter()
+	if p == nil {
+		return nil, errors.New("Harness turn is not active.")
+	}
 	// Inventory and dispatch use the same purpose-scoped capability. A node token
 	// cannot acquire linked tools by guessing their names or conversation IDs.
 	known := false
-	for _, tool := range b.p.bridgeTools() {
+	for _, tool := range p.bridgeTools() {
 		known = known || str(tool, "name") == name
 	}
 	if !known {
 		return nil, errors.New("Tool is not available to this turn capability.")
 	}
 	if !strings.HasPrefix(name, "linked_") {
-		a, p := b.p.app, b.p
+		a := p.app
 		a.mu.Lock()
 		active := !a.closing && a.storageErr == nil && a.runs[p.id] == p.turn && p.turn.ctx.Err() == nil
 		a.mu.Unlock()
@@ -233,7 +280,7 @@ func (b *linkedBridge) call(ctx context.Context, name string, raw json.RawMessag
 	if err := decoder.Decode(&args); err != nil {
 		return nil, errors.New("Invalid linked-agent arguments.")
 	}
-	a, p := b.p.app, b.p
+	a := p.app
 	a.mu.Lock()
 	if a.closing || a.storageErr != nil || a.runs[p.id] != p.turn || p.turn.ctx.Err() != nil {
 		a.mu.Unlock()
