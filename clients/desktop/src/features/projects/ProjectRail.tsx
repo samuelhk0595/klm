@@ -8,7 +8,7 @@ import { IS_MOBILE_HOST, returnToHosts } from '../../platform';
 function projectRuntimeState(projectId: string, sessions: Session[]) {
   let state = 'off';
   for (const session of sessions) {
-    if (session.projectId !== projectId || session.role === 'graph_node') continue;
+    if (session.projectId !== projectId || session.role === 'graph_node' || session.role === 'subagent') continue;
     if (session.status === 'error') return { state: 'error', label: 'Session error' };
     if ((session.permissions?.length ?? 0) > 0 || (session.questions?.length ?? 0) > 0) state = 'waiting';
     else if (state === 'off' && (session.status === 'running' || session.runtimeActive)) state = 'active';

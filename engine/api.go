@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -92,9 +93,12 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/consultations/{requestID}/cancel", a.chatSessionHandler(a.cancelConsultation))
 	mux.HandleFunc("PATCH /api/sessions/{id}", a.chatSessionHandler(a.patchSession))
 	mux.HandleFunc("GET /api/sessions/{id}/models", a.getModels)
+	mux.HandleFunc("GET /api/sessions/{id}/metadata", a.chatSessionHandler(a.getSessionMetadata))
 	mux.HandleFunc("PATCH /api/sessions/{id}/settings", a.chatSessionHandler(a.updateModelSettings))
 	mux.HandleFunc("GET /api/sessions/{id}/quota", a.getQuota)
 	mux.HandleFunc("POST /api/sessions/{id}/messages", a.chatSessionHandler(a.message))
+	mux.HandleFunc("GET /api/sessions/{id}/history", a.chatSessionHandler(a.history))
+	mux.HandleFunc("GET /api/sessions/{id}/export", a.chatSessionHandler(a.exportSession))
 	mux.HandleFunc("GET /api/sessions/{id}/events", a.chatSessionHandler(a.events))
 	mux.HandleFunc("POST /api/sessions/{id}/stop", a.chatSessionHandler(a.stop))
 	mux.HandleFunc("POST /api/sessions/{id}/permissions/{permissionID}", a.permissionDecision)
@@ -191,7 +195,7 @@ func (a *app) health(w http.ResponseWriter, r *http.Request) {
 func (a *app) getState(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	projects := []Project{}
-	sessions := []Session{}
+	sessions := []SessionSummary{}
 	visible := map[string]bool{}
 	for _, project := range a.state.Projects {
 		if !project.Removed {
@@ -201,14 +205,15 @@ func (a *app) getState(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, session := range a.state.Sessions {
 		if visible[session.ProjectID] && session.GraphRunID == "" {
-			sessions = append(sessions, *a.sessionViewLocked(session.ID))
+			sessions = append(sessions, *a.sessionSummaryLocked(session.ID))
 		}
 	}
 	state := struct {
-		Projects  []Project `json:"projects"`
-		Sessions  []Session `json:"sessions"`
-		Harnesses []Harness `json:"harnesses"`
-	}{projects, sessions, a.harnesses}
+		Projects  []Project        `json:"projects"`
+		Sessions  []SessionSummary `json:"sessions"`
+		Harnesses []Harness        `json:"harnesses"`
+		Revision  uint64           `json:"revision"`
+	}{projects, sessions, a.harnesses, a.state.GraphRevision}
 	a.mu.Unlock()
 	respond(w, 200, state)
 }
@@ -464,7 +469,7 @@ func (a *app) createSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
-	respond(w, 201, a.sessionViewLocked(s.ID))
+	respond(w, 201, a.currentSessionUpdateLocked(s.ID))
 }
 
 func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
@@ -510,7 +515,7 @@ func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
-	respond(w, 200, a.sessionViewLocked(id))
+	respond(w, 200, a.currentSessionUpdateLocked(id))
 }
 
 func (a *app) message(w http.ResponseWriter, r *http.Request) {
@@ -622,7 +627,7 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snapshot := *a.state.session(id)
-	response := a.sessionViewLocked(id)
+	response := a.currentSessionUpdateLocked(id)
 	native := a.state.Native[id]
 	ctx, cancel := context.WithCancel(a.ctx)
 	t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{})}
@@ -662,7 +667,7 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	a.mu.Lock()
-	s := *a.sessionViewLocked(id)
+	s := a.currentSessionUpdateLocked(id)
 	err := a.storageErr
 	a.mu.Unlock()
 	if err != nil {
@@ -675,9 +680,10 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 func (a *app) events(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	ch := make(chan struct{}, 1)
+	since, resumable := parseEventRevision(r)
 	a.mu.Lock()
-	s := a.sessionViewLocked(id)
-	if s == nil {
+	update := a.sessionUpdateLocked(id, since, !resumable)
+	if update == nil {
 		a.mu.Unlock()
 		fail(w, 404, "Session not found.")
 		return
@@ -698,20 +704,22 @@ func (a *app) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("X-Accel-Buffering", "no")
 	controller := http.NewResponseController(w)
-	send := func(snapshot *Session) error {
+	send := func(update *SessionUpdate) error {
 		_ = controller.SetWriteDeadline(time.Now().Add(10 * time.Second))
-		b, err := json.Marshal(snapshot)
+		b, err := json.Marshal(update)
 		if err != nil {
 			return err
 		}
-		if _, err := w.Write(append(append([]byte("data: "), b...), '\n', '\n')); err != nil {
+		prefix := []byte("id: " + strconv.FormatUint(update.Revision, 10) + "\ndata: ")
+		if _, err := w.Write(append(append(prefix, b...), '\n', '\n')); err != nil {
 			return err
 		}
 		return controller.Flush()
 	}
-	if send(s) != nil {
+	if send(update) != nil {
 		return
 	}
+	since = update.Revision
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 	for {
@@ -720,11 +728,12 @@ func (a *app) events(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-ch:
 			a.mu.Lock()
-			s = a.sessionViewLocked(id)
+			update = a.sessionUpdateLocked(id, since, false)
 			a.mu.Unlock()
-			if send(s) != nil {
+			if update == nil || send(update) != nil {
 				return
 			}
+			since = update.Revision
 		case <-heartbeat.C:
 			_ = controller.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if _, err := io.WriteString(w, ": keepalive\n\n"); err != nil {
@@ -743,8 +752,9 @@ func (a *app) chatSessionHandler(handler http.HandlerFunc) http.HandlerFunc {
 		a.mu.Lock()
 		s := a.state.session(r.PathValue("id"))
 		private := s != nil && s.GraphRunID != ""
+		readOnly := s != nil && s.Role == sessionRoleSubagent && r.Method != http.MethodGet
 		a.mu.Unlock()
-		if private {
+		if private || readOnly {
 			fail(w, 404, "Conversation not found.")
 			return
 		}

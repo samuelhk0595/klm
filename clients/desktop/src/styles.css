@@ -29,7 +29,8 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
 .session-runtime-led.is-error { background: var(--color-danger); box-shadow: 0 0 6px color-mix(in srgb, var(--color-danger) 70%, transparent); }
 @keyframes session-runtime-pulse { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
 @keyframes session-runtime-wait { 0%, 24.99% { opacity: 0; } 25%, 37.49% { opacity: 1; } 37.5%, 49.99% { opacity: 0; } 50%, 62.49% { opacity: 1; } 62.5%, 100% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .session-runtime-led.is-running, .session-runtime-led.is-waiting { animation: none; } }
+@keyframes subagent-text-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .session-runtime-led.is-running, .session-runtime-led.is-waiting, .subagent-activity.is-running strong, .subagent-activity.is-running small { animation: none; } .subagent-activity.is-running strong, .subagent-activity.is-running small { color: var(--subagent-shimmer-color); background: none; } }
 .session-item:hover { background: var(--color-subtle); }
 .session-item.is-active { background: var(--color-selected); }
 .empty-workspace { padding: 6px 8px; color: var(--color-muted); font-size: 12px; }
@@ -42,9 +43,14 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
 .session-header { cursor: grab; touch-action: none; user-select: none; }
 .app-shell[data-dragging] .session-header { cursor: grabbing; }
 .header-leading, .header-actions { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.header-leading { flex: 1; }
+.header-actions { flex-shrink: 0; }
 .session-header h1 { font-size: var(--text-body); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mode-label { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-muted); font-size: 12px; white-space: nowrap; }
 .mode-label svg { width: 12px; height: 12px; }
+.session-header-branch { min-width: 0; max-width: clamp(88px, 20vw, 260px); }
+.session-header-branch > span { overflow: hidden; text-overflow: ellipsis; }
+.session-header-branch svg { flex-shrink: 0; }
 .export-button { border-radius: var(--radius-pill); }
 .mobile-nav { display: none; }
 .chat-history { flex: 1; min-height: 0; overflow-y: auto; padding: 32px clamp(24px, 6vw, 96px); display: flex; flex-direction: column; gap: 24px; }
@@ -203,6 +209,19 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
 .consultation-body { display: grid; gap: 10px; padding: 12px; min-width: 0; }
 .consultation-question { white-space: pre-wrap; overflow-wrap: anywhere; }
 .consultation-output > div { display: grid; gap: 12px; padding-top: 12px; }
+.subagent-activity { --subagent-shimmer-highlight: #9ca3af; width: 100%; min-width: 0; min-height: 30px; display: flex; align-items: center; gap: 8px; padding: 2px 0; border: 0; background: transparent; color: var(--color-text); text-align: left; }
+.subagent-activity:hover:not(:disabled) .subagent-activity-icon { color: var(--color-accent); }
+.subagent-activity:focus-visible { outline: 2px solid var(--color-focus-ring); outline-offset: 3px; }
+.subagent-activity-icon { width: 22px; height: 22px; display: grid; place-items: center; flex-shrink: 0; color: var(--color-muted); }
+.subagent-activity-icon svg { width: 17px; height: 17px; }
+.subagent-activity-copy { min-width: 0; display: flex; align-items: baseline; gap: 8px; flex: 1; }
+.subagent-activity-copy strong { --subagent-shimmer-color: var(--color-text); flex-shrink: 0; max-width: 42%; overflow: hidden; font-weight: var(--font-weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.subagent-activity-copy small { --subagent-shimmer-color: var(--color-muted); min-width: 0; overflow: hidden; color: var(--color-muted); text-overflow: ellipsis; white-space: nowrap; }
+.subagent-activity.is-running strong, .subagent-activity.is-running small { color: transparent; background: linear-gradient(100deg, var(--subagent-shimmer-color) 30%, var(--subagent-shimmer-highlight) 50%, var(--subagent-shimmer-color) 70%); background-size: 240% 100%; background-clip: text; animation: subagent-text-shimmer 2.4s linear infinite; }
+.subagent-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.subagent-status { min-height: 42px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 6px 16px; border-top: 1px solid var(--color-divider); color: var(--color-muted); font-size: var(--text-sm); }
+.subagent-status > span { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-status .session-status-bar { margin-left: auto; padding: 0; border: 0; }
 .demo-label { margin-top: 8px; }
 .context-stats { display: grid; gap: 5px; }
 .connection-list, .todo-list { list-style: none; margin: 0; padding: 0; }
@@ -252,6 +271,10 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
 .dialog-heading { display: flex; align-items: center; justify-content: space-between; }
 .dialog-heading h2 { font-size: 20px; }
 .settings-dialog p { margin: 16px 0; line-height: 1.6; }
+.engine-settings-form { margin: 20px 0 24px; }
+.engine-settings-form > label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
+.engine-settings-form .dialog-actions { margin-top: 12px; }
+.engine-settings-form .form-error { margin: 8px 0 0; }
 .panel-backdrop { display: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .project-rail { width: 60px; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 16px 8px; border-right: 1px solid var(--color-border); background: var(--color-rail); }
@@ -372,7 +395,7 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
   .brand { gap: 5px; }
   .session-header { padding: 0 12px; gap: 8px; cursor: auto; touch-action: auto; user-select: auto; }
   .header-leading, .header-actions { gap: 6px; }
-  .mode-label { display: none; }
+  .session-header-branch { max-width: 84px; }
   .tab-nav { padding: 0 8px; }
   .chat-history { padding: 24px 16px; gap: 20px; }
   .composer-area { padding: 0 12px 12px; }

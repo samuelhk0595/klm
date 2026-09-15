@@ -21,6 +21,15 @@ type codexInteractive struct {
 	items    map[string]map[string]any
 	parts    map[string]map[string]bool
 	requests map[string]*atomic.Bool
+	children map[string]*codexSubagent
+}
+
+type codexSubagent struct {
+	adapter   *adapter
+	parentKey string
+	turnID    string
+	items     map[string]map[string]any
+	parts     map[string]map[string]bool
 }
 
 func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error) {
@@ -72,7 +81,7 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 		}
 	}()
 	c := &codexInteractive{p: p, cwd: cwd, items: map[string]map[string]any{},
-		parts: map[string]map[string]bool{}, requests: map[string]*atomic.Bool{}}
+		parts: map[string]map[string]bool{}, requests: map[string]*atomic.Bool{}, children: map[string]*codexSubagent{}}
 	defer func() {
 		for _, live := range c.requests {
 			live.Store(false)
@@ -566,6 +575,9 @@ func (c *codexInteractive) frame(frame map[string]any) error {
 		}
 		return nil
 	}
+	if child := c.children[str(params, "threadId")]; child != nil {
+		return c.childFrame(child, method, params)
+	}
 	if c.turnID == "" || str(params, "threadId") != c.threadID {
 		return nil
 	}
@@ -660,6 +672,13 @@ func (c *codexInteractive) frame(frame map[string]any) error {
 }
 
 func (c *codexInteractive) item(item map[string]any, completed bool) error {
+	if str(item, "type") == "collabAgentToolCall" {
+		return c.collaboration(item)
+	}
+	return putCodexItem(c.p, c.parts, item, completed)
+}
+
+func putCodexItem(p *adapter, trackedParts map[string]map[string]bool, item map[string]any, completed bool) error {
 	id, typ := str(item, "id"), str(item, "type")
 	key, status := "codex/item/"+id, "running"
 	if completed {
@@ -678,8 +697,8 @@ func (c *codexInteractive) item(item map[string]any, completed bool) error {
 	case "agentMessage":
 		kind, title = "assistant", ""
 	case "reasoning":
-		if c.parts[id] == nil {
-			c.parts[id] = map[string]bool{}
+		if trackedParts[id] == nil {
+			trackedParts[id] = map[string]bool{}
 		}
 		final := map[string]string{}
 		for _, group := range []string{"summary", "content"} {
@@ -687,16 +706,16 @@ func (c *codexInteractive) item(item map[string]any, completed bool) error {
 			for index, part := range parts {
 				name := group + "/" + strconv.Itoa(index)
 				final[name] = contentText(part)
-				c.parts[id][name] = true
-				if err := c.p.put(key+"/"+name, "reasoning", "", final[name], status, false, nil); err != nil {
+				trackedParts[id][name] = true
+				if err := p.put(key+"/"+name, "reasoning", "", final[name], status, false, nil); err != nil {
 					return err
 				}
 			}
 		}
 		if completed {
-			for name := range c.parts[id] {
+			for name := range trackedParts[id] {
 				if _, exists := final[name]; !exists {
-					if err := c.p.put(key+"/"+name, "reasoning", "", "", status, false, nil); err != nil {
+					if err := p.put(key+"/"+name, "reasoning", "", "", status, false, nil); err != nil {
 						return err
 					}
 				}
@@ -733,7 +752,132 @@ func (c *codexInteractive) item(item map[string]any, completed bool) error {
 	default:
 		return nil
 	}
-	return c.p.put(key, kind, title, text, status, false, map[string]any{"item": item})
+	return p.put(key, kind, title, text, status, false, map[string]any{"item": item})
+}
+
+func (c *codexInteractive) collaboration(item map[string]any) error {
+	if str(item, "tool") != "spawnAgent" {
+		return nil
+	}
+	itemID := str(item, "id")
+	if !codexIdentifier(itemID) {
+		return errors.New("Codex returned a subagent call without a valid identifier.")
+	}
+	title := str(item, "agentType")
+	if title == "" {
+		title = str(item, "prompt")
+	}
+	title = subagentTitle(title)
+	receivers, _ := item["receiverThreadIds"].([]any)
+	for _, value := range receivers {
+		nativeID, _ := value.(string)
+		if nativeID == "" || nativeID == c.threadID {
+			continue
+		}
+		child, err := c.p.ensureSubagent(nativeID, title, "", "")
+		if err != nil {
+			return err
+		}
+		if child == nil {
+			continue
+		}
+		parentKey := "codex/subagent/" + itemID + "/" + nativeID
+		if c.children[nativeID] == nil {
+			c.children[nativeID] = &codexSubagent{adapter: child, parentKey: parentKey, items: map[string]map[string]any{}, parts: map[string]map[string]bool{}}
+			if err := child.resolvedSelection(child.model, child.effort); err != nil {
+				return err
+			}
+		}
+		status := "running"
+		if str(item, "status") == "failed" {
+			status = "error"
+		}
+		data := map[string]any{"harness": c.p.harness, "nativeCallId": itemID, "nativeAgentId": nativeID, "childSessionId": child.id, "item": item}
+		if err := c.p.put(parentKey, "subagent", title, "", status, false, data); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *codexInteractive) childFrame(child *codexSubagent, method string, params map[string]any) error {
+	if method == "thread/tokenUsage/updated" {
+		return child.adapter.setUsage(codexSessionUsage(object(params["tokenUsage"])))
+	}
+	if method == "error" {
+		message := humanError(params["error"])
+		if message == "" {
+			message = "Codex reported a subagent error."
+		}
+		if err := child.adapter.put("", "error", "", message, "error", false, map[string]any{"type": method}); err != nil {
+			return err
+		}
+		return c.p.finishSubagent(child.adapter, "error")
+	}
+	if method == "turn/started" {
+		child.turnID = str(object(params["turn"]), "id")
+		return nil
+	}
+	if method == "turn/completed" {
+		turn := object(params["turn"])
+		if child.turnID != "" && str(turn, "id") != child.turnID {
+			return nil
+		}
+		status := "completed"
+		switch str(turn, "status") {
+		case "failed":
+			status = "error"
+		case "interrupted":
+			status = "cancelled"
+		}
+		if err := c.p.finishSubagent(child.adapter, status); err != nil {
+			return err
+		}
+		return c.p.put(child.parentKey, "subagent", "", "", status, false, map[string]any{"nativeAgentId": str(params, "threadId"), "childSessionId": child.adapter.id})
+	}
+	if method == "item/started" || method == "item/completed" {
+		item := object(params["item"])
+		id := str(item, "id")
+		if !codexIdentifier(id) {
+			return errors.New("Codex returned a subagent item without a valid identifier.")
+		}
+		child.items[id] = item
+		if str(item, "type") == "contextCompaction" {
+			return child.adapter.clearContextUsage()
+		}
+		return putCodexItem(child.adapter, child.parts, item, method == "item/completed")
+	}
+	id := str(params, "itemId")
+	if !codexIdentifier(id) {
+		return nil
+	}
+	key, kind, title := "codex/item/"+id, "", ""
+	switch method {
+	case "item/agentMessage/delta":
+		kind = "assistant"
+	case "item/commandExecution/outputDelta":
+		kind, title = "command", "Command"
+	case "item/reasoning/summaryTextDelta", "item/reasoning/textDelta":
+		kind = "reasoning"
+		field, group := "summaryIndex", "summary"
+		if method == "item/reasoning/textDelta" {
+			field, group = "contentIndex", "content"
+		}
+		index, valid := params[field].(json.Number)
+		n, err := index.Int64()
+		if !valid || err != nil || n < 0 || n > 10000 {
+			return errors.New("Codex returned an invalid subagent reasoning index.")
+		}
+		part := group + "/" + strconv.FormatInt(n, 10)
+		if child.parts[id] == nil {
+			child.parts[id] = map[string]bool{}
+		}
+		child.parts[id][part] = true
+		key += "/" + part
+	default:
+		return nil
+	}
+	return child.adapter.put(key, kind, title, str(params, "delta"), "running", true, map[string]any{"type": method, "itemId": id})
 }
 
 func (c *codexInteractive) request(frame map[string]any) error {
@@ -752,6 +896,11 @@ func (c *codexInteractive) request(frame map[string]any) error {
 		return errors.New("Codex reused a server request identifier within a turn.")
 	}
 	bound := c.threadID != "" && c.turnID != "" && str(params, "threadId") == c.threadID && str(params, "turnId") == c.turnID
+	requestItems := c.items
+	if child := c.children[str(params, "threadId")]; child != nil {
+		requestItems = child.items
+		bound = child.turnID == "" || str(params, "turnId") == "" || str(params, "turnId") == child.turnID
+	}
 	if method == "mcpServer/elicitation/request" && params["turnId"] == nil {
 		bound = c.threadID != "" && c.turnID != "" && str(params, "threadId") == c.threadID
 	}
@@ -876,7 +1025,7 @@ func (c *codexInteractive) request(frame map[string]any) error {
 		if permissions := params["additionalPermissions"]; permissions != nil && !codexPermissions(object(permissions)) {
 			positive = false
 		}
-		if item := c.items[itemID]; item != nil && str(item, "type") != "commandExecution" {
+		if item := requestItems[itemID]; item != nil && str(item, "type") != "commandExecution" {
 			positive = false
 		}
 		if decisions, supplied := params["availableDecisions"]; supplied {
@@ -901,7 +1050,7 @@ func (c *codexInteractive) request(frame map[string]any) error {
 		if root := params["grantRoot"]; root != nil && str(params, "grantRoot") == "" {
 			positive = false
 		}
-		item := c.items[itemID]
+		item := requestItems[itemID]
 		if item != nil {
 			req.Details = map[string]any{"request": params, "item": item}
 		}

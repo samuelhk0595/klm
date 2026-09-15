@@ -43,14 +43,14 @@ func (d *diskState) consultation(id string) *Consultation {
 
 func (d *diskState) linked(id string) *Session {
 	s := d.session(id)
-	if s == nil || s.GraphRunID != "" {
+	if s == nil || s.GraphRunID != "" || s.Role == sessionRoleSubagent {
 		return nil
 	}
-	if s.ParentID != "" {
+	if s.ParentID != "" && s.Role == sessionRoleSideAgent {
 		return d.session(s.ParentID)
 	}
 	for i := range d.Sessions {
-		if d.Sessions[i].ParentID == id {
+		if d.Sessions[i].ParentID == id && d.Sessions[i].Role == sessionRoleSideAgent {
 			return &d.Sessions[i]
 		}
 	}
@@ -58,7 +58,7 @@ func (d *diskState) linked(id string) *Session {
 }
 
 func agentName(s *Session) string {
-	if s.ParentID != "" {
+	if s.Role == sessionRoleSideAgent {
 		return "side agent"
 	}
 	return "main agent"
@@ -79,7 +79,7 @@ func (a *app) sideConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if side := a.state.linked(main.ID); side != nil {
-		respond(w, 200, side)
+		respond(w, 200, a.currentSessionUpdateLocked(side.ID))
 		return
 	}
 	harness, model, effort := main.Harness, main.Model, main.Effort
@@ -90,7 +90,7 @@ func (a *app) sideConversation(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "Harness is not installed.")
 		return
 	}
-	s := Session{ID: newID(), ParentID: main.ID, ProjectID: main.ProjectID, Title: "Side agent", Workspace: main.Workspace, Harness: harness, Model: model, Effort: effort, Status: "idle", Events: []Event{}, CreatedAt: now(), UpdatedAt: now()}
+	s := Session{ID: newID(), ParentID: main.ID, ProjectID: main.ProjectID, Title: "Side agent", Workspace: main.Workspace, Role: sessionRoleSideAgent, Harness: harness, Model: model, Effort: effort, Status: "idle", Events: []Event{}, CreatedAt: now(), UpdatedAt: now()}
 	if err := a.commitLocked(func(d *diskState) {
 		d.Sessions = append(d.Sessions, s)
 		if harness == "pi" {
@@ -100,7 +100,7 @@ func (a *app) sideConversation(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
-	respond(w, 201, s)
+	respond(w, 201, a.currentSessionUpdateLocked(s.ID))
 }
 
 func (a *app) sideHarness(w http.ResponseWriter, r *http.Request) {
@@ -113,7 +113,7 @@ func (a *app) sideHarness(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s := a.state.session(r.PathValue("id"))
-	if s == nil || s.ParentID == "" {
+	if s == nil || s.Role != sessionRoleSideAgent {
 		fail(w, 404, "Side conversation not found.")
 		return
 	}
@@ -131,6 +131,8 @@ func (a *app) sideHarness(w http.ResponseWriter, r *http.Request) {
 		s.Harness = body.Harness
 		s.Model = ""
 		s.Effort = ""
+		s.ResolvedModel = ""
+		s.ResolvedEffort = ""
 		s.UpdatedAt = now()
 		delete(d.Native, id)
 		if s.Harness == "pi" {
@@ -140,7 +142,7 @@ func (a *app) sideHarness(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
-	respond(w, 200, a.state.session(id))
+	respond(w, 200, a.currentSessionUpdateLocked(id))
 }
 
 func boundedText(text string, size int) string {
@@ -152,7 +154,7 @@ func boundedText(text string, size int) string {
 
 // Caller holds the lock. Selected passages are never truncated.
 func (a *app) focusedPrompt(s *Session, text string, sources []SourceReference) (string, error) {
-	if s.ParentID == "" {
+	if s.Role != sessionRoleSideAgent {
 		if len(sources) > 0 {
 			return "", errors.New("Selection context belongs to a side conversation.")
 		}
@@ -358,7 +360,7 @@ func (a *app) cancelConsultation(w http.ResponseWriter, r *http.Request) {
 	if t := a.runs[c.From]; t != nil && t.consultationID == id && t.delivery {
 		t.cancel()
 	}
-	respond(w, 200, a.state.session(r.PathValue("id")))
+	respond(w, 200, a.currentSessionUpdateLocked(r.PathValue("id")))
 }
 
 func (a *app) expireConsultations() {

@@ -152,14 +152,24 @@ func loadState(dir string) (diskState, error) {
 		}
 		ids[s.ID] = true
 	}
-	parents := map[string]bool{}
-	for _, s := range d.Sessions {
+	sideParents := map[string]bool{}
+	for i := range d.Sessions {
+		s := &d.Sessions[i]
 		if s.ParentID != "" {
+			// ParentID predates explicit child roles; existing children are side agents.
+			if s.Role == "" {
+				s.Role = sessionRoleSideAgent
+			}
 			parent := d.session(s.ParentID)
-			if parent == nil || parent.ParentID != "" || parent.GraphRunID != "" || s.GraphRunID != "" || parent.ProjectID != s.ProjectID || parents[s.ParentID] {
+			if parent == nil || parent.ParentID != "" || parent.GraphRunID != "" || s.GraphRunID != "" || parent.ProjectID != s.ProjectID || (s.Role != sessionRoleSideAgent && s.Role != sessionRoleSubagent) {
 				return d, errors.New("invalid linked conversation in state.json")
 			}
-			parents[s.ParentID] = true
+			if s.Role == sessionRoleSideAgent {
+				if sideParents[s.ParentID] {
+					return d, errors.New("invalid linked conversation in state.json")
+				}
+				sideParents[s.ParentID] = true
+			}
 		}
 	}
 	for _, c := range d.Consultations {
@@ -231,6 +241,7 @@ func (a *app) commitLocked(change func(*diskState)) error {
 	if a.storageErr != nil {
 		return a.storageErr
 	}
+	before := a.state
 	b, err := json.Marshal(a.state)
 	var next diskState
 	if err == nil {
@@ -252,6 +263,7 @@ func (a *app) commitLocked(change func(*diskState)) error {
 		return a.storageErr
 	}
 	a.state = next
+	a.recordHistoryLocked(before)
 	for _, listeners := range a.listeners {
 		for ch := range listeners {
 			select {

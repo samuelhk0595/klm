@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
-import type { Harness, Project, Session, SourceReference } from '../../engine';
+import type { EventPage, Harness, Project, Session, SessionResponse, SourceReference } from '../../engine';
+import { HistoryLoader } from './HistoryLoader';
 import { ConversationEvents } from './ConversationEvents';
 import { HarnessIcon } from './HarnessIcon';
 import { MessageComposer, type ComposerDraft } from './MessageComposer';
@@ -13,10 +14,10 @@ import { SessionStatusBar } from './SessionStatusBar';
 const minimumSideWidth = 304;
 const minimumMainWidth = 400;
 
-export function SideChatPanel({ session, project, harnesses, draft, sources, error, disconnected, pending, onClose, onRetry, onSnapshot, onDraftChange, onRemoveSource, onSend, onStop, onHarness, onModel }: {
+export function SideChatPanel({ session, project, harnesses, draft, sources, error, disconnected, pending, onClose, onRetry, onSnapshot, onHistory, onDraftChange, onRemoveSource, onSend, onStop, onHarness, onModel }: {
   session?: Session; project: Project; harnesses: Harness[]; draft: ComposerDraft; sources: SourceReference[];
   error: string; disconnected: boolean; pending: boolean; onClose: () => void; onRetry: () => void;
-  onSnapshot: (session: Session) => void; onDraftChange: (draft: ComposerDraft) => void;
+  onSnapshot: (session: SessionResponse) => void; onHistory: (page: EventPage) => void; onDraftChange: (draft: ComposerDraft) => void;
   onRemoveSource: (index: number) => void; onSend: (draft: ComposerDraft) => Promise<boolean>; onStop: () => void;
   onHarness: (harness: Harness['id']) => void; onModel: (model: string, effort: string) => Promise<boolean>;
 }) {
@@ -68,7 +69,7 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, err
   }, [narrow]);
   useEffect(() => {
     if (followingHistory.current && history.current) history.current.scrollTo({ top: history.current.scrollHeight });
-  }, [session?.updatedAt]);
+  }, [session?.updatedAt, session?.history?.total, !!session?.history]);
   useEffect(() => { if (sources.length) panel.current?.querySelector<HTMLElement>('.composer-editor')?.focus(); }, [sources.length, session?.id]);
   const running = session?.status === 'running';
   const permissions = !!session?.permissions?.length;
@@ -91,7 +92,7 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, err
         const element = event.currentTarget;
         followingHistory.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
       }}>
-        {session ? <><ConversationEvents session={session} working={running || pending} onSnapshot={onSnapshot} />{!session.events.length && !running && !pending && <div className="empty-chat"><h2>Ask the side agent</h2></div>}</>
+        {session ? <><HistoryLoader key={session.id} session={session} onPage={onHistory} /><ConversationEvents session={session} working={running || pending} onSnapshot={onSnapshot} />{!session.history && !session.events.length ? <p className="muted" role="status">Loading history...</p> : !session.events.length && !running && !pending && <div className="empty-chat"><h2>Ask the side agent</h2></div>}</>
           : !error && <p className="muted" role="status">Opening side agent...</p>}
       </div>
       {error && <div role="alert" className="storage-error">{error}{!session && <Button size="sm" onClick={onRetry}>Retry</Button>}</div>}
@@ -101,7 +102,7 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, err
           {session.questions?.map(question => <QuestionCard key={question.id} question={question} sessionId={session.id} onResolved={onSnapshot} />)}
         </div>}
         {!!sources.length && <div className="selection-context" aria-label="Selected context">{sources.map((source, index) => <div key={`${source.messageId}/${index}`}><blockquote>{source.passage}</blockquote><IconButton label={`Remove passage ${index + 1}`} disabled={pending} onClick={() => onRemoveSource(index)}><X /></IconButton></div>)}</div>}
-        {!session.events.length && <fieldset className="harness-picker side-harness-picker" aria-label="Side agent harness" disabled={disabled}>
+        {session.history?.total === 0 && <fieldset className="harness-picker side-harness-picker" aria-label="Side agent harness" disabled={disabled}>
           {harnesses.map(harness => <label key={harness.id} className={`harness-option ${harness.id === session.harness ? 'is-active' : ''}`}>
             <input type="radio" name={`side-harness-${session.id}`} value={harness.id} checked={harness.id === session.harness} disabled={!harness.available} onChange={() => onHarness(harness.id)} />
             <span className="side-harness-icon" aria-hidden="true"><HarnessIcon harness={harness.id} /></span><span>{harness.name}</span>

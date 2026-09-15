@@ -6,6 +6,8 @@ type MobileBridge = { postMessage: (message: string) => void };
 const mobileBridge = (window as Window & { KlmMobile?: MobileBridge }).KlmMobile;
 export const IS_MOBILE_HOST = typeof mobileBridge?.postMessage === 'function';
 
+const engineURLStorageKey = 'klm.engine-url.v1';
+
 export function returnToHosts() {
   mobileBridge?.postMessage('home');
 }
@@ -13,9 +15,22 @@ export function returnToHosts() {
 export function resolveEngineURL() {
   const override = import.meta.env.VITE_ENGINE_URL?.trim();
   if (override) return override.replace(/\/+$/, '');
+  try {
+    const configured = localStorage.getItem(engineURLStorageKey)?.trim();
+    if (configured) return configured.replace(/\/+$/, '');
+  } catch { /* Fall back to the URL-derived engine when storage is unavailable. */ }
   const hostname = IS_DESKTOP ? 'localhost' : window.location.hostname;
   const port = import.meta.env.DEV || window.location.port === '17332' ? '17331' : '7331';
   return `http://${hostname || 'localhost'}:${port}`;
+}
+
+export function configureEngineURL(value: string) {
+  const url = new URL(value.trim());
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Use an HTTP or HTTPS URL.');
+  if (url.search || url.hash) throw new Error('The engine URL cannot include a query or fragment.');
+  const configured = url.toString().replace(/\/+$/, '');
+  localStorage.setItem(engineURLStorageKey, configured);
+  return configured;
 }
 
 export async function openFocus() {

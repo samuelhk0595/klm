@@ -3,7 +3,7 @@ import type { EngineEvent } from '../../engine';
 import { ChatMessage } from './ChatMessage';
 
 export function SessionEvent({ event }: { event: EngineEvent }) {
-  if (event.type === 'consultation') return null;
+  if (event.type === 'consultation' || event.type === 'subagent') return null;
   if (event.type === 'user' || event.type === 'assistant') return <div>
     {Array.isArray(event.data?.sources) && <details className="sent-selection-context"><summary>Selected context</summary>{event.data.sources.map((source: unknown, index: number) => source && typeof source === 'object' && 'passage' in source && typeof source.passage === 'string' ? <blockquote key={index}>{source.passage}</blockquote> : null)}</details>}
     <ChatMessage message={{ id: event.id, role: event.type, text: event.text, mentions: event.data?.mentions, mentionPreparation: event.data?.mentionPreparation }} />

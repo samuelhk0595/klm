@@ -305,6 +305,7 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	}
 	// Drain text before final results, consultation answers and graph completion
 	// read the durable session, including when the harness failed or was stopped.
+	err = errors.Join(err, p.closeSubagents(err != nil || p.failed, t.ctx.Err() != nil))
 	err = errors.Join(err, p.stream.close())
 	graphResult := p.finishGraphAdapter(err)
 	if p.graphNode() && graphResult.Error != nil {
@@ -428,6 +429,8 @@ type adapter struct {
 	keys               map[string]string
 	toolNames          map[string]string
 	commands           map[string]string
+	subagents          map[string]*adapter
+	subagent           bool
 	piMessage          int
 	failed             bool
 	completed          bool

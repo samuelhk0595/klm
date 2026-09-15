@@ -20,9 +20,11 @@ are required. `npm run desktop:build` builds frontend, Rust and a per-user NSIS
 installer in `src-tauri/target/release/bundle/nsis`. No engine is bundled or started.
 
 `src/platform.ts` resolves fetch and SSE to `http://localhost:7331` inside Tauri and
-to the browser page's hostname on port 7331. `VITE_ENGINE_URL` is a development
-override. The production desktop CSP permits the default local API; a custom
-packaged endpoint also needs an explicit CSP adjustment in `tauri.conf.json`.
+to the browser page's hostname on port 7331. Settings can persist a different HTTP(S)
+engine URL for that frontend; connecting reloads the page so requests and streams
+switch together. `VITE_ENGINE_URL` remains a development override. The production
+desktop CSP permits HTTP(S) connections so the configured endpoint also works in the
+packaged client.
 `npm run build` / `npm run preview` remain available for browser development.
 
 Vite dev uses API port **17331**. `desktop:dev` applies `tauri.dev.conf.json` for
