@@ -470,7 +470,7 @@ export function App() {
     onLostPointerCapture={() => { drag.current = null; if (shell.current) delete shell.current.dataset.dragging; }}
     onPointerCancel={() => { drag.current = null; if (shell.current) delete shell.current.dataset.dragging; }}
   >
-    <ProjectRail projects={projects} activeId={project?.id ?? ''} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); settings.current?.showModal(); }} />
+    <ProjectRail projects={projects} sessions={sessions} activeId={project?.id ?? ''} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); settings.current?.showModal(); }} />
     {sidebarOpen && <button className="panel-backdrop" aria-label="Close side panel" onClick={() => setSidebarOpen(false)} />}
     {project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} onNew={newSession} onCreateFolder={createFolder} onSelect={id => { navigation.current += 1; setWorkspaceNavigation(current => ({ ...current, selectedSessions: { ...current.selectedSessions, [project.id]: id } })); setView('chat'); setSidebarOpen(false); }} onClose={() => setSidebarOpen(false)} onAgents={() => { navigation.current += 1; setAgentsVisit(current => current + 1); setView('agents'); setSidebarOpen(false); }} onGraphs={() => { navigation.current += 1; setGraphsVisit(current => current + 1); setView('graphs'); setSidebarOpen(false); }} onEditProject={openProjectEditor} onRemoveProject={target => removeProject(target.id)} />}
     <main className="main-panel">
@@ -487,8 +487,7 @@ export function App() {
           const element = event.currentTarget;
           followingHistory.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
         }}>
-          {session.events.length ? <ConversationEvents key={session.id} session={session} onSnapshot={receiveSession} onAskSide={askSide} /> : !working ? <div className="empty-chat"><div className="empty-chat-brand" role="img" aria-label="KLM Harness"><span className="empty-chat-wordmark" aria-hidden="true"><span>K</span><span>L</span><span>M</span></span><Badge>Harness</Badge></div><h2>What would you like to work on?</h2></div> : null}
-          {working && <div className="chat-working" role="status">{awaitingPermission ? 'Waiting for approval' : awaitingQuestion ? 'Waiting for your answer' : <><span className="working-spinner" aria-hidden="true" />Working</>}</div>}
+          {session.events.length || working ? <ConversationEvents key={session.id} session={session} working={working} onSnapshot={receiveSession} onAskSide={askSide} /> : <div className="empty-chat"><div className="empty-chat-brand" role="img" aria-label="KLM Harness"><span className="empty-chat-wordmark" aria-hidden="true"><span>K</span><span>L</span><span>M</span></span><Badge>Harness</Badge></div><h2>What would you like to work on?</h2></div>}
         </div>
         {(catalogError || !!catalog?.errors.length) && <div role="alert" className="storage-error">{catalogError || catalog?.errors.join(' ')} <Button size="sm" disabled={catalogLoading} onClick={() => void reloadCatalog().catch(() => {})}>Retry</Button></div>}
         {graphErrors[session.id] && <div role="alert" className="storage-error">{graphErrors[session.id]} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}

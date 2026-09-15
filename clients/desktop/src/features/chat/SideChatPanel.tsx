@@ -91,8 +91,7 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, err
         const element = event.currentTarget;
         followingHistory.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
       }}>
-        {session ? <><ConversationEvents session={session} onSnapshot={onSnapshot} />{!session.events.length && !running && <div className="empty-chat"><h2>Ask the side agent</h2></div>}
-          {(running || pending) && <div className="chat-working" role="status">{permissions ? 'Waiting for approval' : questions ? 'Waiting for your answer' : <><span className="working-spinner" aria-hidden="true" />Working</>}</div>}</>
+        {session ? <><ConversationEvents session={session} working={running || pending} onSnapshot={onSnapshot} />{!session.events.length && !running && !pending && <div className="empty-chat"><h2>Ask the side agent</h2></div>}</>
           : !error && <p className="muted" role="status">Opening side agent...</p>}
       </div>
       {error && <div role="alert" className="storage-error">{error}{!session && <Button size="sm" onClick={onRetry}>Retry</Button>}</div>}

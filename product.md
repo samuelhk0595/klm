@@ -99,21 +99,24 @@ question or stop the turn.
 
 ## Mobile Client
 
-**KLM Harness** in `clients/mobile` is a Flutter mobile client with two native
-screens: a list of saved hosts and an Add host form. Each host has a user-provided
-name and an IP address or domain. Save persists it locally in the app; hosts remain
-listed across app restarts. The list does not imply an online-status check.
+**KLM Harness** in `clients/mobile` is a Flutter mobile client with a native list
+of saved web clients and a form used to add or edit them. Each entry has a
+user-provided name, a web client URL and an optional emoji; the server icon remains
+the default. Entries can be created, edited and deleted, with changes persisted
+locally across app restarts. The list does not imply an online-status check.
 
-Selecting a host opens its web frontend inside a WebView. An IP without an explicit
+Selecting an entry opens its web frontend inside a WebView. An IP without an explicit
 port uses the frontend default **7332**. A domain without a port gets no added port,
 allowing tunnel/proxy URLs. Explicit ports and HTTP(S) schemes are preserved;
 without a scheme, IPs use HTTP and domains use HTTPS.
 
-The KLM logo at the top of the web project rail returns to the native host list.
-While loaded, the WebView has no additional native toolbar. Failed loads offer
-Retry and a native KLM home action. Mobile does not start servers or relocate
-execution/files to the device. Native screens reuse KLM's visual language through
-Flutter equivalents of its colors, typography, inputs, buttons and cards.
+The KLM logo at the top of the web project rail returns to the native web client
+list. While loaded, the WebView has no additional native toolbar. Flutter knows
+only the web client URL; engine selection and configuration belong to that web
+client. Failed loads offer Retry and a native KLM home action. Mobile does not
+start servers or relocate execution/files to the device. Native screens reuse
+KLM's visual language through Flutter equivalents of its colors, typography,
+inputs, buttons and cards.
 
 ## File and Folder References
 

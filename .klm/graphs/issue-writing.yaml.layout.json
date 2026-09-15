@@ -1,0 +1,21 @@
+{
+  "positions": {
+    "3c7f25c2-ba60-40f4-8e8e-dbee26c07048": {
+      "x": 0,
+      "y": 0
+    },
+    "ab25edcc-8f7b-4bff-bb09-3e358c34502d": {
+      "x": 391,
+      "y": -6
+    },
+    "choice:work-done": {
+      "x": 429,
+      "y": -6
+    }
+  },
+  "viewport": {
+    "x": 273,
+    "y": 319,
+    "zoom": 1
+  }
+}

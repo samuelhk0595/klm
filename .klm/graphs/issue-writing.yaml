@@ -1,0 +1,21 @@
+name: Issue Writing
+enabled: true
+initial_node: 3c7f25c2-ba60-40f4-8e8e-dbee26c07048
+nodes:
+    3c7f25c2-ba60-40f4-8e8e-dbee26c07048:
+        type: agent
+        name: Issue Writing
+        agent: issue-writer
+        choices:
+            - work-done
+choices:
+    work-done:
+        name: work_done
+        description: Called when the work is fully done
+        input:
+            summary:
+                type: string
+                required: true
+        output:
+            summary: '{{choice.summary}}'
+        terminal: true

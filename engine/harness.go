@@ -243,6 +243,7 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	}
 	p.graph = graphBinding(t)
 	defer UnbindGraphAdapter(t)
+	p.stream = newStreamBatch(p)
 	var err error
 	if t.prompt == "" {
 		t.prompt = payload.Text
@@ -302,6 +303,9 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 			}
 		}
 	}
+	// Drain text before final results, consultation answers and graph completion
+	// read the durable session, including when the harness failed or was stopped.
+	err = errors.Join(err, p.stream.close())
 	graphResult := p.finishGraphAdapter(err)
 	if p.graphNode() && graphResult.Error != nil {
 		err = graphResult.Error
@@ -409,6 +413,7 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 }
 
 type adapter struct {
+	stream             *streamBatch
 	graph              *graphAdapterBinding
 	nativeSettled      bool
 	choiceToolSettled  bool
@@ -485,8 +490,8 @@ func contentText(value any) string {
 	return ""
 }
 
-// Stable keys upsert harness items in first-observed order. Only Pi deltas
-// append text; accumulated tool results and completed messages replace text.
+// Stable keys upsert harness items in first-observed order. Native deltas append
+// text; accumulated tool results and completed messages replace text.
 func (p *adapter) put(key, kind, title, text, status string, appendText bool, raw map[string]any) error {
 	id := p.keys[key]
 	if key == "" || id == "" {
@@ -495,37 +500,21 @@ func (p *adapter) put(key, kind, title, text, status string, appendText bool, ra
 			p.keys[key] = id
 		}
 	}
-	p.app.mu.Lock()
-	defer p.app.mu.Unlock()
-	return p.app.commitLocked(func(d *diskState) {
-		s := d.session(p.id)
-		var e *Event
-		for i := len(s.Events) - 1; i >= 0; i-- {
-			if s.Events[i].ID == id {
-				e = &s.Events[i]
-				break
-			}
+	data := map[string]any{"harness": p.harness}
+	for k, v := range raw {
+		data[k] = v
+	}
+	update := streamUpdate{event: Event{ID: id, Type: kind, Title: title, Text: text,
+		Status: status, ConsultationID: p.turn.consultationID, CreatedAt: now(), Data: data}, appendText: appendText}
+	if p.stream != nil {
+		if key != "" && status == "running" && (kind == "assistant" || kind == "reasoning" || appendText) {
+			return p.stream.enqueue(update)
 		}
-		if e == nil {
-			s.Events = append(s.Events, Event{ID: id, Type: kind, ConsultationID: p.turn.consultationID, CreatedAt: now(), Data: map[string]any{"harness": p.harness}})
-			e = &s.Events[len(s.Events)-1]
-		}
-		if title != "" {
-			e.Title = title
-		}
-		if status != "" {
-			e.Status = status
-		}
-		if appendText {
-			e.Text += text
-		} else {
-			e.Text = text
-		}
-		for k, v := range raw {
-			e.Data[k] = v
-		}
-		s.UpdatedAt = now()
-	})
+		// Lifecycle/tool events and final replacements also persist earlier text,
+		// so a delayed batch can never overwrite completion or reorder events.
+		return p.stream.flush(&update)
+	}
+	return p.commitStreamUpdates([]streamUpdate{update})
 }
 
 func (p *adapter) nativeID(id string) error {
