@@ -22,6 +22,7 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, err
 }) {
   const panel = useRef<HTMLElement>(null);
   const history = useRef<HTMLDivElement>(null);
+  const followingHistory = useRef(true);
   const [savedWidth, setSavedWidth] = useState(() => {
     try { const value = Number(localStorage.getItem('klm.side-agent.width.v1')); return Number.isFinite(value) && value >= minimumSideWidth ? Math.min(value, 900) : 352; }
     catch { return 352; }
@@ -65,7 +66,9 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, err
     target.addEventListener('keydown', keydown);
     return () => { siblings.forEach(item => { item.inert = false; }); target.removeEventListener('keydown', keydown); previous?.focus(); };
   }, [narrow]);
-  useEffect(() => { history.current?.scrollTo({ top: history.current.scrollHeight }); }, [session?.updatedAt]);
+  useEffect(() => {
+    if (followingHistory.current && history.current) history.current.scrollTo({ top: history.current.scrollHeight });
+  }, [session?.updatedAt]);
   useEffect(() => { if (sources.length) panel.current?.querySelector<HTMLElement>('.composer-editor')?.focus(); }, [sources.length, session?.id]);
   const running = session?.status === 'running';
   const permissions = !!session?.permissions?.length;
@@ -84,7 +87,10 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, err
       }} />}
     <aside ref={panel} className={`side-chat-panel ${narrow ? 'side-chat-panel--full' : ''}`} style={{ width: narrow ? undefined : width }} role={narrow ? 'dialog' : undefined} aria-modal={narrow || undefined} aria-label="Side agent">
       <header className="side-chat-header"><h2>Side agent</h2><IconButton label="Close side agent" onClick={onClose}><X /></IconButton></header>
-      <div className="chat-history" ref={history} role="log" aria-label="Side conversation" aria-live="polite">
+      <div className="chat-history" ref={history} role="log" aria-label="Side conversation" aria-live="polite" onScroll={event => {
+        const element = event.currentTarget;
+        followingHistory.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+      }}>
         {session ? <><ConversationEvents session={session} onSnapshot={onSnapshot} />{!session.events.length && !running && <div className="empty-chat"><h2>Ask the side agent</h2></div>}
           {(running || pending) && <div className="chat-working" role="status">{permissions ? 'Waiting for approval' : questions ? 'Waiting for your answer' : <><span className="working-spinner" aria-hidden="true" />Working</>}</div>}</>
           : !error && <p className="muted" role="status">Opening side agent...</p>}
