@@ -14,10 +14,13 @@ function sessionRuntimeState(session: Session) {
   return { state: 'off', label: 'Runtime stopped' };
 }
 
-export function WorkspaceSidebar({ project, sessions, activeId, activeSection, collapsed, archivedCollapsed, onCollapsedChange, onArchivedCollapsedChange, onSelect, onNew, onCreateFolder, onRename, onMove, onArchiveSession, onArchiveFolder, onClose, onAgents, onGraphs, onEditProject, onRemoveProject }: {
+type DragItem = { kind: 'session'; id: string } | { kind: 'folder'; name: string };
+
+export function WorkspaceSidebar({ project, sessions, activeId, activeSection, collapsed, archivedCollapsed, onCollapsedChange, onArchivedCollapsedChange, onSelect, onNew, onCreateFolder, onRename, onPosition, onReorderFolder, onArchiveSession, onArchiveFolder, onClose, onAgents, onGraphs, onEditProject, onRemoveProject }: {
   project: Project; sessions: Session[]; activeId: string; collapsed: string[]; archivedCollapsed: boolean; onCollapsedChange: (folders: string[]) => void; onArchivedCollapsedChange: (collapsed: boolean) => void;
   onSelect: (id: string) => void; onNew: (folder?: string) => void; onCreateFolder: (name: string) => Promise<string | null>;
-  onRename: (session: Session) => void; onMove: (session: Session, folder: string) => Promise<boolean>;
+  onRename: (session: Session) => void; onPosition: (session: Session, folder: string, beforeId: string) => Promise<boolean>;
+  onReorderFolder: (folder: string, before: string) => Promise<boolean>;
   onArchiveSession: (session: Session, archived: boolean) => Promise<boolean>; onArchiveFolder: (folder: string, archived: boolean) => Promise<boolean>;
   onClose: () => void; activeSection: 'chat' | 'design' | 'agents' | 'graphs'; onAgents: () => void; onGraphs: () => void;
   onEditProject: (project: Project) => void; onRemoveProject: (project: Project) => Promise<string | null>;
@@ -32,8 +35,10 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, c
   const [savingFolder, setSavingFolder] = useState(false);
   const [busyAction, setBusyAction] = useState('');
   const [actionError, setActionError] = useState('');
-  const [dragging, setDragging] = useState('');
-  const [dropTarget, setDropTarget] = useState('');
+  const [dragging, setDragging] = useState<DragItem | null>(null);
+  const [folderDropTarget, setFolderDropTarget] = useState('');
+  const [sessionDropTarget, setSessionDropTarget] = useState<{ id: string; edge: 'before' | 'after' } | null>(null);
+  const [folderOrderTarget, setFolderOrderTarget] = useState<{ name: string; edge: 'before' | 'after' } | null>(null);
   const archivedFolders = new Set(project.archivedFolders);
   const activeFolders = project.folders.filter(folder => !archivedFolders.has(folder));
   const archivedSessions = sessions.filter(session => session.archived && !archivedFolders.has(session.workspace));
@@ -53,19 +58,35 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, c
     finally { setBusyAction(''); }
   }
 
-  async function moveSession(session: Session, workspace: string) {
-    setDropTarget('');
-    if (session.workspace === workspace) return;
-    if (await runAction(`move:${session.id}`, () => onMove(session, workspace), 'Could not move the session. Try again.')) {
+  async function positionSession(session: Session, workspace: string, beforeId: string) {
+    setFolderDropTarget(''); setSessionDropTarget(null);
+    if (await runAction(`move:${session.id}`, () => onPosition(session, workspace, beforeId), 'Could not move the session. Try again.')) {
       onCollapsedChange(collapsed.filter(folder => folder !== workspace));
     }
   }
 
   function sessionRow(session: Session, archived = false) {
     const runtime = sessionRuntimeState(session);
-    return <div key={session.id} className={`session-row ${dragging === session.id ? 'is-dragging' : ''} ${sessionMenu === session.id ? 'has-open-menu' : ''}`} draggable={!archived && !busyAction}
-      onDragStart={event => { setDragging(session.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', session.id); }}
-      onDragEnd={() => { setDragging(''); setDropTarget(''); }}>
+    return <div key={session.id} className={`session-row ${dragging?.kind === 'session' && dragging.id === session.id ? 'is-dragging' : ''} ${sessionDropTarget?.id === session.id ? `is-drop-${sessionDropTarget.edge}` : ''} ${sessionMenu === session.id ? 'has-open-menu' : ''}`} draggable={!archived && !busyAction && search === null}
+      onDragStart={event => { setDragging({ kind: 'session', id: session.id }); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-klm-session', session.id); }}
+      onDragEnd={() => { setDragging(null); setFolderDropTarget(''); setSessionDropTarget(null); setFolderOrderTarget(null); }}
+      onDragOver={event => {
+        if (dragging?.kind !== 'session' || dragging.id === session.id) return;
+        event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move';
+        const bounds = event.currentTarget.getBoundingClientRect();
+        setFolderDropTarget('');
+        setSessionDropTarget({ id: session.id, edge: event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after' });
+      }}
+      onDrop={event => {
+        if (dragging?.kind !== 'session' || !sessionDropTarget || sessionDropTarget.id !== session.id) return;
+        event.preventDefault(); event.stopPropagation();
+        const moved = sessions.find(item => item.id === dragging.id);
+        const peers = sessions.filter(item => !item.archived && item.workspace === session.workspace && item.id !== dragging.id);
+        const index = peers.findIndex(item => item.id === session.id);
+        if (!moved || index < 0) return;
+        const beforeId = sessionDropTarget.edge === 'before' ? session.id : peers[index + 1]?.id ?? '';
+        void positionSession(moved, session.workspace, beforeId);
+      }}>
       <button className={`session-item ${session.id === activeId ? 'is-active' : ''}`} disabled={archived} aria-current={session.id === activeId ? 'page' : undefined} onClick={() => onSelect(session.id)}>
         <span>{session.title}</span>{!archived && <i className={`session-runtime-led is-${runtime.state}`} role="img" aria-label={runtime.label} title={runtime.label} />}
       </button>
@@ -102,12 +123,50 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, c
       {[...activeFolders, 'Ungrouped'].map(workspace => {
         const matches = sessions.filter(session => !session.archived && session.workspace === workspace && session.title.toLowerCase().includes(query));
         const expanded = search !== null || !collapsed.includes(workspace);
-        const isDropTarget = dropTarget === workspace;
+        const isDropTarget = folderDropTarget === workspace;
         return <div className={`workspace-group ${isDropTarget ? 'is-drop-target' : ''}`} key={workspace}
-          onDragOver={event => { if (!dragging) return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget(workspace); }}
-          onDragLeave={event => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDropTarget(''); }}
-          onDrop={event => { event.preventDefault(); const session = sessions.find(item => item.id === (dragging || event.dataTransfer.getData('text/plain'))); if (session) void moveSession(session, workspace); }}>
-          <div className="workspace-folder-row"><button className="workspace-folder" aria-expanded={expanded} onClick={() => { if (search === null) onCollapsedChange(collapsed.includes(workspace) ? collapsed.filter(item => item !== workspace) : [...collapsed, workspace]); }}><Folder />{workspace}</button><IconButton label={`New session in ${workspace}`} onClick={() => { onCollapsedChange(collapsed.filter(item => item !== workspace)); onNew(workspace); }}><Plus /></IconButton>{workspace !== 'Ungrouped' && <Menu label={`${workspace} actions`} role="menu" className="workspace-action-menu" open={folderMenu === workspace} onOpenChange={open => { setActionError(''); setFolderMenu(open ? workspace : ''); }} side="bottom" trigger={props => <IconButton {...props} label={`${workspace} actions`}><MoreHorizontal /></IconButton>}><MenuItem role="menuitem" disabled={!!busyAction} onClick={() => void runAction(`archive-folder:${workspace}`, () => onArchiveFolder(workspace, true), 'Could not archive the folder. Try again.')}><Archive />Archive</MenuItem></Menu>}</div>
+          onDragOver={event => { if (dragging?.kind !== 'session') return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setSessionDropTarget(null); setFolderDropTarget(workspace); }}
+          onDragLeave={event => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setFolderDropTarget(''); }}
+          onDrop={event => {
+            if (dragging?.kind !== 'session') return;
+            event.preventDefault();
+            const session = sessions.find(item => item.id === dragging.id);
+            if (session) void positionSession(session, workspace, '');
+          }}>
+          <div className={`workspace-folder-row ${dragging?.kind === 'folder' && dragging.name === workspace ? 'is-dragging' : ''} ${folderOrderTarget?.name === workspace ? `is-drop-${folderOrderTarget.edge}` : ''}`}
+            onDragStart={event => {
+              if (workspace === 'Ungrouped') return;
+              setDragging({ kind: 'folder', name: workspace }); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-klm-folder', workspace);
+            }}
+            onDragEnd={() => { setDragging(null); setFolderDropTarget(''); setSessionDropTarget(null); setFolderOrderTarget(null); }}
+            onDragOver={event => {
+              if (!dragging) return;
+              if (dragging.kind === 'session') {
+                event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setSessionDropTarget(null); setFolderDropTarget(workspace); return;
+              }
+              if (dragging.name === workspace) return;
+              event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move';
+              const bounds = event.currentTarget.getBoundingClientRect();
+              setFolderOrderTarget({ name: workspace, edge: workspace === 'Ungrouped' || event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after' });
+            }}
+            onDrop={event => {
+              if (!dragging) return;
+              event.preventDefault(); event.stopPropagation();
+              if (dragging.kind === 'session') {
+                const session = sessions.find(item => item.id === dragging.id);
+                if (session) void positionSession(session, workspace, '');
+                return;
+              }
+              if (!folderOrderTarget || folderOrderTarget.name !== workspace) return;
+              const remaining = activeFolders.filter(folder => folder !== dragging.name);
+              const targetIndex = remaining.indexOf(workspace);
+              const before = workspace === 'Ungrouped' ? '' : folderOrderTarget.edge === 'before' ? workspace : remaining[targetIndex + 1] ?? '';
+              const folder = dragging.name;
+              setFolderOrderTarget(null);
+              void runAction(`reorder-folder:${folder}`, () => onReorderFolder(folder, before), 'Could not reorder the folder. Try again.');
+            }}>
+            <button className="workspace-folder" draggable={workspace !== 'Ungrouped' && !busyAction && search === null} aria-expanded={expanded} onClick={() => { if (search === null) onCollapsedChange(collapsed.includes(workspace) ? collapsed.filter(item => item !== workspace) : [...collapsed, workspace]); }}><Folder />{workspace}</button><IconButton label={`New session in ${workspace}`} onClick={() => { onCollapsedChange(collapsed.filter(item => item !== workspace)); onNew(workspace); }}><Plus /></IconButton>{workspace !== 'Ungrouped' && <Menu label={`${workspace} actions`} role="menu" className="workspace-action-menu" open={folderMenu === workspace} onOpenChange={open => { setActionError(''); setFolderMenu(open ? workspace : ''); }} side="bottom" trigger={props => <IconButton {...props} label={`${workspace} actions`}><MoreHorizontal /></IconButton>}><MenuItem role="menuitem" disabled={!!busyAction} onClick={() => void runAction(`archive-folder:${workspace}`, () => onArchiveFolder(workspace, true), 'Could not archive the folder. Try again.')}><Archive />Archive</MenuItem></Menu>}
+          </div>
           {expanded && <div className="session-list">{matches.map(session => sessionRow(session))}{matches.length === 0 && <p className="empty-workspace">No sessions</p>}</div>}
         </div>;
       })}

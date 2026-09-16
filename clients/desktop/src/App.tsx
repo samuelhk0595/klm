@@ -35,6 +35,22 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'The engine request failed. Please retry.';
 }
 
+function moveBefore<T extends { id: string }>(items: T[], id: string, beforeId: string) {
+  const moved = items.find(item => item.id === id);
+  if (!moved) return items;
+  const remaining = items.filter(item => item.id !== id);
+  const target = beforeId ? remaining.findIndex(item => item.id === beforeId) : remaining.length;
+  if (target < 0) return items;
+  return [...remaining.slice(0, target), moved, ...remaining.slice(target)];
+}
+
+function orderSessionSnapshot(current: Session[], incoming: EngineSnapshot['sessions']) {
+  const merged = mergeSessions(current, incoming);
+  const byId = new Map(merged.map(session => [session.id, session]));
+  const incomingIds = new Set(incoming.map(session => session.id));
+  return [...incoming.flatMap(session => byId.get(session.id) ?? []), ...merged.filter(session => !incomingIds.has(session.id))];
+}
+
 type WorkspaceNavigation = { activeProjectId: string; selectedSessions: Record<string, string>; openSideSessions: string[]; collapsedFolders: Record<string, string[]>; collapsedArchivedProjects: string[] };
 const navigationStorageKey = `klm.workspace-navigation.v1:${ENGINE_URL}`;
 
@@ -172,7 +188,7 @@ export function App() {
           const visibleIds = new Set(visibleProjects.map(project => project.id));
           return {
             projects: visibleProjects,
-            sessions: mergeSessions(current.sessions, next.sessions).filter(session => visibleIds.has(session.projectId)),
+            sessions: orderSessionSnapshot(current.sessions, next.sessions).filter(session => visibleIds.has(session.projectId)),
             harnesses: next.harnesses,
           };
         });
@@ -350,13 +366,16 @@ export function App() {
       if (action === 'messages') setPendingMessages(current => ({ ...current, [id]: false }));
     }
   }
-  async function patchSession(target: Session, body: { title?: string; workspace?: string; archived?: boolean }): Promise<string | null> {
+  async function patchSession(target: Session, body: { title?: string; workspace?: string; archived?: boolean; position?: { workspace: string; beforeId: string } }): Promise<string | null> {
     const id = target.id;
     if (pending.current.has(id)) return 'Another session update is still in progress.';
     pending.current.add(id); setPendingSessions(current => ({ ...current, [id]: true })); setSessionErrors(current => ({ ...current, [id]: '' }));
     try {
       const next = await request<SessionResponse>(`/api/sessions/${encodeURIComponent(id)}`, 'PATCH', body);
-      setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [next]) }));
+      setEngine(current => {
+        const merged = mergeSessions(current.sessions, [next]);
+        return { ...current, sessions: body.position ? moveBefore(merged, id, body.position.beforeId) : merged };
+      });
       return null;
     } catch (error) {
       const failure = errorMessage(error);
@@ -469,6 +488,20 @@ export function App() {
       return null;
     } catch (error) { return errorMessage(error); }
   }
+  async function reorderProject(target: Project, beforeId: string): Promise<boolean> {
+    try {
+      const next = await request<Project>(`/api/projects/${encodeURIComponent(target.id)}`, 'PATCH', { position: { beforeId } });
+      projectRevision.current += 1;
+      setEngine(current => ({
+        ...current,
+        projects: moveBefore(current.projects.map(item => item.id === target.id ? next : item), target.id, beforeId),
+      }));
+      return true;
+    } catch (error) {
+      setConnectionError(errorMessage(error));
+      return false;
+    }
+  }
   async function removeProject(projectId: string): Promise<string | null> {
     try {
       await request(`/api/projects/${encodeURIComponent(projectId)}`, 'DELETE');
@@ -510,6 +543,19 @@ export function App() {
     const projectId = project.id;
     try {
       const next = await request<Project>(`/api/projects/${encodeURIComponent(projectId)}/folders`, 'PATCH', { name: folder, archived });
+      projectRevision.current += 1;
+      setEngine(current => ({ ...current, projects: current.projects.map(item => item.id === projectId ? next : item) }));
+      return true;
+    } catch (error) {
+      setConnectionError(errorMessage(error));
+      return false;
+    }
+  }
+  async function reorderFolder(folder: string, before: string): Promise<boolean> {
+    if (!project) return false;
+    const projectId = project.id;
+    try {
+      const next = await request<Project>(`/api/projects/${encodeURIComponent(projectId)}/folders`, 'PATCH', { name: folder, position: { before } });
       projectRevision.current += 1;
       setEngine(current => ({ ...current, projects: current.projects.map(item => item.id === projectId ? next : item) }));
       return true;
@@ -560,9 +606,9 @@ export function App() {
     onLostPointerCapture={() => { drag.current = null; if (shell.current) delete shell.current.dataset.dragging; }}
     onPointerCancel={() => { drag.current = null; if (shell.current) delete shell.current.dataset.dragging; }}
   >
-    <ProjectRail projects={projects} sessions={sessions} activeId={project?.id ?? ''} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); setSettingsEngineURL(ENGINE_URL); setSettingsError(''); settings.current?.showModal(); }} />
+    <ProjectRail projects={projects} sessions={sessions} activeId={project?.id ?? ''} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onReorder={reorderProject} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); setSettingsEngineURL(ENGINE_URL); setSettingsError(''); settings.current?.showModal(); }} />
     {sidebarOpen && <button className="panel-backdrop" aria-label="Close side panel" onClick={() => setSidebarOpen(false)} />}
-    {project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} collapsed={collapsedFolders[project.id] ?? []} archivedCollapsed={collapsedArchivedProjects.includes(project.id)} onCollapsedChange={folders => setWorkspaceNavigation(current => ({ ...current, collapsedFolders: { ...current.collapsedFolders, [project.id]: folders } }))} onArchivedCollapsedChange={collapsed => setWorkspaceNavigation(current => ({ ...current, collapsedArchivedProjects: collapsed ? [...new Set([...current.collapsedArchivedProjects, project.id])] : current.collapsedArchivedProjects.filter(id => id !== project.id) }))} onNew={newSession} onCreateFolder={createFolder} onRename={setRenamingSession} onMove={async (target, folder) => (await patchSession(target, { workspace: folder })) === null} onArchiveSession={async (target, archived) => (await patchSession(target, { archived })) === null} onArchiveFolder={archiveFolder} onSelect={id => { navigation.current += 1; setWorkspaceNavigation(current => ({ ...current, selectedSessions: { ...current.selectedSessions, [project.id]: id } })); setView('chat'); setSidebarOpen(false); }} onClose={() => setSidebarOpen(false)} onAgents={() => { navigation.current += 1; setAgentsVisit(current => current + 1); setView('agents'); setSidebarOpen(false); }} onGraphs={() => { navigation.current += 1; setGraphsVisit(current => current + 1); setView('graphs'); setSidebarOpen(false); }} onEditProject={openProjectEditor} onRemoveProject={target => removeProject(target.id)} />}
+    {project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} collapsed={collapsedFolders[project.id] ?? []} archivedCollapsed={collapsedArchivedProjects.includes(project.id)} onCollapsedChange={folders => setWorkspaceNavigation(current => ({ ...current, collapsedFolders: { ...current.collapsedFolders, [project.id]: folders } }))} onArchivedCollapsedChange={collapsed => setWorkspaceNavigation(current => ({ ...current, collapsedArchivedProjects: collapsed ? [...new Set([...current.collapsedArchivedProjects, project.id])] : current.collapsedArchivedProjects.filter(id => id !== project.id) }))} onNew={newSession} onCreateFolder={createFolder} onRename={setRenamingSession} onPosition={async (target, workspace, beforeId) => (await patchSession(target, { position: { workspace, beforeId } })) === null} onReorderFolder={reorderFolder} onArchiveSession={async (target, archived) => (await patchSession(target, { archived })) === null} onArchiveFolder={archiveFolder} onSelect={id => { navigation.current += 1; setWorkspaceNavigation(current => ({ ...current, selectedSessions: { ...current.selectedSessions, [project.id]: id } })); setView('chat'); setSidebarOpen(false); }} onClose={() => setSidebarOpen(false)} onAgents={() => { navigation.current += 1; setAgentsVisit(current => current + 1); setView('agents'); setSidebarOpen(false); }} onGraphs={() => { navigation.current += 1; setGraphsVisit(current => current + 1); setView('graphs'); setSidebarOpen(false); }} onEditProject={openProjectEditor} onRemoveProject={target => removeProject(target.id)} />}
     <main className="main-panel">
       <header className="session-header"><div id="workspace-header-leading" className="header-leading">{project && <IconButton label="Open sessions" className="mobile-nav" onClick={() => setSidebarOpen(true)}><PanelLeft /></IconButton>}<h1>{view === 'chat' && session ? <button className="session-title-button" title="Rename session" onClick={() => setRenamingSession(session)}>{session.title}</button> : view === 'design' ? 'Design system' : view === 'agents' ? 'Agents' : view === 'graphs' ? 'Graphs' : project?.name ?? 'KLM'}</h1>{view === 'chat' && session && gitBranch && <span className="mode-label session-header-branch" title={gitBranch}><GitBranch aria-hidden="true" /><span>{gitBranch}</span></span>}</div><div id="workspace-header-actions" className="header-actions">
         {session && view === 'chat' && <Button size="sm" className="export-button" onClick={exportSession}>Session log<Download /></Button>}

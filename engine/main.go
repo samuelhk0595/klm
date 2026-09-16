@@ -82,6 +82,7 @@ func runEngine(dir string) error {
 	if err := recoverGraphCatalogChanges(dir, &state); err != nil {
 		return err
 	}
+	recoveryRevision := state.GraphRevision
 	interrupted := interruptGraphState(&state, "Graph run interrupted by engine restart; execution was not replayed.")
 	interruptedConsultations := map[string]string{}
 	for i := range state.Consultations {
@@ -131,6 +132,9 @@ func runEngine(dir string) error {
 		}
 	}
 	if interrupted {
+		if state.GraphRevision == recoveryRevision {
+			state.GraphRevision++
+		}
 		if err := saveState(dir, &state); err != nil {
 			return errors.New("cannot persist interrupted sessions")
 		}

@@ -22,12 +22,15 @@ function projectRuntimeState(project: Project, sessions: Session[]) {
   return { state, label: '' };
 }
 
-export function ProjectRail({ projects, sessions, activeId, onSelect, onEdit, onRemove, onAdd, onSettings, adding = false }: {
+export function ProjectRail({ projects, sessions, activeId, onSelect, onEdit, onRemove, onReorder, onAdd, onSettings, adding = false }: {
   projects: Project[]; sessions: Session[]; activeId: string; onSelect: (project: Project) => void; onEdit: (project: Project) => void; onAdd: () => void; adding?: boolean;
   onRemove: (project: Project) => Promise<string | null>;
+  onReorder: (project: Project, beforeId: string) => Promise<boolean>;
   onSettings: () => void;
 }) {
   const [contextMenu, setContextMenu] = useState<{ projectId: string; x: number; y: number } | null>(null);
+  const [dragging, setDragging] = useState('');
+  const [dropTarget, setDropTarget] = useState<{ id: string; edge: 'before' | 'after' } | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -44,9 +47,27 @@ export function ProjectRail({ projects, sessions, activeId, onSelect, onEdit, on
       return <ProjectActionsMenu key={project.id} project={project} onEdit={onEdit} onRemove={onRemove}
       open={contextMenu?.projectId === project.id} position={contextMenu?.projectId === project.id ? contextMenu : undefined}
       onOpenChange={open => { if (!open) setContextMenu(current => current?.projectId === project.id ? null : current); }}
-      trigger={props => <button {...props} className={`project-icon status-${runtime.state} ${project.id === activeId ? 'is-active' : ''}`}
+      trigger={props => <button {...props} draggable={!adding} className={`project-icon status-${runtime.state} ${project.id === activeId ? 'is-active' : ''} ${dragging === project.id ? 'is-dragging' : ''} ${dropTarget?.id === project.id ? `is-drop-${dropTarget.edge}` : ''}`}
       aria-label={`Switch to ${project.name}${runtime.label ? `, ${runtime.label}` : ''}`} aria-current={project.id === activeId ? 'page' : undefined}
       title={runtime.label ? `${project.name}: ${runtime.label}` : project.name} onClick={() => { setContextMenu(null); onSelect(project); }}
+      onDragStart={event => { setContextMenu(null); setDragging(project.id); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-klm-project', project.id); }}
+      onDragEnd={() => { setDragging(''); setDropTarget(null); }}
+      onDragOver={event => {
+        if (!dragging || dragging === project.id) return;
+        event.preventDefault(); event.dataTransfer.dropEffect = 'move';
+        const bounds = event.currentTarget.getBoundingClientRect();
+        setDropTarget({ id: project.id, edge: event.clientY < bounds.top + bounds.height / 2 ? 'before' : 'after' });
+      }}
+      onDrop={event => {
+        event.preventDefault();
+        if (!dragging || !dropTarget || dropTarget.id !== project.id) return;
+        const moved = projects.find(item => item.id === dragging);
+        const remaining = projects.filter(item => item.id !== dragging);
+        const targetIndex = remaining.findIndex(item => item.id === project.id);
+        if (!moved || targetIndex < 0) return;
+        const beforeId = dropTarget.edge === 'before' ? project.id : remaining[targetIndex + 1]?.id ?? '';
+        setDropTarget(null); void onReorder(moved, beforeId);
+      }}
       onContextMenu={event => {
         event.preventDefault(); event.currentTarget.focus();
         const rect = event.currentTarget.getBoundingClientRect();

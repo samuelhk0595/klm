@@ -237,6 +237,9 @@ func changedEvents(before, after []Event, revision uint64) ([]EventChange, bool)
 }
 
 func (a *app) recordHistoryLocked(before diskState) {
+	if a.historyJournal == nil {
+		a.historyJournal = map[string]*sessionJournal{}
+	}
 	revision := a.state.GraphRevision
 	beforeSessions := make(map[string]Session, len(before.Sessions))
 	for _, session := range before.Sessions {
@@ -343,6 +346,6 @@ func parseEventRevision(r *http.Request) (uint64, bool) {
 	if value == "" {
 		return 0, false
 	}
-	revision, _ := strconv.ParseUint(value, 10, 64)
-	return revision, true
+	revision, err := strconv.ParseUint(value, 10, 64)
+	return revision, err == nil
 }

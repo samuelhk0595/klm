@@ -217,6 +217,94 @@ func validIcon(icon string) bool {
 	return err == nil
 }
 
+type listPosition struct {
+	BeforeID string `json:"beforeId"`
+}
+
+func moveProjectBefore(projects []Project, id, beforeID string) []Project {
+	index := -1
+	for i := range projects {
+		if projects[i].ID == id {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return projects
+	}
+	moved := projects[index]
+	projects = append(projects[:index], projects[index+1:]...)
+	insert := len(projects)
+	if beforeID != "" {
+		for i := range projects {
+			if projects[i].ID == beforeID {
+				insert = i
+				break
+			}
+		}
+	}
+	projects = append(projects, Project{})
+	copy(projects[insert+1:], projects[insert:])
+	projects[insert] = moved
+	return projects
+}
+
+func moveStringBefore(values []string, value, before string) []string {
+	index := -1
+	for i := range values {
+		if values[i] == value {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return values
+	}
+	moved := values[index]
+	values = append(values[:index], values[index+1:]...)
+	insert := len(values)
+	if before != "" {
+		for i := range values {
+			if values[i] == before {
+				insert = i
+				break
+			}
+		}
+	}
+	values = append(values, "")
+	copy(values[insert+1:], values[insert:])
+	values[insert] = moved
+	return values
+}
+
+func moveSessionBefore(sessions []Session, id, beforeID string) []Session {
+	index := -1
+	for i := range sessions {
+		if sessions[i].ID == id {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return sessions
+	}
+	moved := sessions[index]
+	sessions = append(sessions[:index], sessions[index+1:]...)
+	insert := len(sessions)
+	if beforeID != "" {
+		for i := range sessions {
+			if sessions[i].ID == beforeID {
+				insert = i
+				break
+			}
+		}
+	}
+	sessions = append(sessions, Session{})
+	copy(sessions[insert+1:], sessions[insert:])
+	sessions[insert] = moved
+	return sessions
+}
+
 func (a *app) createProject(w http.ResponseWriter, r *http.Request) {
 	var body struct{ Name, Folder, Icon string }
 	if !decode(w, r, &body) {
@@ -261,12 +349,16 @@ func (a *app) createProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) updateProject(w http.ResponseWriter, r *http.Request) {
-	var body struct{ Name, Icon *string }
+	var body struct {
+		Name     *string       `json:"name"`
+		Icon     *string       `json:"icon"`
+		Position *listPosition `json:"position"`
+	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if body.Name == nil && body.Icon == nil {
-		fail(w, 400, "Provide a project name or icon to update.")
+	if body.Name == nil && body.Icon == nil && body.Position == nil {
+		fail(w, 400, "Provide a project name, icon, or position to update.")
 		return
 	}
 	if body.Name != nil {
@@ -288,6 +380,13 @@ func (a *app) updateProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "Project not found.")
 		return
 	}
+	if body.Position != nil && body.Position.BeforeID != "" {
+		before := a.state.project(body.Position.BeforeID)
+		if before == nil || before.Removed {
+			fail(w, 400, "Position target must be an existing project.")
+			return
+		}
+	}
 	if err := a.commitLocked(func(d *diskState) {
 		p := d.project(id)
 		if body.Name != nil {
@@ -295,6 +394,9 @@ func (a *app) updateProject(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Icon != nil {
 			p.Icon = *body.Icon
+		}
+		if body.Position != nil && body.Position.BeforeID != id {
+			d.Projects = moveProjectBefore(d.Projects, id, body.Position.BeforeID)
 		}
 	}); err != nil {
 		fail(w, 503, err.Error())
@@ -371,12 +473,15 @@ func (a *app) patchFolder(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Name     string `json:"name"`
 		Archived *bool  `json:"archived"`
+		Position *struct {
+			Before string `json:"before"`
+		} `json:"position"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if body.Archived == nil {
-		fail(w, 400, "Provide archived to update the folder.")
+	if body.Archived == nil && body.Position == nil {
+		fail(w, 400, "Provide archived or position to update the folder.")
 		return
 	}
 	a.mu.Lock()
@@ -404,21 +509,45 @@ func (a *app) patchFolder(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	if isArchived != *body.Archived {
+	if body.Position != nil {
+		if isArchived {
+			fail(w, 400, "Archived folders cannot be reordered.")
+			return
+		}
+		if body.Position.Before != "" {
+			beforeFound := false
+			for _, folder := range p.Folders {
+				if folder == body.Position.Before && !folderArchived(p, folder) {
+					beforeFound = true
+					break
+				}
+			}
+			if !beforeFound {
+				fail(w, 400, "Position target must be an active session folder.")
+				return
+			}
+		}
+	}
+	if (body.Archived != nil && isArchived != *body.Archived) || body.Position != nil {
 		id := p.ID
 		if err := a.commitLocked(func(d *diskState) {
 			project := d.project(id)
-			if *body.Archived {
-				project.ArchivedFolders = append(project.ArchivedFolders, name)
-				return
-			}
-			folders := project.ArchivedFolders[:0]
-			for _, folder := range project.ArchivedFolders {
-				if folder != name {
-					folders = append(folders, folder)
+			if body.Archived != nil {
+				if *body.Archived {
+					project.ArchivedFolders = append(project.ArchivedFolders, name)
+				} else {
+					folders := project.ArchivedFolders[:0]
+					for _, folder := range project.ArchivedFolders {
+						if folder != name {
+							folders = append(folders, folder)
+						}
+					}
+					project.ArchivedFolders = folders
 				}
 			}
-			project.ArchivedFolders = folders
+			if body.Position != nil && body.Position.Before != name {
+				project.Folders = moveStringBefore(project.Folders, name, body.Position.Before)
+			}
 		}); err != nil {
 			fail(w, 503, err.Error())
 			return
@@ -507,12 +636,16 @@ func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
 		Title     *string `json:"title"`
 		Workspace *string `json:"workspace"`
 		Archived  *bool   `json:"archived"`
+		Position  *struct {
+			Workspace string `json:"workspace"`
+			BeforeID  string `json:"beforeId"`
+		} `json:"position"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if body.Title == nil && body.Workspace == nil && body.Archived == nil {
-		fail(w, 400, "Provide title, workspace, or archived.")
+	if body.Title == nil && body.Workspace == nil && body.Archived == nil && body.Position == nil {
+		fail(w, 400, "Provide title, workspace, archived, or position.")
 		return
 	}
 	a.mu.Lock()
@@ -524,6 +657,10 @@ func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Archived != nil && s.ParentID != "" {
 		fail(w, 400, "Only top-level sessions can be archived.")
+		return
+	}
+	if body.Position != nil && (s.ParentID != "" || s.Role == "graph_node" || s.Archived) {
+		fail(w, 400, "Only active top-level sessions can be reordered.")
 		return
 	}
 	title, group := s.Title, s.Workspace
@@ -542,12 +679,33 @@ func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if body.Position != nil {
+		group, ok = workspace(a.state.project(s.ProjectID), body.Position.Workspace)
+		if !ok {
+			fail(w, 400, "Position workspace must be Ungrouped or an existing project folder name.")
+			return
+		}
+		if body.Workspace != nil && group != strings.TrimSpace(*body.Workspace) {
+			fail(w, 400, "Workspace and position workspace must match.")
+			return
+		}
+		if body.Position.BeforeID != "" {
+			before := a.state.session(body.Position.BeforeID)
+			if before == nil || before.ID == s.ID || before.ProjectID != s.ProjectID || before.ParentID != "" || before.Role == "graph_node" || before.Archived || before.Workspace != group {
+				fail(w, 400, "Position target must be another active session in the destination folder.")
+				return
+			}
+		}
+	}
 	id := s.ID
 	if err := a.commitLocked(func(d *diskState) {
 		s := d.session(id)
 		s.Title, s.Workspace, s.UpdatedAt = title, group, now()
 		if body.Archived != nil {
 			s.Archived = *body.Archived
+		}
+		if body.Position != nil {
+			d.Sessions = moveSessionBefore(d.Sessions, id, body.Position.BeforeID)
 		}
 	}); err != nil {
 		fail(w, 503, err.Error())

@@ -20,7 +20,7 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
 .workspace-folder svg { color: var(--color-faint); }
 .workspace-folder .accent { color: var(--color-accent); }
 .session-list { padding: 4px 4px 4px 16px; }
-.session-row { display: flex; align-items: center; min-width: 0; border-radius: 6px; }
+.session-row { position: relative; display: flex; align-items: center; min-width: 0; border-radius: 6px; }
 .session-row > .session-item { flex: 1; min-width: 0; }
 .session-row > .menu-anchor, .session-row > .icon-button { flex-shrink: 0; }
 .session-row > :is(.menu-anchor, .icon-button) .icon-button, .session-row > .icon-button { width: 26px; height: 26px; min-height: 26px; }
@@ -29,6 +29,9 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
 .session-row:not(:hover):not(:focus-within):not(.has-open-menu) .session-runtime-led { transform: translateX(25px); }
 .session-row[draggable="true"] { cursor: grab; }
 .session-row.is-dragging { opacity: .45; }
+.session-row.is-drop-before::before, .session-row.is-drop-after::after { position: absolute; z-index: 2; left: 4px; right: 4px; height: 2px; border-radius: 2px; background: var(--color-accent); content: ''; pointer-events: none; }
+.session-row.is-drop-before::before { top: -1px; }
+.session-row.is-drop-after::after { bottom: -1px; }
 .session-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; width: 100%; padding: 7px 8px; border: 0; border-radius: 6px; background: transparent; text-align: left; }
 .session-item:disabled { color: var(--color-muted); cursor: default; }
 .session-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -293,7 +296,11 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
 .project-rail-footer { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--color-border); width: 100%; flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .rail-brand { min-height: 32px; display: flex; align-items: center; justify-content: center; margin-bottom: 4px; }
 .project-icons { display: flex; flex-direction: column; align-items: center; gap: 12px; width: 100%; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; padding: 4px 0; }
-.project-icon { width: 36px; height: 36px; flex-shrink: 0; padding: 3px; border: 1px solid transparent; border-radius: 10px; background: var(--color-subtle); color: var(--color-muted); font-size: 11px; font-weight: 600; }
+.project-icon { position: relative; width: 36px; height: 36px; flex-shrink: 0; padding: 3px; border: 1px solid transparent; border-radius: 10px; background: var(--color-subtle); color: var(--color-muted); font-size: 11px; font-weight: 600; cursor: grab; }
+.project-icon.is-dragging { opacity: .45; }
+.project-icon.is-drop-before::before, .project-icon.is-drop-after::after { position: absolute; z-index: 2; left: 2px; right: 2px; height: 2px; border-radius: 2px; background: var(--color-accent); content: ''; pointer-events: none; }
+.project-icon.is-drop-before::before { top: -7px; }
+.project-icon.is-drop-after::after { bottom: -7px; }
 .project-icon img { display: block; width: 100%; height: 100%; border-radius: 6px; object-fit: cover; }
 .project-icon:hover { background: var(--color-selected); }
 .project-icons > .menu-anchor { flex-shrink: 0; }
@@ -322,6 +329,12 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
 .project-settings-button { width: 28px; height: 28px; min-height: 28px; }
 .project-folder-label { padding: 0 16px; margin: -6px 0 16px; font-size: 11px; color: var(--color-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
 .workspace-heading-actions, .workspace-folder-row { display: flex; align-items: center; }
+.workspace-folder-row { position: relative; }
+.workspace-folder[draggable="true"] { cursor: grab; }
+.workspace-folder-row.is-dragging { opacity: .45; }
+.workspace-folder-row.is-drop-before::before, .workspace-folder-row.is-drop-after::after { position: absolute; z-index: 2; left: 4px; right: 4px; height: 2px; border-radius: 2px; background: var(--color-accent); content: ''; pointer-events: none; }
+.workspace-folder-row.is-drop-before::before { top: -1px; }
+.workspace-folder-row.is-drop-after::after { bottom: -1px; }
 .workspace-folder-row .workspace-folder { min-width: 0; overflow-wrap: anywhere; }
 .workspace-folder-row > .icon-button { width: 28px; min-height: 28px; height: 28px; }
 .workspace-folder-row > .menu-anchor { flex-shrink: 0; }
