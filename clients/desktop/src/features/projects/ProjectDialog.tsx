@@ -5,7 +5,7 @@ import { pickDirectory, type Project } from '../../engine';
 
 export function ProjectDialog({ initialFolder, project, onSave, onClose }: {
   initialFolder: string; project?: Project;
-  onSave: (project: Omit<Project, 'id' | 'folders'>) => Promise<string | null>; onClose: () => void;
+  onSave: (project: Omit<Project, 'id' | 'folders' | 'archivedFolders'>) => Promise<string | null>; onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [name, setName] = useState(project?.name ?? initialFolder.split(/[\\/]/).filter(Boolean).pop() ?? '');

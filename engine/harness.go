@@ -239,7 +239,6 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true}
 	if s.Role != "graph_node" {
 		p.runtime = a.beginSessionRuntime(s.ID)
-		defer p.runtime.finishTurn()
 	}
 	p.graph = graphBinding(t)
 	defer UnbindGraphAdapter(t)
@@ -305,10 +304,14 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	}
 	// Drain text before final results, consultation answers and graph completion
 	// read the durable session, including when the harness failed or was stopped.
+	err = errors.Join(err, p.closeSubagents(err != nil || p.failed, t.ctx.Err() != nil))
 	err = errors.Join(err, p.stream.close())
 	graphResult := p.finishGraphAdapter(err)
 	if p.graphNode() && graphResult.Error != nil {
 		err = graphResult.Error
+	}
+	if p.runtime != nil {
+		p.runtime.finishTurn()
 	}
 	a.mu.Lock()
 	finalErr := a.commitLocked(func(d *diskState) {
@@ -316,6 +319,15 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 		s.Status, s.UpdatedAt = "idle", now()
 		s.Permissions = nil
 		s.Questions = nil
+		if t.ctx.Err() != nil || err != nil || p.failed || !p.completed {
+			pauseMessageQueue(s, "Execution stopped. Send queued messages when ready.")
+		} else {
+			for i := range s.Queue {
+				if s.Queue[i].Status == "sending" {
+					s.Queue[i].Status, s.Queue[i].Error = "uncertain", "Delivery was not confirmed. Check the conversation before sending again."
+				}
+			}
+		}
 		var last Event
 		switch {
 		case t.ctx.Err() != nil:
@@ -428,6 +440,8 @@ type adapter struct {
 	keys               map[string]string
 	toolNames          map[string]string
 	commands           map[string]string
+	subagents          map[string]*adapter
+	subagent           bool
 	piMessage          int
 	failed             bool
 	completed          bool

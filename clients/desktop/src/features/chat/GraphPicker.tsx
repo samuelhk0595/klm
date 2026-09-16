@@ -21,7 +21,7 @@ export function GraphPicker({ graphs, value, selectedName, running = false, disa
   const options = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const selected = graphs.find(graph => graph.id === value);
-  const label = selectedName ?? selected?.name ?? (value || 'Select graph');
+  const label = selectedName ?? selected?.name ?? (value || 'none');
   const searchable = graphs.length > 5;
   const query = searchable ? search.trim().toLowerCase() : '';
   const matches = graphs.filter(graph => `${graph.name} ${graph.description}`.toLowerCase().includes(query));
