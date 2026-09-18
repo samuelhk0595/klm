@@ -90,6 +90,7 @@ type openCodeHTTP struct {
 }
 
 type openCodeServer struct {
+	mcpPrefixes  []string
 	h            *openCodeHTTP
 	transport    *http.Transport
 	owner        *ownedProcess
@@ -495,6 +496,7 @@ func (p *adapter) startOpenCodeServer(b binary, cwd string, ctx context.Context)
 	if str(object(bridgeStatus["klm_linked"]), "status") != "connected" {
 		return failed(errors.New("OpenCode did not connect to the linked-agent bridge."))
 	}
+	server.mcpPrefixes = openCodeMCPToolPrefixes(bridgeStatus)
 	if err := p.bridge.waitReady(ctx); err != nil {
 		return failed(err)
 	}
@@ -542,6 +544,9 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 		}
 	}
 	h, owner := server.h, server.owner
+	p.app.mu.Lock()
+	p.openCodeMCPPrefixes = server.mcpPrefixes
+	p.app.mu.Unlock()
 	processDone, outputFailed := server.processDone, server.outputFailed
 	p.processesDrained = false
 	sessionID := ""
@@ -748,7 +753,8 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			command = strings.Join(patterns, "\n")
 		}
 		req := Permission{
-			ID: newID(), Harness: p.harness, Kind: kind, Title: "Allow " + kind,
+			mcpTool: p.isOpenCodeMCPTool(kind),
+			ID:      newID(), Harness: p.harness, Kind: kind, Title: "Allow " + kind,
 			Description: strings.TrimSpace(description), Patterns: patterns,
 			Details: metadata, Command: command, AllowLabel: "Allow", CreatedAt: now(), SourceID: id,
 		}

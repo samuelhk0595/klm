@@ -31,6 +31,19 @@ Initial defaults for understood operations:
 | Identified deletion | Ask | Deny |
 | Small set of exact read-oriented commands | Allow at workspace root | Ask |
 | Unknown command/tool | Ask | Ask |
+| Skill loading and reads of installed skill resources | Allow | Allow |
+| Identified MCP tool invocation | Allow | Allow |
+
+Skill/MCP allowances apply in normal mode, after explicit saved rules, without
+enabling YOLO. OpenCode MCP identity comes from the owned server's registered MCP
+namespaces, including names without an `mcp_` prefix. Skills are recognized through
+the native `skill` tool or read operations under the standard project/user skill
+directories (`.agents/skills`, `.claude/skills`, `.opencode/skills`, user
+`.config/opencode/skills`, `.codex/skills`, and Pi skill directories). Loading a
+skill does not approve subsequent commands or writes requested by that skill.
+Codex's supported, empty MCP tool-approval forms are automatically accepted; forms
+asking for user input are not answered automatically. Pi currently runs with external
+extensions disabled; this policy does not add an external MCP transport to Pi.
 
 The workspace is the actual execution directory, including a graph worktree.
 Resolved paths, existing ancestors and symlinks/junctions are considered before

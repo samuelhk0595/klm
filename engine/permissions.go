@@ -10,6 +10,7 @@ import (
 )
 
 type Permission struct {
+	mcpTool     bool           // Adapter-confirmed MCP identity; never inferred from tool arguments.
 	ID          string         `json:"id"`
 	Harness     string         `json:"harness"`
 	Kind        string         `json:"kind"`

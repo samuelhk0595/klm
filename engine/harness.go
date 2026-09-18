@@ -443,31 +443,32 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 }
 
 type adapter struct {
-	yolo               bool
-	cwd                string
-	gatedPermissions   map[string]string // Protected by app.mu; native call -> tool.
-	stream             *streamBatch
-	graph              *graphAdapterBinding
-	nativeSettled      bool
-	choiceToolSettled  bool
-	processesDrained   bool
-	processDrainFailed bool
-	bridge             *linkedBridge
-	runtime            *sessionRuntime
-	app                *app
-	turn               *turn
-	id                 string
-	harness            string
-	keys               map[string]string
-	toolNames          map[string]string
-	commands           map[string]string
-	subagents          map[string]*adapter
-	subagent           bool
-	piMessage          int
-	failed             bool
-	completed          bool
-	model              string
-	effort             string
+	yolo                bool
+	cwd                 string
+	gatedPermissions    map[string]string // Protected by app.mu; native call -> tool.
+	openCodeMCPPrefixes []string          // Protected by app.mu; discovered server namespaces.
+	stream              *streamBatch
+	graph               *graphAdapterBinding
+	nativeSettled       bool
+	choiceToolSettled   bool
+	processesDrained    bool
+	processDrainFailed  bool
+	bridge              *linkedBridge
+	runtime             *sessionRuntime
+	app                 *app
+	turn                *turn
+	id                  string
+	harness             string
+	keys                map[string]string
+	toolNames           map[string]string
+	commands            map[string]string
+	subagents           map[string]*adapter
+	subagent            bool
+	piMessage           int
+	failed              bool
+	completed           bool
+	model               string
+	effort              string
 }
 
 func object(value any) map[string]any {

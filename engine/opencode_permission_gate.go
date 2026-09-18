@@ -5,7 +5,37 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 )
+
+func openCodeMCPToolPrefixes(servers map[string]any) []string {
+	var prefixes []string
+	for name := range servers {
+		if name == "" {
+			continue
+		}
+		// Native McpCatalog.toolName: sanitized server name + '_' + tool name.
+		name = strings.Map(func(r rune) rune {
+			if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' || r == '-' {
+				return r
+			}
+			return '_'
+		}, name)
+		prefixes = append(prefixes, name+"_")
+	}
+	return prefixes
+}
+
+func (p *adapter) isOpenCodeMCPTool(tool string) bool {
+	p.app.mu.Lock()
+	defer p.app.mu.Unlock()
+	for _, prefix := range p.openCodeMCPPrefixes {
+		if strings.HasPrefix(tool, prefix) && len(tool) > len(prefix) {
+			return true
+		}
+	}
+	return false
+}
 
 func (p *adapter) openCodePermissionGate(ctx context.Context, raw json.RawMessage) (bool, error) {
 	var call struct {
@@ -33,6 +63,7 @@ func (p *adapter) openCodePermissionGate(ctx context.Context, raw json.RawMessag
 	req := Permission{SourceID: "preflight:" + key, Kind: call.Tool, Title: "Allow " + call.Tool,
 		Patterns: []string{string(encoded)}, Command: str(call.Input, "command"), Path: call.Cwd,
 		Details: map[string]any{"toolName": call.Tool, "input": call.Input, "cwd": call.Cwd}}
+	req.mcpTool = p.isOpenCodeMCPTool(call.Tool)
 	if call.Tool == "bash" {
 		if workdir := str(call.Input, "workdir"); workdir != "" {
 			req.Path = workdir
@@ -87,6 +118,6 @@ func (p *adapter) openCodePermissionApproved(properties map[string]any) bool {
 	if tool == "" {
 		return false
 	}
-	return kind == tool || kind == "external_directory" && slices.Contains([]string{"read", "write", "edit", "apply_patch", "bash", "glob", "grep", "list"}, tool) ||
+	return kind == tool || kind == "external_directory" && slices.Contains([]string{"read", "write", "edit", "apply_patch", "bash", "glob", "grep", "list", "skill"}, tool) ||
 		kind == "edit" && slices.Contains([]string{"write", "edit", "apply_patch"}, tool)
 }

@@ -105,8 +105,36 @@ func npmReadRoot(cwd, path string) string {
 	return ""
 }
 
+// Skills are also loaded through ordinary read tools (notably by Pi). Permit
+// reading their installed resources, never writes or commands merely located
+// inside one of these directories.
+func skillReadPath(cwd, path string) bool {
+	roots := []string{}
+	for _, relative := range []string{".agents/skills", ".claude/skills", ".opencode/skills", ".opencode/skill", ".pi/skills"} {
+		if filepath.IsAbs(cwd) {
+			roots = append(roots, filepath.Join(cwd, filepath.FromSlash(relative)))
+		}
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, relative := range []string{".agents/skills", ".claude/skills", ".codex/skills", ".config/opencode/skills", ".config/opencode/skill", ".pi/agent/skills"} {
+			roots = append(roots, filepath.Join(home, filepath.FromSlash(relative)))
+		}
+	}
+	for _, root := range roots {
+		if resolved, ok := permissionPath("", root); ok && permissionWithin(resolved, path) {
+			return true
+		}
+	}
+	return false
+}
+
 func permissionFactsFor(req Permission, harness, cwd string) permissionFacts {
 	f := permissionFacts{dangerous: destructiveCommand.MatchString(req.Command)}
+	if (harness == "opencode" || harness == "pi") && (req.Kind == "skill" || str(req.Details, "toolName") == "skill") ||
+		harness == "opencode" && req.mcpTool || harness == "codex" && req.Kind == "mcp" {
+		f.decision = "allow"
+		return f
+	}
 	if req.Command != "" {
 		tool := str(req.Details, "toolName")
 		if tool != "" && tool != "bash" && tool != "shell" {
@@ -238,7 +266,7 @@ func permissionFactsFor(req Permission, harness, cwd string) permissionFacts {
 	if !ok {
 		return f
 	}
-	allInside, outside, resources := true, false, []string{}
+	allInside, allReadAllowed, outside, resources := true, true, false, []string{}
 	for _, path := range paths {
 		resolved, ok := permissionPath(cwd, path)
 		if !ok {
@@ -246,6 +274,7 @@ func permissionFactsFor(req Permission, harness, cwd string) permissionFacts {
 		}
 		inside := permissionWithin(root, resolved)
 		allInside, outside = allInside && inside, outside || !inside
+		allReadAllowed = allReadAllowed && f.operation == "read" && (inside || skillReadPath(cwd, resolved))
 		resource := resolved
 		if f.operation == "read" {
 			if npm := npmReadRoot(cwd, resolved); npm != "" {
@@ -268,7 +297,7 @@ func permissionFactsFor(req Permission, harness, cwd string) permissionFacts {
 	}
 	if outside && f.operation != "read" {
 		f.decision = "deny"
-	} else if allInside && !f.dangerous {
+	} else if (allInside || allReadAllowed) && !f.dangerous {
 		f.decision = "allow"
 	}
 	return f

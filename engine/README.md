@@ -562,8 +562,8 @@ them. Turn completion, not process exit, ends execution.
 
 Command and file-change requests receive accept/decline only. Permission-profile
 requests preserve all requested access and deny entries; native grants have a
-minimum **turn** lifetime, labeled in the UI. Recognized empty MCP approval forms
-support one-shot consent only when resource identity is ambiguous. Unsupported
+minimum **turn** lifetime, labeled in the UI. Recognized empty MCP tool-approval
+forms receive automatic one-shot approval under normal policy. Unsupported
 forms, URLs, legacy/dynamic-tool requests are declined or failed, never
 answered affirmatively. No native session or global policy amendments are used.
 
@@ -669,9 +669,10 @@ before its existing readiness notification. Linked communication tools bypass Pi
 redundant per-tool permission dialog. Codex automatically accepts native tool-call
 approval forms for the ready, turn-owned `klm_linked` bridge; OpenCode automatically
 replies `once` to permission requests matching its four exact internal tool names.
-These internal operations never create permission cards or remembered grants. The
-policy does not apply to other MCP servers or arbitrary elicitation forms, and
-filesystem/shell tools remain gated. No user/global
+These internal operations never create permission cards or remembered grants.
+External MCP tool invocations and skill loading also default to automatic approval,
+subject to saved rules (see `PERMISSIONS.md`). MCP forms requiring user input are
+not auto-answered; filesystem/shell tools keep their operation-specific policy. No user/global
 installation or native transcript-format translation is required.
 
 The installed versions inspected for this feature were OpenCode 1.18.30 and Codex

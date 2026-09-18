@@ -129,6 +129,11 @@ Explicit denies win over remembered allows. Known destructive requests carry a
 small warning icon. Pi and an owned OpenCode pre-tool plugin evaluate workspace
 policy before execution; Codex uses the requests and sandbox controls it exposes.
 Native grant lifetimes and unsupported forms retain their actual semantics.
+Skill loading and identified MCP tool calls are automatically approved by the
+engine's normal policy, without requiring YOLO. Standard installed skill-resource
+reads are included; subsequent file changes and shell commands use their own policy.
+Explicit saved denies still apply. Questions and MCP forms requiring user input
+are not answered by this automatic tool approval.
 
 The composer's vertical-ellipsis menu, immediately left of the harness/model
 selector, initially contains only **YOLO mode**. YOLO is persisted per conversation,
@@ -246,8 +251,9 @@ either agent can retrieve more messages or consult the other. No generated summa
 or native fork is required. Starting without a selection provides the same tools.
 
 KLM's internal linked-conversation tools are automatically allowed on its owned
-bridge. They do not require user permission cards or remembered grants. Other
-MCP servers, filesystem actions, and command execution retain their permission flow.
+bridge. They do not require user permission cards or remembered grants. Identified
+external MCP tool calls use the normal automatic-approval policy; filesystem actions
+and command execution retain their permission flow.
 
 Consultations run in the recipient's actual native conversation and enter its
 native history. The engine distinguishes them from user turns and groups their
