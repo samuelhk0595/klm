@@ -113,7 +113,7 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, err
         </fieldset>}
         <MessageQueue key={`queue/${session.id}`} session={session} disabled={disconnected || pending} onSnapshot={onSnapshot} />
         <MessageComposer key={session.id} projectId={session.projectId} placeholder="Message the side agent" draft={draft} onDraftChange={onDraftChange} onSend={onSend} onStop={onStop} disabled={disconnected || pending} running={running}
-          modelControl={<ModelPicker key={`${session.id}/${session.harness}`} session={session} disabled={disabled} onSave={onModel} />} />
+          modelControl={<ModelPicker key={`${session.id}/${session.harness}`} session={session} disabled={disabled} onSave={onModel} onSnapshot={onSnapshot} />} />
         <SessionStatusBar session={session} side />
       </div>}
     </aside>

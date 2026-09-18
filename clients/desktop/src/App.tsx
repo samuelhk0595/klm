@@ -1,8 +1,7 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Download, Focus, GitBranch, PanelLeft, PanelRight, X } from 'lucide-react';
-import { configureEngineURL, IS_DESKTOP, openFocus, startWindowDrag } from './platform';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Focus, GitBranch, PanelLeft, PanelRight } from 'lucide-react';
+import { IS_DESKTOP, openFocus, startWindowDrag } from './platform';
 import { Button, IconButton } from './design-system/Button';
-import { Input } from './design-system/Input';
 import { Badge } from './design-system/Badge';
 import { TabNav } from './design-system/TabNav';
 import { WorkspaceSidebar } from './features/workspace/WorkspaceSidebar';
@@ -25,8 +24,10 @@ import { MessageComposer, type ComposerDraft, type SendMode } from './features/c
 import { DesignSystem } from './DesignSystem';
 import { ProjectRail } from './features/projects/ProjectRail';
 import { ProjectDialog } from './features/projects/ProjectDialog';
+import { SettingsDialog } from './features/settings/SettingsDialog';
 import { ENGINE_URL, getConversationGraph, mergeGraphState, selectConversationGraph, request, type ConversationGraphState, type EngineEvent, type EngineState, type EngineSnapshot, type EventPage, type Harness, type Project, type Session, type SessionResponse, type SessionMetadata, type SourceReference } from './engine';
 import { Select } from './design-system/Select';
+import paperBoatIcon from './features/projects/paper-boat-rail.png';
 
 const GraphView = lazy(() => import('./features/graphs/GraphView').then(module => ({ default: module.GraphView })));
 type SessionTab = 'chat' | 'graph' | `subagent:${string}`;
@@ -140,18 +141,7 @@ export function App() {
   const [sideErrors, setSideErrors] = useState<Record<string, string>>({});
   const openingSide = useRef(new Set<string>());
   const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>({});
-  const settings = useRef<HTMLDialogElement>(null);
-  const [settingsEngineURL, setSettingsEngineURL] = useState(ENGINE_URL);
-  const [settingsError, setSettingsError] = useState('');
-  function connectEngine(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    try {
-      configureEngineURL(settingsEngineURL);
-      window.location.reload();
-    } catch (error) {
-      setSettingsError(error instanceof Error ? error.message : 'Enter a valid engine URL.');
-    }
-  }
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const shell = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; minX: number; maxX: number; minY: number; maxY: number } | null>(null);
   useEffect(() => {
@@ -606,7 +596,7 @@ export function App() {
     onLostPointerCapture={() => { drag.current = null; if (shell.current) delete shell.current.dataset.dragging; }}
     onPointerCancel={() => { drag.current = null; if (shell.current) delete shell.current.dataset.dragging; }}
   >
-    <ProjectRail projects={projects} sessions={sessions} activeId={project?.id ?? ''} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onReorder={reorderProject} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); setSettingsEngineURL(ENGINE_URL); setSettingsError(''); settings.current?.showModal(); }} />
+    <ProjectRail projects={projects} sessions={sessions} activeId={project?.id ?? ''} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onReorder={reorderProject} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />
     {sidebarOpen && <button className="panel-backdrop" aria-label="Close side panel" onClick={() => setSidebarOpen(false)} />}
     {project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} collapsed={collapsedFolders[project.id] ?? []} archivedCollapsed={collapsedArchivedProjects.includes(project.id)} onCollapsedChange={folders => setWorkspaceNavigation(current => ({ ...current, collapsedFolders: { ...current.collapsedFolders, [project.id]: folders } }))} onArchivedCollapsedChange={collapsed => setWorkspaceNavigation(current => ({ ...current, collapsedArchivedProjects: collapsed ? [...new Set([...current.collapsedArchivedProjects, project.id])] : current.collapsedArchivedProjects.filter(id => id !== project.id) }))} onNew={newSession} onCreateFolder={createFolder} onRename={setRenamingSession} onPosition={async (target, workspace, beforeId) => (await patchSession(target, { position: { workspace, beforeId } })) === null} onReorderFolder={reorderFolder} onArchiveSession={async (target, archived) => (await patchSession(target, { archived })) === null} onArchiveFolder={archiveFolder} onSelect={id => { navigation.current += 1; setWorkspaceNavigation(current => ({ ...current, selectedSessions: { ...current.selectedSessions, [project.id]: id } })); setView('chat'); setSidebarOpen(false); }} onClose={() => setSidebarOpen(false)} onAgents={() => { navigation.current += 1; setAgentsVisit(current => current + 1); setView('agents'); setSidebarOpen(false); }} onGraphs={() => { navigation.current += 1; setGraphsVisit(current => current + 1); setView('graphs'); setSidebarOpen(false); }} onEditProject={openProjectEditor} onRemoveProject={target => removeProject(target.id)} />}
     <main className="main-panel">
@@ -619,7 +609,7 @@ export function App() {
       {connectionError && <div role="alert" className="storage-error">{connectionError} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}
       {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav<SessionTab> value={view === 'design' ? 'chat' : activeTab} onChange={tab => { setView('chat'); setSessionTabs(current => ({ ...current, [activeId]: tab })); }} items={view === 'chat' ? tabItems : [{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <Select label="Move session to folder" value={session.workspace} disabled={pendingSessions[session.id] || !!connectionError} onChange={event => void patchSession(session, { workspace: event.target.value })}>{[...project.folders.filter(folder => !project.archivedFolders.includes(folder)), 'Ungrouped'].map(folder => <option key={folder} value={folder}>{folder}</option>)}</Select>}</div>}
       {view === 'design' ? <DesignSystem /> : (view === 'agents' || view === 'graphs') && project ? <ProjectAuthoring key={`${project.id}:${view}:${agentsVisit}:${graphsVisit}`} projectId={project.id} area={view} /> : !loaded ? <div className="empty-chat"><h2>{connectionError ? 'Engine disconnected' : 'Connecting to engine...'}</h2></div> : !project ? <div className="empty-chat"><h2>Add a project</h2><Button onClick={() => void openProjectPicker()}>Add project</Button></div> : !session ? <div className="empty-chat"><h2>Create a session</h2><Button onClick={() => newSession()} disabled={!!connectionError}>Create session</Button></div> : <>
-        {activeTab === 'chat' && <ConversationHistory session={session} subagents={sessions.filter(item => item.parentId === activeId && item.role === 'subagent')} working={working} label="Conversation" onSnapshot={receiveSession} onHistory={receiveHistory} onEventChange={receiveEvent} onAskSide={askSide} onOpenSubagent={openSubagent} empty={<div className="empty-chat"><div className="empty-chat-brand" role="img" aria-label="KLM Harness"><span className="empty-chat-wordmark" aria-hidden="true"><span>K</span><span>L</span><span>M</span></span><Badge>Harness</Badge></div><h2>What would you like to work on?</h2></div>} />}
+        {activeTab === 'chat' && <ConversationHistory session={session} subagents={sessions.filter(item => item.parentId === activeId && item.role === 'subagent')} working={working} label="Conversation" onSnapshot={receiveSession} onHistory={receiveHistory} onEventChange={receiveEvent} onAskSide={askSide} onOpenSubagent={openSubagent} empty={<div className="empty-chat"><div className="empty-chat-brand" role="img" aria-label="KLM Harness"><img className="empty-chat-brand-icon" src={paperBoatIcon} alt="" /><span className="empty-chat-wordmark" aria-hidden="true"><span>K</span><span>L</span><span>M</span></span><Badge>Harness</Badge></div><h2>What would you like to work on?</h2></div>} />}
         {activeTab.startsWith('subagent:') && <SubagentView session={activeSubagent} onSnapshot={receiveSession} onHistory={receiveHistory} />}
         {(catalogError || !!catalog?.errors.length) && <div role="alert" className="storage-error">{catalogError || catalog?.errors.join(' ')} <Button size="sm" disabled={catalogLoading} onClick={() => void reloadCatalog().catch(() => {})}>Retry</Button></div>}
         {graphErrors[session.id] && <div role="alert" className="storage-error">{graphErrors[session.id]} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}
@@ -642,7 +632,11 @@ export function App() {
             })}
           </div>}
           <MessageQueue key={`queue/${session.id}`} session={session} disabled={!!connectionError || !!pendingSessions[session.id]} onSnapshot={receiveSession} />
-          <MessageComposer key={session.id} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} disabled={!!connectionError || pendingSessions[session.id]} running={session.status === 'running'} onStop={() => void updateSession(session, 'stop', {})} graphControl={<GraphPicker key={session.id} graphs={catalogGraphs} value={selectedGraphId} selectedName={catalogSelectedGraph?.definition.name ?? selectedGraph?.definition.name} running={graphRunInProgress} disabled={!!connectionError || !!selectingGraphs[session.id] || !session.graph} loading={catalogLoading} error={catalogError || catalog?.errors.join(' ')} onReload={() => void reloadCatalog().catch(() => {})} onChange={graphId => void chooseGraph(session.id, graphId)} />} modelControl={<ModelPicker key={session.id} session={session} disabled={!!connectionError || !!pendingSessions[session.id] || working} onSave={(model, effort) => applyModelSettings(session, model, effort)} />} />
+          <MessageComposer key={session.id} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} onTranscription={text => setDrafts(current => {
+            const draft = current[session.id] ?? { text: '', mentions: [] };
+            const separator = !draft.text || draft.text.endsWith('\n\n') ? '' : draft.text.endsWith('\n') ? '\n' : '\n\n';
+            return { ...current, [session.id]: { ...draft, text: `${draft.text}${separator}${text.trim()}` } };
+          })} disabled={!!connectionError || pendingSessions[session.id]} running={session.status === 'running'} onStop={() => void updateSession(session, 'stop', {})} graphControl={<GraphPicker key={session.id} graphs={catalogGraphs} value={selectedGraphId} selectedName={catalogSelectedGraph?.definition.name ?? selectedGraph?.definition.name} running={graphRunInProgress} disabled={!!connectionError || !!selectingGraphs[session.id] || !session.graph} loading={catalogLoading} error={catalogError || catalog?.errors.join(' ')} onReload={() => void reloadCatalog().catch(() => {})} onChange={graphId => void chooseGraph(session.id, graphId)} />} modelControl={<ModelPicker key={session.id} session={session} disabled={!!connectionError || !!pendingSessions[session.id] || working} onSave={(model, effort) => applyModelSettings(session, model, effort)} onSnapshot={receiveSession} />} />
           <SessionStatusBar session={session} />
         </div>
       </>}
@@ -660,6 +654,6 @@ export function App() {
     {editingProject && <ProjectDialog key={`edit-project:${editingProject.id}`} initialFolder={editingProject.folder} project={editingProject} onSave={input => editProject(editingProject.id, input)} onClose={() => setEditingProject(null)} />}
     {creatingSession && createProject && <CreateSessionDialog project={createProject} harnesses={harnesses} workspace={creatingSession.workspace} onCreate={createSession} onClose={() => { navigation.current += 1; setCreatingSession(null); }} />}
     {renamingSession && <RenameSessionDialog key={renamingSession.id} session={renamingSession} onRename={title => patchSession(renamingSession, { title })} onClose={() => setRenamingSession(null)} />}
-    <dialog ref={settings} aria-label="Settings" className="settings-dialog"><div className="dialog-heading"><h2>Settings</h2><IconButton label="Close settings" onClick={() => settings.current?.close()}><X /></IconButton></div><form className="engine-settings-form" onSubmit={connectEngine}><label htmlFor="engine-url">Engine URL</label><Input id="engine-url" type="text" inputMode="url" required autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="http://localhost:7331" value={settingsEngineURL} aria-invalid={!!settingsError} aria-describedby={settingsError ? 'engine-url-error' : undefined} onChange={event => { setSettingsEngineURL(event.target.value); setSettingsError(''); }} />{settingsError && <p id="engine-url-error" className="form-error" role="alert">{settingsError}</p>}<div className="dialog-actions"><Button variant="primary" type="submit">Connect</Button></div></form><p>Projects and session history are saved locally by the engine. Unsent drafts are kept only until this page reloads.</p><Button onClick={() => { settings.current?.close(); setView('design'); }}>Design system</Button></dialog>
+    {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} onDesignSystem={() => { setSettingsOpen(false); setView('design'); }} />}
   </div>;
 }

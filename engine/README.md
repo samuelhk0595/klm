@@ -576,10 +576,11 @@ mode, or model is changed.
 ## Permission Decisions
 
 Session snapshots include optional pending `permissions` entries with id, harness,
-kind, title, description, patterns, details, decisions, allowLabel, createdAt and
-resolving. IDs bind to the active engine turn and native request. Client payloads
-contain a choice only, never raw native responses. Concurrent/stale decisions are
-rejected; stop and restart invalidate pending requests.
+kind, title, description, patterns, details, normalized command/path when
+available, decisions, allowLabel, createdAt and resolving. IDs bind to the active
+engine turn and native request. Client payloads contain a choice only, never raw
+native responses. Concurrent/stale decisions are rejected; stop and restart
+invalidate pending requests.
 
 - `once`: approve the native request without an engine rule. Codex permission
   profiles last for the current turn, not one operation.
@@ -612,7 +613,11 @@ private fields are masked there but sent to the receiving harness. Its own recor
 or model output may retain/echo values; this is not end-to-end secret redaction.
 
 - OpenCode: handles question.asked/replied/rejected, GET /question reconciliation,
-  and ordered native reply/reject endpoints. Custom entry defaults to allowed;
+  and ordered native reply/reject endpoints. Verified native descendants route
+  requests to the owning conversation even before task metadata arrives; replies
+  retain the native question ID. YOLO does not auto-answer questions. A failed
+  delivery leaves an unresolved question available for manual retry.
+  Custom entry defaults to allowed;
   multiple comes from the request. Native question registration is enabled on the
   owned server. Old CLI-run sessions may still deny question; use a new session
   rather than overriding intentional native permission rules.
@@ -725,9 +730,13 @@ execution, a full suite, or an adversarial review.
   left running become `error` with a durable interruption event. Native harness
   transcripts remain owned/formatted by the harness itself; they are not part of
   the engine JSON transaction, and a stopped turn may have partial native history.
-- Stop/shutdown cancel the direct child and use Windows `taskkill /T /F` on that
-  owned PID only. Unix children use a separate process group. The stop response
-  waits for termination and the durable cancelled snapshot; there is no replay of
+- Stop cancels the turn before persistence and independently terminates the whole
+  conversation runtime: Windows closes its owned Job Object, including native
+  subagents and local tool descendants; Unix signals its owned process groups.
+  Native abort/EOF and pending permissions do not gate process termination. The
+  runtime is discarded and a subsequent turn resumes the stored conversation in
+  a new runtime. The stop response waits for termination and the durable cancelled
+  snapshot; unconfirmed termination is reported as an error. There is no replay of
   the cancelled prompt. Force-killing the engine itself cannot run cleanup and
   may leave external children, which are not blindly killed by PID on restart.
 - Output is consumed concurrently from stdout and stderr. JSON lines are capped

@@ -32,6 +32,9 @@ const openCodeResponseLimit = 32 << 20
 //go:embed opencode-graph-plugin.mjs
 var openCodeGraphPlugin string
 
+//go:embed opencode-permissions-plugin.mjs
+var openCodePermissionsPlugin string
+
 func (p *adapter) openCodeGraphConfig() (string, func(), error) {
 	config := map[string]any{}
 	if existing := os.Getenv("OPENCODE_CONFIG_CONTENT"); strings.TrimSpace(existing) != "" {
@@ -44,9 +47,15 @@ func (p *adapter) openCodeGraphConfig() (string, func(), error) {
 		return "", nil, errors.New("Cannot create the owned graph plugin directory.")
 	}
 	cleanup := func() { _ = os.RemoveAll(dir) }
-	pluginPath := filepath.Join(dir, "graph-gate.mjs")
+	pluginPath := filepath.Join(dir, "klm-policy.mjs")
 	data, _ := json.Marshal(map[string]string{"url": p.bridge.url, "token": p.bridge.token})
 	plugin := strings.Replace(openCodeGraphPlugin, "/*KLM_GRAPH_CONFIG*/{}", string(data), 1)
+	if !p.graphNode() {
+		plugin = "export default async function () { return {}; }"
+	}
+	policyData, _ := json.Marshal(map[string]any{"url": p.bridge.url, "token": p.bridge.token, "yolo": p.yolo})
+	plugin = strings.Replace(plugin, "export default async function", "async function graphPlugin", 1) + "\n" +
+		strings.Replace(openCodePermissionsPlugin, "/*KLM_PERMISSION_CONFIG*/{}", string(policyData), 1)
 	if err := os.WriteFile(pluginPath, []byte(plugin), 0600); err != nil {
 		cleanup()
 		return "", nil, errors.New("Cannot write the owned graph plugin.")
@@ -265,6 +274,33 @@ func (h *openCodeHTTP) walkMessages(ctx context.Context, sessionID string, basel
 	}
 }
 
+// Permission/question events can precede task metadata, or already be pending
+// when we subscribe. Verify native ancestry rather than dropping those requests
+// or trusting every session sharing the server's directory.
+func (h *openCodeHTTP) ownsSession(ctx context.Context, id string, owned map[string]bool) (bool, error) {
+	var ancestors []string
+	seen := map[string]bool{}
+	for id != "" && !seen[id] && len(ancestors) < 32 {
+		if owned[id] {
+			for _, child := range ancestors {
+				owned[child] = true
+			}
+			return true, nil
+		}
+		seen[id] = true
+		ancestors = append(ancestors, id)
+		var session map[string]any
+		if err := h.json(ctx, http.MethodGet, "/session/"+url.PathEscape(id), nil, &session); err != nil {
+			return false, err
+		}
+		if str(session, "id") != id {
+			return false, errors.New("OpenCode returned a different session while resolving request ownership.")
+		}
+		id = str(session, "parentID")
+	}
+	return false, nil
+}
+
 // SSE frames, including multi-line data fields, have the same bound as CLI JSON lines.
 func openCodeEvents(ctx context.Context, body io.Reader, events chan<- map[string]any, failed chan<- error) {
 	scanner := bufio.NewScanner(body)
@@ -330,13 +366,10 @@ func (p *adapter) startOpenCodeServer(b binary, cwd string, ctx context.Context)
 		return errors.New("OpenCode server redirects are not allowed.")
 	}}
 	cleanup := func() {}
-	graphConfig := ""
-	if p.graphNode() {
-		graphConfig, cleanup, err = p.openCodeGraphConfig()
-		if err != nil {
-			transport.CloseIdleConnections()
-			return nil, err
-		}
+	graphConfig, cleanup, err := p.openCodeGraphConfig()
+	if err != nil {
+		transport.CloseIdleConnections()
+		return nil, err
 	}
 	fail := func(err error) (*openCodeServer, error) {
 		transport.CloseIdleConnections()
@@ -348,7 +381,7 @@ func (p *adapter) startOpenCodeServer(b binary, cwd string, ctx context.Context)
 	cmd.Dir = cwd
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
-		if p.graphNode() && strings.EqualFold(key, "OPENCODE_CONFIG_CONTENT") {
+		if strings.EqualFold(key, "OPENCODE_CONFIG_CONTENT") {
 			continue
 		}
 		if !strings.EqualFold(key, "OPENCODE_SERVER_PASSWORD") && !strings.EqualFold(key, "OPENCODE_SERVER_USERNAME") &&
@@ -357,9 +390,7 @@ func (p *adapter) startOpenCodeServer(b binary, cwd string, ctx context.Context)
 		}
 	}
 	cmd.Env = append(cmd.Env, "OPENCODE_SERVER_USERNAME=opencode", "OPENCODE_SERVER_PASSWORD="+h.password, "OPENCODE_ENABLE_QUESTION_TOOL=true")
-	if p.graphNode() {
-		cmd.Env = append(cmd.Env, "OPENCODE_CONFIG_CONTENT="+graphConfig)
-	}
+	cmd.Env = append(cmd.Env, "OPENCODE_CONFIG_CONTENT="+graphConfig)
 	var owner *ownedProcess
 	if p.runtime == nil {
 		owner, err = prepareOwnedProcess(cmd)
@@ -519,7 +550,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	defer func() {
 		// Cancel local subscriptions/replies first, then abort only our native turn.
 		cancel()
-		if sessionID != "" && promptAttempted && !p.completed {
+		if sessionID != "" && promptAttempted && !p.completed && !(p.runtime != nil && t.ctx.Err() != nil) {
 			abortCtx, abortCancel := context.WithTimeout(context.Background(), 2*time.Second)
 			abortSettled = h.json(abortCtx, http.MethodPost, "/session/"+url.PathEscape(sessionID)+"/abort", nil, nil) == nil
 			abortCancel()
@@ -622,6 +653,13 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 
 	permissions := map[string]bool{}
 	questions := map[string]*atomic.Bool{}
+	ownedSessions := map[string]bool{sessionID: true}
+	ownsRequest := func(id string) (bool, error) {
+		if p.subagents[id] != nil || p.graphOwnsNativeSession(id) {
+			ownedSessions[id] = true
+		}
+		return h.ownsSession(ctx, id, ownedSessions)
+	}
 	defer func() {
 		cancel()
 		for id, live := range questions {
@@ -630,69 +668,14 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 		}
 	}()
 	requestQuestion := func(properties map[string]any) error {
-		if str(properties, "sessionID") != sessionID && !p.graphOwnsNativeSession(str(properties, "sessionID")) {
-			return nil
+		if owned, err := ownsRequest(str(properties, "sessionID")); err != nil || !owned {
+			return err
 		}
-		id := str(properties, "id")
-		if strings.TrimSpace(id) == "" {
-			return errors.New("OpenCode returned a question without an identifier.")
-		}
-		if questions[id] != nil {
-			return nil
-		}
-		if p.graphSealed() {
-			return h.json(ctx, http.MethodPost, "/question/"+url.PathEscape(id)+"/reject", nil, nil)
-		}
-		encoded, err := json.Marshal(properties["questions"])
-		if err != nil || len(encoded) > openCodeFrameLimit {
-			return errors.New("OpenCode question request exceeded the 2 MiB limit.")
-		}
-		var nativeQuestions []struct {
-			Question string           `json:"question"`
-			Header   string           `json:"header"`
-			Options  []QuestionOption `json:"options"`
-			Multiple bool             `json:"multiple"`
-			Custom   *bool            `json:"custom"`
-		}
-		if json.Unmarshal(encoded, &nativeQuestions) != nil {
-			return errors.New("OpenCode returned an invalid question request.")
-		}
-		req := QuestionRequest{SourceID: id}
-		for index, question := range nativeQuestions {
-			req.Items = append(req.Items, QuestionItem{
-				ID: strconv.Itoa(index), Header: question.Header, Text: question.Question,
-				Options: question.Options, Multiple: question.Multiple,
-				Custom: question.Custom == nil || *question.Custom,
-			})
-		}
-		live := &atomic.Bool{}
-		live.Store(true)
-		questions[id] = live
-		return p.requestQuestion(req, func(answers [][]string, cancelled bool) error {
-			if t.ctx.Err() != nil || ctx.Err() != nil || !live.CompareAndSwap(true, false) {
-				return errors.New("The OpenCode question is no longer active.")
-			}
-			path := "/question/" + url.PathEscape(id)
-			var body any
-			if cancelled || p.graphSealed() {
-				path += "/reject"
-			} else {
-				path += "/reply"
-				body = map[string]any{"answers": answers}
-			}
-			var accepted bool
-			if err := h.json(ctx, http.MethodPost, path, body, &accepted); err != nil {
-				return err
-			}
-			if !accepted {
-				return errors.New("OpenCode did not accept the question response.")
-			}
-			return nil
-		})
+		return p.requestOpenCodeQuestion(ctx, h, properties, questions)
 	}
 	requestPermission := func(properties map[string]any) error {
-		if str(properties, "sessionID") != sessionID && !p.graphOwnsNativeSession(str(properties, "sessionID")) {
-			return nil
+		if owned, err := ownsRequest(str(properties, "sessionID")); err != nil || !owned {
+			return err
 		}
 		encoded, err := json.Marshal(properties)
 		if err != nil || len(encoded) > openCodeFrameLimit {
@@ -717,6 +700,13 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			return replyPermission("reject")
 		}
 		if p.internalOpenCodeTool(kind) {
+			if err := replyPermission("once"); err != nil {
+				return err
+			}
+			permissions[id] = true
+			return nil
+		}
+		if p.openCodePermissionApproved(properties) {
 			if err := replyPermission("once"); err != nil {
 				return err
 			}
@@ -753,10 +743,17 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 		if detail := str(metadata, "description"); detail != "" {
 			description = detail + "\n" + description
 		}
+		command := str(metadata, "command")
+		if command == "" && (kind == "bash" || kind == "command") {
+			command = strings.Join(patterns, "\n")
+		}
 		req := Permission{
 			ID: newID(), Harness: p.harness, Kind: kind, Title: "Allow " + kind,
 			Description: strings.TrimSpace(description), Patterns: patterns,
-			Details: metadata, AllowLabel: "Allow", CreatedAt: now(), SourceID: id,
+			Details: metadata, Command: command, AllowLabel: "Allow", CreatedAt: now(), SourceID: id,
+		}
+		if command != "" {
+			req.Path = wanted
 		}
 		if scope == nil {
 			req.Decisions = []string{"once", "reject"}
@@ -998,6 +995,37 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			return err
 		case event := <-nextEvents:
 			typ, properties := str(event, "type"), object(event["properties"])
+			// Route human waits before the display-only child-session filter.
+			// Replies remain on the owning conversation, keyed by native request ID.
+			switch typ {
+			case "permission.asked":
+				if err := requestPermission(properties); err != nil {
+					return err
+				}
+				continue
+			case "question.asked":
+				if err := requestQuestion(properties); err != nil {
+					return err
+				}
+				continue
+			case "permission.replied":
+				id := str(properties, "requestID")
+				if permissions[id] {
+					if err := p.dismissPermission(id); err != nil {
+						return err
+					}
+				}
+				continue
+			case "question.replied", "question.rejected":
+				id := str(properties, "requestID")
+				if live := questions[id]; live != nil {
+					live.Store(false)
+					if err := p.dismissQuestion(id); err != nil {
+						return err
+					}
+				}
+				continue
+			}
 			if typ == "message.part.updated" {
 				p.observeOpenCodeMCPPart(object(properties["part"]))
 			}
@@ -1021,28 +1049,6 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			}
 			if child := children[scopedID]; child != nil {
 				switch typ {
-				case "permission.asked":
-					if err := requestPermission(properties); err != nil {
-						return err
-					}
-				case "permission.replied":
-					id := str(properties, "requestID")
-					permissions[id] = true
-					if err := p.dismissPermission(id); err != nil {
-						return err
-					}
-				case "question.asked":
-					if err := requestQuestion(properties); err != nil {
-						return err
-					}
-				case "question.replied", "question.rejected":
-					id := str(properties, "requestID")
-					if questions[id] != nil {
-						questions[id].Store(false)
-					}
-					if err := p.dismissQuestion(id); err != nil {
-						return err
-					}
 				case "message.updated":
 					info := object(properties["info"])
 					id := str(info, "id")
@@ -1117,30 +1123,6 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				continue
 			}
 			if scopedID != sessionID {
-				if p.graphOwnsNativeSession(scopedID) {
-					switch typ {
-					case "permission.asked":
-						if err := requestPermission(properties); err != nil {
-							return err
-						}
-					case "question.asked":
-						if err := requestQuestion(properties); err != nil {
-							return err
-						}
-					case "permission.replied":
-						if err := p.dismissPermission(str(properties, "requestID")); err != nil {
-							return err
-						}
-					case "question.replied", "question.rejected":
-						id := str(properties, "requestID")
-						if questions[id] != nil {
-							questions[id].Store(false)
-						}
-						if err := p.dismissQuestion(id); err != nil {
-							return err
-						}
-					}
-				}
 				continue
 			}
 			switch typ {
@@ -1151,35 +1133,6 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 					}
 				}
 				if err := p.setUsage(usage.snapshot()); err != nil {
-					return err
-				}
-			case "permission.asked":
-				if err := requestPermission(properties); err != nil {
-					return err
-				}
-			case "permission.replied":
-				id := str(properties, "requestID")
-				if id == "" {
-					return errors.New("OpenCode returned an invalid permission resolution.")
-				}
-				permissions[id] = true
-				if err := p.dismissPermission(id); err != nil {
-					return err
-				}
-			case "question.asked":
-				if err := requestQuestion(properties); err != nil {
-					return err
-				}
-			case "question.replied", "question.rejected":
-				id := str(properties, "requestID")
-				if strings.TrimSpace(id) == "" {
-					return errors.New("OpenCode returned an invalid question resolution.")
-				}
-				if questions[id] == nil {
-					questions[id] = &atomic.Bool{}
-				}
-				questions[id].Store(false)
-				if err := p.dismissQuestion(id); err != nil {
 					return err
 				}
 			case "session.error":
@@ -1361,4 +1314,68 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			}
 		}
 	}
+}
+
+// Called only after native request ownership has been verified. Questions from
+// descendants live on the parent conversation, but retain their native ID.
+func (p *adapter) requestOpenCodeQuestion(ctx context.Context, h *openCodeHTTP, properties map[string]any, questions map[string]*atomic.Bool) error {
+	id := str(properties, "id")
+	if strings.TrimSpace(id) == "" {
+		return errors.New("OpenCode returned a question without an identifier.")
+	}
+	if questions[id] != nil {
+		return nil
+	}
+	if p.graphSealed() {
+		return h.json(ctx, http.MethodPost, "/question/"+url.PathEscape(id)+"/reject", nil, nil)
+	}
+	encoded, err := json.Marshal(properties["questions"])
+	if err != nil || len(encoded) > openCodeFrameLimit {
+		return errors.New("OpenCode question request exceeded the 2 MiB limit.")
+	}
+	var nativeQuestions []struct {
+		Question string           `json:"question"`
+		Header   string           `json:"header"`
+		Options  []QuestionOption `json:"options"`
+		Multiple bool             `json:"multiple"`
+		Custom   *bool            `json:"custom"`
+	}
+	if json.Unmarshal(encoded, &nativeQuestions) != nil {
+		return errors.New("OpenCode returned an invalid question request.")
+	}
+	req := QuestionRequest{SourceID: id}
+	for index, question := range nativeQuestions {
+		req.Items = append(req.Items, QuestionItem{
+			ID: strconv.Itoa(index), Header: question.Header, Text: question.Question,
+			Options: question.Options, Multiple: question.Multiple,
+			Custom: question.Custom == nil || *question.Custom,
+		})
+	}
+	live := &atomic.Bool{}
+	live.Store(true)
+	questions[id] = live
+	return p.requestQuestion(req, func(answers [][]string, cancelled bool) error {
+		// answerQuestion serializes submissions. A transport failure must not
+		// consume the question locally and silently disable the user's Retry.
+		if p.turn.ctx.Err() != nil || ctx.Err() != nil || !live.Load() {
+			return errors.New("The OpenCode question is no longer active.")
+		}
+		path := "/question/" + url.PathEscape(id)
+		var body any
+		if cancelled || p.graphSealed() {
+			path += "/reject"
+		} else {
+			path += "/reply"
+			body = map[string]any{"answers": answers}
+		}
+		var accepted bool
+		if err := h.json(ctx, http.MethodPost, path, body, &accepted); err != nil {
+			return err
+		}
+		if !accepted {
+			return errors.New("OpenCode did not accept the question response.")
+		}
+		live.Store(false)
+		return nil
+	})
 }

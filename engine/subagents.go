@@ -67,7 +67,7 @@ func (p *adapter) ensureSubagent(nativeID, title, model, effort string) (*adapte
 	}
 	childID := childSession.ID
 	p.app.mu.Unlock()
-	child := &adapter{app: p.app, turn: p.turn, id: childID, harness: p.harness, subagent: true,
+	child := &adapter{app: p.app, turn: p.turn, id: childID, harness: p.harness, subagent: true, yolo: p.yolo, cwd: p.cwd,
 		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true, model: model, effort: effort}
 	child.stream = newStreamBatch(child)
 	if p.subagents == nil {

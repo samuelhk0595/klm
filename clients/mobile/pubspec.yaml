@@ -21,6 +21,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/brand/icon.png
   fonts:
     - family: Inter
       fonts:

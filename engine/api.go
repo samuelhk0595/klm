@@ -68,6 +68,9 @@ func (a *app) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", a.health)
 	mux.HandleFunc("GET /api/state", a.getState)
+	mux.HandleFunc("GET /api/transcription/settings", a.getTranscriptionSettings)
+	mux.HandleFunc("PATCH /api/transcription/settings", a.updateTranscriptionSettings)
+	mux.HandleFunc("POST /api/transcriptions", a.transcribe)
 	mux.HandleFunc("POST /api/projects", a.createProject)
 	mux.HandleFunc("PATCH /api/projects/{id}", a.updateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", a.removeProject)
@@ -105,6 +108,9 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("PATCH /api/sessions/{id}/events/{eventID}", a.chatSessionHandler(a.patchEvent))
 	mux.HandleFunc("POST /api/sessions/{id}/stop", a.chatSessionHandler(a.stop))
 	mux.HandleFunc("POST /api/sessions/{id}/permissions/{permissionID}", a.permissionDecision)
+	mux.HandleFunc("PATCH /api/sessions/{id}/permissions", a.chatSessionHandler(a.updatePermissionSettings))
+	mux.HandleFunc("GET /api/permission-rules", a.permissionRules)
+	mux.HandleFunc("DELETE /api/permission-rules/{ruleID}", a.deletePermissionRule)
 	mux.HandleFunc("POST /api/sessions/{id}/questions/{questionID}/reply", a.answerQuestion)
 	mux.HandleFunc("POST /api/dialogs/directory", a.directory)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "Endpoint not found.") })
@@ -120,9 +126,15 @@ func (a *app) routes() http.Handler {
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			transcriptionUpload := r.Method == http.MethodPost && r.URL.Path == "/api/transcriptions"
 			kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-			if err != nil || kind != "application/json" {
-				fail(w, 415, "Mutations require Content-Type: application/json.")
+			if (!transcriptionUpload && (err != nil || kind != "application/json")) ||
+				(transcriptionUpload && (err != nil || kind != "multipart/form-data")) {
+				if transcriptionUpload {
+					fail(w, 415, "Transcriptions require multipart/form-data.")
+				} else {
+					fail(w, 415, "Mutations require Content-Type: application/json.")
+				}
 				return
 			}
 			a.mu.Lock()
@@ -886,6 +898,10 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	t := a.runs[id]
+	// Cancellation must not depend on a successful history/queue write.
+	if t != nil {
+		t.cancel()
+	}
 	if err := a.commitLocked(func(d *diskState) {
 		s := d.session(id)
 		for i := range s.Queue {
@@ -903,9 +919,6 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
-	if t != nil {
-		t.cancel()
-	}
 	a.mu.Unlock()
 	if t != nil {
 		select {
@@ -914,6 +927,10 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-time.After(20 * time.Second):
 			fail(w, 504, "Cancellation is still in progress.")
+			return
+		}
+		if t.stopErr != nil {
+			fail(w, 503, "Could not confirm all session processes stopped: "+t.stopErr.Error())
 			return
 		}
 	}

@@ -102,18 +102,54 @@ The private bridge also exposes graph operations according to the conversation's
 role. Graph-node sessions receive their own Choice capability, without access to
 main/side conversation history or tools to invoke other graphs.
 
-Permission prompts are supported for OpenCode, Pi, and Codex. Users can allow a
-request, remember the exact scope for the session, or remember it for the project
-and harness. Denial remains available. Native grant lifetimes or unsupported
-interactive forms must not be represented as narrower or broader consent than the
-harness actually supports. Permission UI never implies blanket approval or a
-bypass of harness protections.
+### Audio Transcription
+
+The main chat composer can record audio and transcribe it through the engine without
+sending the resulting text automatically. Transcribed text is appended to the current
+draft while preserving selected file and folder references. Side-agent and design-system
+composers do not expose recording.
+
+The engine stores the OpenAI API key, model, optional language, and vocabulary globally.
+The API never returns the key, only whether one is configured. Vocabulary notes remain
+available as engine-backed context for the interface; this first slice sends only terms
+as transcription prompt context. Audio uploads are limited to 25 MiB.
+
+Recording requires the client environment to support `getUserMedia` and `MediaRecorder`.
+Browser security rules may deny microphone capture on insecure remote origins, so remote
+HTTP access is not promised to support recording. This does not change the existing
+personal-use network and authentication contract.
+
+Permission prompts are supported for OpenCode, Pi, and Codex. Cards expose **Allow**,
+**Allow session**, and **Deny**, with a menu for **Allow in this project**, **Deny in
+this project**, **Allow globally**, and **Deny globally**. Rules persist in the engine;
+global rules apply across its projects and sessions. The displayed operation/resource
+scope determines matching, not the button's lifetime alone. Recognized filesystem
+scopes can be shared across harnesses; opaque requests retain exact native scope.
+Explicit denies win over remembered allows. Known destructive requests carry a
+small warning icon. Pi and an owned OpenCode pre-tool plugin evaluate workspace
+policy before execution; Codex uses the requests and sandbox controls it exposes.
+Native grant lifetimes and unsupported forms retain their actual semantics.
+
+The composer's vertical-ellipsis menu, immediately left of the harness/model
+selector, initially contains only **YOLO mode**. YOLO is persisted per conversation,
+can be changed between turns, and bypasses saved permission rules while active.
+Pi's engine replies are automatic; OpenCode's owned runtime gets permissive merged
+permissions; Codex uses `never` approvals and `danger-full-access`. Disabling YOLO
+restores normal policy on the next turn without deleting saved rules. User questions
+and graph authorization/lifecycle controls are independent of tool permissions.
+The normal workspace policy, precise matching rules, API recovery controls and
+adapter coverage are documented in `PERMISSIONS.md`. Runtime behavior awaits human
+validation; command classification is not filesystem or network isolation.
 
 Agents can ask users questions through their harness tools. The interface shows
 clickable choices and an optional custom answer, including multi-select when the
 tool supports it. Answers are returned to the waiting tool, not sent as a separate
 chat turn, and never become remembered permission grants. Users can dismiss a
 question or stop the turn.
+OpenCode questions and permission requests from native subagents are presented
+in the owning conversation, including requests received before task metadata.
+Question answers return to the originating native request; YOLO never chooses
+an answer on the user's behalf.
 
 ## Mobile Client
 
@@ -183,6 +219,10 @@ attachments. Accepted inputs enter chat history. Stop, execution failure, and
 engine restart pause unsent inputs. Unconfirmed native delivery is marked for
 manual recovery and is never automatically replayed. These controls affect the
 chat agent; they do not stop or steer an independently running graph node.
+Stopping a chat cancels its turn and terminates its owned process container,
+including native subagents and local tool subprocesses, without waiting for a
+permission reply or a successful native abort. The stopped runtime is discarded;
+the next turn starts a new runtime and resumes the stored native conversation.
 Runtime behavior across the three harnesses awaits human validation.
 
 ## Linked Side Agent Conversation

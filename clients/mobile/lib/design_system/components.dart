@@ -37,8 +37,13 @@ class KlmBrand extends StatelessWidget {
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const KlmMark(),
-        const SizedBox(width: 10),
+        const Image(
+          image: AssetImage('assets/brand/icon.png'),
+          width: 28,
+          height: 28,
+          fit: BoxFit.contain,
+        ),
+        const SizedBox(width: 7),
         const Text(
           'KLM',
           style: TextStyle(

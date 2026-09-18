@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -235,10 +236,14 @@ const linkedPromptPrefix = "KLM linked-agent tools are available: linked_discove
 func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd string, payload submission) {
 	defer a.wg.Done()
 	defer t.cancel()
-	p := &adapter{app: a, turn: t, id: s.ID, harness: s.Harness,
+	p := &adapter{app: a, turn: t, id: s.ID, harness: s.Harness, yolo: s.YOLO, cwd: cwd,
 		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true}
+	var stopCancellation func() bool
 	if s.Role != "graph_node" {
 		p.runtime = a.beginSessionRuntime(s.ID)
+		// Independent of the adapter's event loop and native abort response.
+		// A cancelled turn retires the entire conversation process container.
+		stopCancellation = context.AfterFunc(t.ctx, func() { _ = p.runtime.shutdown() })
 	}
 	p.graph = graphBinding(t)
 	defer UnbindGraphAdapter(t)
@@ -314,6 +319,16 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 		p.runtime.finishTurn()
 	}
 	a.mu.Lock()
+	if stopCancellation != nil {
+		// Serialize normal completion against the Stop endpoint. Disarm before
+		// deferred t.cancel so a successful turn can retain its warm runtime.
+		stopCancellation()
+		if t.ctx.Err() != nil {
+			a.mu.Unlock()
+			t.stopErr = p.runtime.shutdown()
+			a.mu.Lock()
+		}
+	}
 	finalErr := a.commitLocked(func(d *diskState) {
 		s := d.session(s.ID)
 		s.Status, s.UpdatedAt = "idle", now()
@@ -330,6 +345,9 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 		}
 		var last Event
 		switch {
+		case t.stopErr != nil:
+			s.Status = "error"
+			last = event("error", "Could not confirm all session processes stopped: "+t.stopErr.Error())
 		case t.ctx.Err() != nil:
 			last = event("status", "Execution stopped.")
 			last.Status = "cancelled"
@@ -425,6 +443,9 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 }
 
 type adapter struct {
+	yolo               bool
+	cwd                string
+	gatedPermissions   map[string]string // Protected by app.mu; native call -> tool.
 	stream             *streamBatch
 	graph              *graphAdapterBinding
 	nativeSettled      bool
