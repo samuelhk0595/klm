@@ -451,7 +451,8 @@ reading:
 			if err := p.requestPermission(Permission{
 				Harness: "pi", Kind: "tool", Title: "Allow " + request.ToolName + "?",
 				Description: pattern, Patterns: []string{pattern},
-				Details:   map[string]any{"toolCallId": request.ToolCallID, "toolName": request.ToolName, "cwd": request.Cwd, "input": request.Input},
+				Details: map[string]any{"toolCallId": request.ToolCallID, "toolName": request.ToolName, "cwd": request.Cwd, "input": request.Input},
+				Command: str(request.Input, "command"), Path: request.Cwd,
 				Decisions: []string{"once", "session", "always", "reject"}, AllowLabel: "Allow", SourceID: sourceID,
 			}, scope, func(allow bool) error {
 				if err := ctx.Err(); err != nil {

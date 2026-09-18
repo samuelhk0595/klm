@@ -52,6 +52,7 @@ export type Session = {
   workspace: string;
   harness: Harness['id'];
   model?: string;
+  yolo?: boolean;
   effort?: string;
   resolvedModel?: string;
   resolvedEffort?: string;
@@ -120,7 +121,7 @@ export type FileMention = ProjectPath & { id: string; start: number; end: number
 export type MentionPreparation = ProjectPath & { mode: 'native' | 'prepared'; bytes?: number; truncated?: boolean };
 export type MessageSubmission = { text: string; mentions: FileMention[]; sources?: SourceReference[] };
 
-export type PermissionDecision = 'once' | 'session' | 'always' | 'reject';
+export type PermissionDecision = 'once' | 'session' | 'always' | 'reject' | 'deny_project' | 'allow_global' | 'deny_global';
 export type QuestionItem = {
   id: string;
   header: string;
@@ -145,6 +146,10 @@ export type PermissionRequest = {
   description: string;
   patterns: string[];
   details?: Record<string, unknown>;
+  command?: string;
+  path?: string;
+  scopeLabel?: string;
+  dangerous?: boolean;
   decisions: PermissionDecision[];
   allowLabel?: string;
   createdAt: string;
@@ -161,6 +166,19 @@ export type ModelOption = { id: string; name: string; provider: string; provider
 export type ModelCatalog = { models: ModelOption[]; connectedProviders: { id: string; name: string; authType: string }[]; defaultModel?: string; defaultEffort?: string; effortLabel: string };
 export type SessionMetadata = { sessionId: string; gitBranch?: string };
 export type QuotaSnapshot = { source: string; observedAt: string; stale?: boolean; windows: { name: string; usedPercent: number; resetsAt: number }[] };
+export type TranscriptionVocabularyEntry = { term: string; note: string };
+export type TranscriptionSettings = {
+  apiKeyConfigured: boolean;
+  model: string;
+  language: string;
+  vocabulary: TranscriptionVocabularyEntry[];
+};
+export type TranscriptionSettingsUpdate = {
+  apiKey?: string | null;
+  model?: string;
+  language?: string;
+  vocabulary?: TranscriptionVocabularyEntry[];
+};
 
 export async function request<T>(path: string, method = 'GET', body?: unknown, timeoutMs = 15000, signal?: AbortSignal): Promise<T> {
   let response: Response;
@@ -187,4 +205,32 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, t
 export async function pickDirectory(signal?: AbortSignal): Promise<string | null> {
   const result = await request<{ path: string | null }>('/api/dialogs/directory', 'POST', {}, 15000, signal);
   return result.path;
+}
+
+export const getTranscriptionSettings = () => request<TranscriptionSettings>('/api/transcription/settings');
+export const updateTranscriptionSettings = (settings: TranscriptionSettingsUpdate) => request<TranscriptionSettings>('/api/transcription/settings', 'PATCH', settings);
+
+export async function transcribeAudio(audio: Blob, filename: string, signal?: AbortSignal): Promise<string> {
+  const form = new FormData();
+  form.append('file', audio, filename);
+  let response: Response;
+  try {
+    response = await fetch(`${ENGINE_URL}/api/transcriptions`, {
+      method: 'POST',
+      credentials: 'omit',
+      body: form,
+      signal,
+    });
+  } catch {
+    throw new Error(`Cannot connect to the engine at ${ENGINE_URL}. Start the engine and retry.`);
+  }
+  const result: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail = result && typeof result === 'object' && 'error' in result && typeof result.error === 'string' ? result.error : `Transcription failed (${response.status}).`;
+    throw new Error(detail);
+  }
+  if (!result || typeof result !== 'object' || !('text' in result) || typeof result.text !== 'string') {
+    throw new Error('The engine returned an invalid transcription. Retry.');
+  }
+  return result.text;
 }

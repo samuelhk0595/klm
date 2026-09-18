@@ -492,12 +492,14 @@ func validateGraphRecords(d *diskState) error {
 		}
 	}
 	for _, grant := range d.Grants {
-		if !claim(grant.ID) || d.project(grant.ProjectID) == nil {
+		// Empty project means a global rule; empty harness means a normalized
+		// policy scope, shared across harnesses. Both are persisted intentionally.
+		if !claim(grant.ID) || grant.ProjectID != "" && d.project(grant.ProjectID) == nil {
 			return bad("permission grant", grant.ID)
 		}
 		if grant.SessionID != "" {
 			s := d.session(grant.SessionID)
-			if s == nil || s.ProjectID != grant.ProjectID || s.Harness != grant.Harness {
+			if grant.ProjectID == "" || s == nil || s.ProjectID != grant.ProjectID || grant.Harness != "" && s.Harness != grant.Harness {
 				return bad("permission grant owner", grant.ID)
 			}
 		}

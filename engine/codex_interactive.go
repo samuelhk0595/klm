@@ -163,8 +163,12 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 	choiceInterrupted := false
 	steering := p.steeringChannel()
 	steeringRequests := map[string]bool{}
+	approvalPolicy, sandbox, sandboxType := "on-request", "read-only", "readOnly"
+	if p.yolo {
+		approvalPolicy, sandbox, sandboxType = "never", "danger-full-access", "dangerFullAccess"
+	}
 	sendThread := func() error {
-		params := map[string]any{"cwd": cwd, "approvalPolicy": "on-request", "approvalsReviewer": "user", "sandbox": "read-only"}
+		params := map[string]any{"cwd": cwd, "approvalPolicy": approvalPolicy, "approvalsReviewer": "user", "sandbox": sandbox}
 		method := "thread/start"
 		if native.ID != "" {
 			method, params["threadId"] = "thread/resume", native.ID
@@ -322,8 +326,8 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 			if threadID == "" || (native.ID != "" && threadID != native.ID) || !sameCwd {
 				return errors.New("Codex returned a different thread or working directory; refusing to start a turn.")
 			}
-			if str(result, "approvalPolicy") != "on-request" || str(object(result["sandbox"]), "type") != "readOnly" {
-				return errors.New("Codex did not confirm the requested approval policy and read-only sandbox.")
+			if str(result, "approvalPolicy") != approvalPolicy || str(object(result["sandbox"]), "type") != sandboxType {
+				return errors.New("Codex did not confirm the requested approval policy and sandbox.")
 			}
 			if reviewer := str(result, "approvalsReviewer"); reviewer != "" && reviewer != "user" {
 				return errors.New("Codex did not retain user-reviewed approvals.")
@@ -1044,6 +1048,10 @@ func (c *codexInteractive) request(frame map[string]any) error {
 	case "item/commandExecution/requestApproval":
 		req.Kind, req.Title = "command", "Run command"
 		command, workdir := str(params, "command"), str(params, "cwd")
+		req.Command, req.Path = command, workdir
+		if req.Path == "" {
+			req.Path = c.cwd
+		}
 		network := object(params["networkApprovalContext"])
 		validNetwork := network != nil && strings.TrimSpace(str(network, "host")) != "" && strings.TrimSpace(str(network, "protocol")) != ""
 		positive = positive && (strings.TrimSpace(command) != "" || validNetwork)

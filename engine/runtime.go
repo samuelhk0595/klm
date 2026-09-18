@@ -13,17 +13,19 @@ const sessionRuntimeIdleTimeout = 40 * time.Minute
 // sessionRuntime owns the process container shared by ordinary turns in one
 // conversation. Graph node processes intentionally never use this lifetime.
 type sessionRuntime struct {
-	app         *app
-	id          string
-	mu          sync.Mutex
-	group       *runtimeProcessGroup
-	bridge      *linkedBridge
-	interactive *runtimeInteractive
-	openCode    *openCodeServer
-	openCodeKey string
-	cancel      context.CancelFunc
-	closed      bool
-	turnActive  bool
+	app          *app
+	id           string
+	mu           sync.Mutex
+	group        *runtimeProcessGroup
+	bridge       *linkedBridge
+	interactive  *runtimeInteractive
+	openCode     *openCodeServer
+	openCodeKey  string
+	cancel       context.CancelFunc
+	closed       bool
+	turnActive   bool
+	shutdownDone chan struct{}
+	shutdownErr  error
 }
 
 type runtimeInteractive struct {
@@ -260,8 +262,7 @@ func (r *sessionRuntime) finishTurn() {
 		r.closed = true
 		resources := r.detachLocked()
 		r.mu.Unlock()
-		closeRuntimeResources(resources)
-		r.remove()
+		_ = r.finishShutdown(resources)
 		return
 	}
 	group.EndTurn()
@@ -315,8 +316,7 @@ func (r *sessionRuntime) shutdownIdle(ctx context.Context) {
 	}
 	resources := r.detachLocked()
 	r.mu.Unlock()
-	closeRuntimeResources(resources)
-	r.remove()
+	_ = r.finishShutdown(resources)
 }
 
 func (r *sessionRuntime) active() bool {
@@ -325,11 +325,18 @@ func (r *sessionRuntime) active() bool {
 	return !r.closed && r.group != nil
 }
 
-func (r *sessionRuntime) shutdown() {
+func (r *sessionRuntime) shutdown() error {
 	r.mu.Lock()
 	if r.closed {
+		done := r.shutdownDone
 		r.mu.Unlock()
-		return
+		if done != nil {
+			<-done
+		}
+		r.mu.Lock()
+		err := r.shutdownErr
+		r.mu.Unlock()
+		return err
 	}
 	r.closed = true
 	if r.cancel != nil {
@@ -338,18 +345,25 @@ func (r *sessionRuntime) shutdown() {
 	}
 	resources := r.detachLocked()
 	r.mu.Unlock()
-	closeRuntimeResources(resources)
-	r.remove()
+	return r.finishShutdown(resources)
 }
 
 func (r *sessionRuntime) detachLocked() runtimeShutdown {
+	r.shutdownDone = make(chan struct{})
 	resources := runtimeShutdown{group: r.group, bridge: r.bridge, interactive: r.interactive, openCode: r.openCode}
 	r.group, r.bridge, r.interactive, r.openCode = nil, nil, nil, nil
 	r.openCodeKey = ""
 	return resources
 }
 
-func closeRuntimeResources(resources runtimeShutdown) {
+func closeRuntimeResources(resources runtimeShutdown) error {
+	// Stop the container first, not just the harness executable. This also kills
+	// subprocesses holding inherited pipes or waiting on an unanswered permission.
+	// Native abort/EOF and bridge cleanup must never delay this signal.
+	var err error
+	if resources.group != nil {
+		err = resources.group.Close()
+	}
 	if resources.interactive != nil {
 		closeRuntimeInteractive(resources.interactive)
 	}
@@ -359,9 +373,17 @@ func closeRuntimeResources(resources runtimeShutdown) {
 	if resources.bridge != nil {
 		resources.bridge.close()
 	}
-	if resources.group != nil {
-		_ = resources.group.Close()
-	}
+	return err
+}
+
+func (r *sessionRuntime) finishShutdown(resources runtimeShutdown) error {
+	err := closeRuntimeResources(resources)
+	r.remove()
+	r.mu.Lock()
+	r.shutdownErr = err
+	close(r.shutdownDone)
+	r.mu.Unlock()
+	return err
 }
 
 func (r *sessionRuntime) remove() {
@@ -417,6 +439,6 @@ func (p *adapter) markRuntimeInfrastructure() {
 }
 
 func (p *adapter) runtimeToolKey() string {
-	encoded, _ := json.Marshal(p.bridgeTools())
+	encoded, _ := json.Marshal(map[string]any{"tools": p.bridgeTools(), "yolo": p.yolo})
 	return string(encoded)
 }

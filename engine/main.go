@@ -24,6 +24,7 @@ type turn struct {
 	ctx                 context.Context
 	cancel              context.CancelFunc
 	done                chan struct{}
+	stopErr             error // Written before done closes; read only after done.
 	approvals           map[string]*pendingApproval
 	questions           map[string]*pendingQuestion
 }

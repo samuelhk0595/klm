@@ -1,7 +1,7 @@
-import { ArrowUp, FileText, Folder, ListPlus, Square } from 'lucide-react';
+import { ArrowUp, FileText, Folder, ListPlus, LoaderCircle, Mic, Square } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Button, IconButton } from '../../design-system/Button';
-import { request, type FileMention, type ProjectPath } from '../../engine';
+import { request, transcribeAudio, type FileMention, type ProjectPath } from '../../engine';
 import { mentionQuery } from './mentions';
 import { MentionEditor, type MentionEditorHandle } from './MentionEditor';
 
@@ -9,8 +9,19 @@ export type SendMode = 'queue' | 'steer';
 
 export type ComposerDraft = { text: string; mentions: FileMention[] };
 
-export function MessageComposer({ onSend, draft, onDraftChange, projectId, disabled = false, running = false, onStop, modelControl, graphControl, placeholder = 'Message the agent' }: {
+type AudioState = 'idle' | 'recording' | 'transcribing';
+
+const recordingTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+
+function recordingFilename(type: string) {
+  if (type.startsWith('audio/mp4')) return 'recording.mp4';
+  if (type.startsWith('audio/ogg')) return 'recording.ogg';
+  return 'recording.webm';
+}
+
+export function MessageComposer({ onSend, onTranscription, draft, onDraftChange, projectId, disabled = false, running = false, onStop, modelControl, graphControl, placeholder = 'Message the agent' }: {
   onSend: (draft: ComposerDraft, mode?: SendMode) => void | Promise<boolean | void>; draft: ComposerDraft; onDraftChange: (draft: ComposerDraft) => void;
+  onTranscription?: (text: string) => void;
   projectId?: string;
   disabled?: boolean; running?: boolean; onStop?: () => void;
   modelControl?: ReactNode;
@@ -28,6 +39,11 @@ export function MessageComposer({ onSend, draft, onDraftChange, projectId, disab
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const editor = useRef<MentionEditorHandle>(null);
+  const [audioState, setAudioState] = useState<AudioState>('idle');
+  const recorder = useRef<MediaRecorder | null>(null);
+  const audioStream = useRef<MediaStream | null>(null);
+  const transcriptionRequest = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
   const query = focused && !composing && !submitting && projectId ? mentionQuery(text, caret, mentions) : null;
   const queryKey = query ? JSON.stringify([projectId, query.start, query.query]) : '';
   const open = !!queryKey && dismissed !== queryKey;
@@ -49,6 +65,23 @@ export function MessageComposer({ onSend, draft, onDraftChange, projectId, disab
   useEffect(() => {
     if (open) document.getElementById(`${listId}-${active}`)?.scrollIntoView({ block: 'nearest' });
   }, [active, open, listId]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      transcriptionRequest.current?.abort();
+      const activeRecorder = recorder.current;
+      if (activeRecorder) {
+        activeRecorder.ondataavailable = null;
+        activeRecorder.onstop = null;
+        activeRecorder.onerror = null;
+        if (activeRecorder.state !== 'inactive') activeRecorder.stop();
+      }
+      audioStream.current?.getTracks().forEach(track => track.stop());
+      recorder.current = null;
+      audioStream.current = null;
+    };
+  }, []);
   function selectPath(path: ProjectPath) {
     if (!query) return;
     editor.current?.insertMention(path, query);
@@ -62,6 +95,77 @@ export function MessageComposer({ onSend, draft, onDraftChange, projectId, disab
       if (accepted !== false) onDraftChange({ text: '', mentions: [] });
     } catch (error) { setError(error instanceof Error ? error.message : 'Message could not be sent. Retry.'); }
     finally { sending.current = false; setSubmitting(false); }
+  }
+  function releaseAudio() {
+    audioStream.current?.getTracks().forEach(track => track.stop());
+    audioStream.current = null;
+    recorder.current = null;
+  }
+  async function toggleRecording() {
+    if (!onTranscription || audioState === 'transcribing') return;
+    if (audioState === 'recording') {
+      setAudioState('transcribing');
+      if (recorder.current?.state !== 'inactive') recorder.current?.stop();
+      return;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setError('Audio recording is not supported by this client.');
+      return;
+    }
+    setAudioState('transcribing');
+    setError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!mounted.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      audioStream.current = stream;
+      const mimeType = recordingTypes.find(type => MediaRecorder.isTypeSupported(type));
+      const nextRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      let failed = false;
+      recorder.current = nextRecorder;
+      nextRecorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+      nextRecorder.onerror = () => {
+        failed = true;
+        releaseAudio();
+        if (mounted.current) {
+          setAudioState('idle');
+          setError('Audio recording failed. Retry.');
+        }
+      };
+      nextRecorder.onstop = async () => {
+        const type = nextRecorder.mimeType || mimeType || 'audio/webm';
+        releaseAudio();
+        if (failed || !mounted.current) return;
+        const audio = new Blob(chunks, { type });
+        if (!audio.size) {
+          setAudioState('idle');
+          setError('No audio was recorded. Retry.');
+          return;
+        }
+        const controller = new AbortController();
+        transcriptionRequest.current = controller;
+        try {
+          const text = await transcribeAudio(audio, recordingFilename(type), controller.signal);
+          if (mounted.current) onTranscription(text);
+        } catch (error) {
+          if (mounted.current && !controller.signal.aborted) setError(error instanceof Error ? error.message : 'Transcription failed. Retry.');
+        } finally {
+          if (transcriptionRequest.current === controller) transcriptionRequest.current = null;
+          if (mounted.current) setAudioState('idle');
+        }
+      };
+      nextRecorder.start();
+      setAudioState('recording');
+    } catch (error) {
+      releaseAudio();
+      if (mounted.current) {
+        setAudioState('idle');
+        setError(error instanceof DOMException && error.name === 'NotAllowedError' ? 'Microphone access was denied.' : 'Could not start audio recording. Retry.');
+      }
+    }
   }
   return <form className="composer" aria-label="Message composer" onSubmit={event => { event.preventDefault(); send(); }}>
     {open && <div className="mention-picker">
@@ -94,6 +198,6 @@ export function MessageComposer({ onSend, draft, onDraftChange, projectId, disab
       } else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); }
     }} />
     {error && <p role="alert" className="form-error composer-error">{error}</p>}
-    <div className="composer-controls">{graphControl && <div className="composer-graph-control">{graphControl}</div>}<div className="composer-model-controls">{modelControl}{running && text.trim() && <Button size="sm" disabled={disabled || submitting} onClick={() => void send('steer')}>Send now</Button>}{running && onStop && <IconButton label="Stop response" variant="outline" onClick={onStop}><Square /></IconButton>}<IconButton label={running ? 'Queue message' : 'Send message'} variant="soft" type="submit" disabled={!text.trim() || disabled || submitting} className="send-button">{running ? <ListPlus /> : <ArrowUp />}</IconButton></div></div>
+    <div className="composer-controls">{graphControl && <div className="composer-graph-control">{graphControl}</div>}<div className="composer-model-controls">{modelControl}{running && text.trim() && <Button size="sm" disabled={disabled || submitting} onClick={() => void send('steer')}>Send now</Button>}{running && onStop && <IconButton label="Stop response" variant="outline" onClick={onStop}><Square /></IconButton>}{onTranscription && <IconButton label={audioState === 'recording' ? 'Stop recording' : audioState === 'transcribing' ? 'Transcribing audio' : 'Record audio'} aria-pressed={audioState === 'recording'} variant={audioState === 'recording' ? 'danger-soft' : 'ghost'} disabled={(disabled && audioState === 'idle') || submitting || audioState === 'transcribing'} className={`audio-record-button ${audioState === 'recording' ? 'is-recording' : ''}`} onClick={() => void toggleRecording()}>{audioState === 'recording' ? <Square /> : audioState === 'transcribing' ? <LoaderCircle className="audio-spinner" /> : <Mic />}</IconButton>}<IconButton label={running ? 'Queue message' : 'Send message'} variant="soft" type="submit" disabled={!text.trim() || disabled || submitting} className="send-button">{running ? <ListPlus /> : <ArrowUp />}</IconButton></div></div>
   </form>;
 }

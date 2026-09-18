@@ -4,7 +4,8 @@ import { Button, IconButton } from '../../design-system/Button';
 import { Menu, MenuItem } from '../../design-system/Menu';
 import { Slider } from '../../design-system/Slider';
 import { HarnessIcon } from './HarnessIcon';
-import { request, type ModelCatalog, type Session } from '../../engine';
+import { request, type ModelCatalog, type Session, type SessionResponse } from '../../engine';
+import { SessionOptions } from './SessionOptions';
 
 const effortOrder = ['none', 'off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 function effortRank(value: string) {
@@ -15,8 +16,9 @@ function effortLabel(value: string) {
   return value === 'xhigh' ? 'Extra high' : value ? value[0].toUpperCase() + value.slice(1) : 'Default';
 }
 
-export function ModelPicker({ session, disabled, onSave }: {
+export function ModelPicker({ session, disabled, onSave, onSnapshot }: {
   session: Session; disabled: boolean; onSave: (model: string, effort: string) => Promise<boolean>;
+  onSnapshot?: (snapshot: SessionResponse) => void;
 }) {
   const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
   const [loading, setLoading] = useState(true);
@@ -94,6 +96,7 @@ export function ModelPicker({ session, disabled, onSave }: {
   }
 
   return <div className="model-picker-controls">
+    {onSnapshot && <SessionOptions session={session} disabled={locked} onSnapshot={onSnapshot} />}
     <Menu label="Models" className="model-menu" open={menu === 'model'} onOpenChange={open => openMenu('model', open)} trigger={props => <Button {...props} variant="ghost" size="sm" className="model-picker-trigger" disabled={locked} aria-label="Choose model">
       <HarnessIcon harness={session.harness} /><span className="model-picker-name">{current?.name || currentModelId || (loading ? 'Loading model...' : 'Model unavailable')}</span><ChevronDown />
     </Button>}>

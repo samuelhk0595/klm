@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +52,7 @@ type Session struct {
 	Title           string                  `json:"title"`
 	Workspace       string                  `json:"workspace"`
 	Harness         string                  `json:"harness"`
+	YOLO            bool                    `json:"yolo,omitempty"`
 	Model           string                  `json:"model,omitempty"`
 	Effort          string                  `json:"effort,omitempty"`
 	ResolvedModel   string                  `json:"resolvedModel,omitempty"`
@@ -71,6 +73,20 @@ type nativeSession struct {
 	Path string `json:"path,omitempty"`
 }
 
+const defaultTranscriptionModel = "gpt-4o-mini-transcribe"
+
+type TranscriptionVocabularyEntry struct {
+	Term string `json:"term"`
+	Note string `json:"note"`
+}
+
+type TranscriptionSettings struct {
+	APIKey     string                         `json:"apiKey,omitempty"`
+	Model      string                         `json:"model"`
+	Language   string                         `json:"language,omitempty"`
+	Vocabulary []TranscriptionVocabularyEntry `json:"vocabulary"`
+}
+
 type diskState struct {
 	QueuePayloads       map[string]queuedPayload `json:"queuePayloads,omitempty"`
 	GraphRevision       uint64                   `json:"graphRevision"`
@@ -89,6 +105,16 @@ type diskState struct {
 	Sessions            []Session                `json:"sessions"`
 	Native              map[string]nativeSession `json:"native"`
 	Grants              []permissionGrant        `json:"permissionGrants,omitempty"`
+	Transcription       TranscriptionSettings    `json:"transcription"`
+}
+
+func normalizeTranscriptionSettings(settings *TranscriptionSettings) {
+	if settings.Model == "" {
+		settings.Model = defaultTranscriptionModel
+	}
+	if settings.Vocabulary == nil {
+		settings.Vocabulary = []TranscriptionVocabularyEntry{}
+	}
 }
 
 func now() string { return time.Now().UTC().Format(time.RFC3339Nano) }
@@ -124,7 +150,8 @@ func (d *diskState) project(id string) *Project {
 }
 
 func loadState(dir string) (diskState, error) {
-	d := diskState{Version: 2, Projects: []Project{}, Sessions: []Session{}, Native: map[string]nativeSession{}}
+	d := diskState{Version: 2, Projects: []Project{}, Sessions: []Session{}, Native: map[string]nativeSession{},
+		Transcription: TranscriptionSettings{Model: defaultTranscriptionModel, Vocabulary: []TranscriptionVocabularyEntry{}}}
 	b, err := os.ReadFile(filepath.Join(dir, "state.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return d, nil
@@ -144,6 +171,7 @@ func loadState(dir string) (diskState, error) {
 	if (d.Version != 1 && d.Version != 2) || d.Projects == nil || d.Sessions == nil || d.Native == nil {
 		return d, errors.New("unsupported or incomplete state.json; refusing to overwrite")
 	}
+	normalizeTranscriptionSettings(&d.Transcription)
 	ids := map[string]bool{}
 	for i := range d.Projects {
 		p := &d.Projects[i]
@@ -235,6 +263,7 @@ func saveState(dir string, d *diskState) error {
 		return errors.New("refusing to write unsupported state version")
 	}
 	normalizeGraphWorkspaceRecords(d)
+	normalizeTranscriptionSettings(&d.Transcription)
 	if err := validateGraphRecords(d); err != nil {
 		return err
 	}
@@ -278,6 +307,7 @@ func (a *app) commitLocked(change func(*diskState)) error {
 		err = saveState(a.dir, &next)
 	}
 	if err != nil {
+		log.Printf("state persistence failed: %v", err)
 		a.storageErr = errors.New("state persistence failed; engine is read-only until restarted")
 		for _, r := range a.runs {
 			r.cancel()

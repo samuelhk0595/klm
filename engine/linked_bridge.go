@@ -209,6 +209,19 @@ func (b *linkedBridge) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		result = map[string]any{"allowed": true}
+	case "klm/permission/opencode":
+		if p == nil || p.harness != "opencode" {
+			fail(w, 409, "Harness turn is not active.")
+			return
+		}
+		// Human permission waits outlive the short bridge RPC write deadline.
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
+		allowed, err := p.openCodePermissionGate(r.Context(), message.Params)
+		if err != nil {
+			respond(w, 200, map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{"code": -32000, "message": err.Error()}})
+			return
+		}
+		result = map[string]any{"allowed": allowed}
 	case "tools/call":
 		var params struct {
 			Name      string          `json:"name"`

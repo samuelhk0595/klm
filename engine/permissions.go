@@ -10,6 +10,7 @@ import (
 )
 
 type Permission struct {
+	mcpTool     bool           // Adapter-confirmed MCP identity; never inferred from tool arguments.
 	ID          string         `json:"id"`
 	Harness     string         `json:"harness"`
 	Kind        string         `json:"kind"`
@@ -17,6 +18,10 @@ type Permission struct {
 	Description string         `json:"description"`
 	Patterns    []string       `json:"patterns"`
 	Details     map[string]any `json:"details,omitempty"`
+	Command     string         `json:"command,omitempty"`
+	Path        string         `json:"path,omitempty"`
+	ScopeLabel  string         `json:"scopeLabel,omitempty"`
+	Dangerous   bool           `json:"dangerous,omitempty"`
 	Decisions   []string       `json:"decisions"`
 	AllowLabel  string         `json:"allowLabel,omitempty"`
 	CreatedAt   string         `json:"createdAt"`
@@ -32,13 +37,18 @@ type permissionGrant struct {
 	Kind      string `json:"kind"`
 	Key       string `json:"key"`
 	CreatedAt string `json:"createdAt"`
+	Decision  string `json:"decision,omitempty"` // Empty is a legacy allow.
+	Label     string `json:"label,omitempty"`
 }
 
 type pendingApproval struct {
-	request Permission
-	key     string
-	reply   func(bool) error
-	busy    bool
+	request     Permission
+	key         string
+	reply       func(bool) error
+	busy        bool
+	ruleHarness string
+	ruleKind    string
+	ruleKey     string
 }
 
 func (p *adapter) requestPermission(req Permission, scope map[string]any, reply func(bool) error) error {
@@ -63,6 +73,19 @@ func (p *adapter) requestPermission(req Permission, scope map[string]any, reply 
 	if key == "" {
 		req.Decisions = slices.DeleteFunc(slices.Clone(req.Decisions), func(choice string) bool { return choice == "session" || choice == "always" })
 	}
+	facts := permissionFactsFor(req, p.harness, p.cwd)
+	req.Dangerous = facts.dangerous
+	ruleKey, ruleKind, ruleHarness := key, req.Kind, p.harness
+	if facts.key != "" && key != "" {
+		ruleKey, ruleKind, ruleHarness = facts.key, facts.operation, ""
+	}
+	if ruleKey != "" && slices.Contains(req.Decisions, "always") {
+		req.Decisions = append(req.Decisions, "deny_project", "allow_global", "deny_global")
+		req.ScopeLabel = facts.label
+		if req.ScopeLabel == "" {
+			req.ScopeLabel = "This exact request (" + p.harness + ")"
+		}
+	}
 	req.ID, req.Harness, req.CreatedAt = newID(), p.harness, now()
 	if req.Patterns == nil {
 		req.Patterns = []string{}
@@ -80,12 +103,35 @@ func (p *adapter) requestPermission(req Permission, scope map[string]any, reply 
 		}
 	}
 	s := a.state.session(p.id)
+	if s == nil {
+		a.mu.Unlock()
+		return errors.New("Permission session no longer exists.")
+	}
+	decision := ""
+	reason := "saved rule"
+	if p.yolo {
+		reason = "YOLO mode"
+		decision = "deny"
+		if slices.Contains(req.Decisions, "once") {
+			decision = "allow"
+		}
+	} else {
+		decision = rememberedPermission(a.state.Grants, s, ruleHarness, ruleKind, ruleKey)
+	}
+	if decision == "deny" || decision == "allow" && slices.Contains(req.Decisions, "once") {
+		a.mu.Unlock()
+		return p.replyAutomaticPermission(req, decision, reason, reply)
+	}
 	for _, grant := range a.state.Grants {
 		if key != "" && slices.Contains(req.Decisions, "once") && grant.ProjectID == s.ProjectID &&
-			grant.Harness == p.harness && grant.Kind == req.Kind && grant.Key == key && (grant.SessionID == "" || grant.SessionID == p.id) {
+			grant.Harness == p.harness && grant.Kind == req.Kind && grant.Key == key && grant.Decision != "deny" && (grant.SessionID == "" || grant.SessionID == p.id) {
 			a.mu.Unlock()
-			return reply(true)
+			return p.replyAutomaticPermission(req, "allow", "remembered exact request", reply)
 		}
+	}
+	if facts.decision == "deny" || facts.decision == "allow" && slices.Contains(req.Decisions, "once") {
+		a.mu.Unlock()
+		return p.replyAutomaticPermission(req, facts.decision, "workspace policy", reply)
 	}
 	err := a.commitLocked(func(d *diskState) {
 		s := d.session(p.id)
@@ -96,7 +142,7 @@ func (p *adapter) requestPermission(req Permission, scope map[string]any, reply 
 		if p.turn.approvals == nil {
 			p.turn.approvals = map[string]*pendingApproval{}
 		}
-		p.turn.approvals[req.ID] = &pendingApproval{request: req, key: key, reply: reply}
+		p.turn.approvals[req.ID] = &pendingApproval{request: req, key: key, reply: reply, ruleKey: ruleKey, ruleKind: ruleKind, ruleHarness: ruleHarness}
 	}
 	a.mu.Unlock()
 	return err
@@ -121,6 +167,12 @@ func (p *adapter) dismissPermission(sourceID string) error {
 }
 
 func (a *app) permissionDecision(w http.ResponseWriter, r *http.Request) {
+	resolveRelated := false
+	defer func() {
+		if resolveRelated {
+			a.resolveRememberedPermissions()
+		}
+	}()
 	var body struct {
 		Decision string `json:"decision"`
 	}
@@ -142,7 +194,7 @@ func (a *app) permissionDecision(w http.ResponseWriter, r *http.Request) {
 	}
 	pending := t.approvals[requestID]
 	if pending.busy || !slices.Contains(pending.request.Decisions, body.Decision) ||
-		!slices.Contains([]string{"once", "session", "always", "reject"}, body.Decision) {
+		!slices.Contains([]string{"once", "session", "always", "reject", "deny_project", "allow_global", "deny_global"}, body.Decision) {
 		a.mu.Unlock()
 		fail(w, 409, "This permission decision is unavailable or already being processed.")
 		return
@@ -150,11 +202,17 @@ func (a *app) permissionDecision(w http.ResponseWriter, r *http.Request) {
 	grantID := ""
 	err := a.commitLocked(func(d *diskState) {
 		s := d.session(id)
-		if body.Decision == "session" || body.Decision == "always" {
+		if slices.Contains([]string{"session", "always", "deny_project", "allow_global", "deny_global"}, body.Decision) {
 			grantID = newID()
-			grant := permissionGrant{ID: grantID, ProjectID: s.ProjectID, Harness: s.Harness, Kind: pending.request.Kind, Key: pending.key, CreatedAt: now()}
+			grant := permissionGrant{ID: grantID, ProjectID: s.ProjectID, Harness: pending.ruleHarness, Kind: pending.ruleKind, Key: pending.ruleKey, CreatedAt: now(), Decision: "allow", Label: pending.request.ScopeLabel}
 			if body.Decision == "session" {
 				grant.SessionID = id
+			}
+			if body.Decision == "allow_global" || body.Decision == "deny_global" {
+				grant.ProjectID = ""
+			}
+			if body.Decision == "deny_project" || body.Decision == "deny_global" {
+				grant.Decision = "deny"
 			}
 			d.Grants = append(d.Grants, grant)
 		}
@@ -175,7 +233,7 @@ func (a *app) permissionDecision(w http.ResponseWriter, r *http.Request) {
 	if t.ctx.Err() != nil {
 		err = t.ctx.Err()
 	} else {
-		err = pending.reply(body.Decision != "reject")
+		err = pending.reply(body.Decision != "reject" && body.Decision != "deny_project" && body.Decision != "deny_global")
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -199,6 +257,7 @@ func (a *app) permissionDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	delete(t.approvals, requestID)
+	resolveRelated = grantID != ""
 	if err := a.commitLocked(func(d *diskState) {
 		s := d.session(id)
 		s.Permissions = slices.DeleteFunc(s.Permissions, func(req Permission) bool { return req.ID == requestID })
