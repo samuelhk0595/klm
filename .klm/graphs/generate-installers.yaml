@@ -17,3 +17,4 @@ choices:
                 type: string
                 required: true
         output: {}
+        terminal: true

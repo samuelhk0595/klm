@@ -28,6 +28,9 @@ type codexSubagent struct {
 	adapter   *adapter
 	parentKey string
 	turnID    string
+	callID    string
+	calls     map[string]string
+	turns     map[string]string
 	items     map[string]map[string]any
 	parts     map[string]map[string]bool
 }
@@ -82,6 +85,9 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 	}()
 	c := &codexInteractive{p: p, cwd: cwd, items: map[string]map[string]any{},
 		parts: map[string]map[string]bool{}, requests: map[string]*atomic.Bool{}, children: map[string]*codexSubagent{}}
+	if err := c.restoreChildren(); err != nil {
+		return err
+	}
 	defer func() {
 		for _, live := range c.requests {
 			live.Store(false)
@@ -816,7 +822,8 @@ func putCodexItem(p *adapter, trackedParts map[string]map[string]bool, item map[
 }
 
 func (c *codexInteractive) collaboration(item map[string]any) error {
-	if str(item, "tool") != "spawnAgent" {
+	tool := str(item, "tool")
+	if tool != "spawnAgent" && tool != "sendInput" && tool != "resumeAgent" {
 		return nil
 	}
 	itemID := str(item, "id")
@@ -841,26 +848,92 @@ func (c *codexInteractive) collaboration(item map[string]any) error {
 		if child == nil {
 			continue
 		}
-		parentKey := "codex/subagent/" + itemID + "/" + nativeID
-		if c.children[nativeID] == nil {
-			c.children[nativeID] = &codexSubagent{adapter: child, parentKey: parentKey, items: map[string]map[string]any{}, parts: map[string]map[string]bool{}}
+		tracked := c.children[nativeID]
+		if tracked == nil {
+			tracked = newCodexSubagent(child)
+			c.children[nativeID] = tracked
 			if err := child.resolvedSelection(child.model, child.effort); err != nil {
 				return err
 			}
+		}
+		// Resuming a thread alone does not start work. turn/started will open
+		// a cycle if resume is followed by a native execution.
+		if tool == "resumeAgent" {
+			continue
+		}
+		parentKey := tracked.calls[itemID]
+		if parentKey == "" {
+			parentKey = "codex/subagent/" + itemID + "/" + nativeID
+			// A reused thread can emit turn/started before the call's receipt.
+			if tracked.callID == "" && tracked.parentKey != "" {
+				parentKey = tracked.parentKey
+				tracked.callID = itemID
+			}
+			tracked.calls[itemID] = parentKey
 		}
 		status := "running"
 		if str(item, "status") == "failed" {
 			status = "error"
 		}
-		data := map[string]any{"harness": c.p.harness, "nativeCallId": itemID, "nativeAgentId": nativeID, "childSessionId": child.id, "item": item}
+		if result := child.subagentResults[parentKey]; result != "" {
+			status = result
+		} else if status == "running" {
+			if child.subagentExecution != parentKey {
+				tracked.turnID = ""
+			}
+			tracked.parentKey, tracked.callID = parentKey, itemID
+			if err := c.p.startSubagent(child, parentKey); err != nil {
+				return err
+			}
+		}
+		data := map[string]any{"harness": c.p.harness, "nativeCallId": itemID, "nativeAgentId": nativeID, "childSessionId": child.id, "subagentExecutionId": parentKey, "item": item}
 		if err := c.p.put(parentKey, "subagent", title, "", status, false, data); err != nil {
 			return err
+		}
+		if status == "error" {
+			if err := c.p.finishSubagentExecution(child, parentKey, status); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func newCodexSubagent(child *adapter) *codexSubagent {
+	return &codexSubagent{adapter: child, calls: map[string]string{}, turns: map[string]string{}, items: map[string]map[string]any{}, parts: map[string]map[string]bool{}}
+}
+
+func (c *codexInteractive) restoreChildren() error {
+	if err := c.p.restoreSubagents(); err != nil {
+		return err
+	}
+	for nativeID, child := range c.p.subagents {
+		c.children[nativeID] = newCodexSubagent(child)
+	}
+	c.p.app.mu.Lock()
+	defer c.p.app.mu.Unlock()
+	if parent := c.p.app.state.session(c.p.id); parent != nil {
+		for _, e := range parent.Events {
+			child := c.children[str(e.Data, "nativeAgentId")]
+			execution := subagentEventExecution(e)
+			if e.Type != "subagent" || child == nil || execution == "" {
+				continue
+			}
+			if callID := str(e.Data, "nativeCallId"); callID != "" {
+				child.calls[callID] = execution
+			}
+			if turnID := str(e.Data, "nativeTurnId"); turnID != "" {
+				child.turns[turnID] = execution
+			}
 		}
 	}
 	return nil
 }
 
 func (c *codexInteractive) childFrame(child *codexSubagent, method string, params map[string]any) error {
+	if turnID := str(params, "turnId"); method != "turn/started" && method != "turn/completed" && turnID != "" && turnID != child.turnID {
+		return nil
+	}
 	if method == "thread/tokenUsage/updated" {
 		return child.adapter.setUsage(codexSessionUsage(object(params["tokenUsage"])))
 	}
@@ -875,25 +948,44 @@ func (c *codexInteractive) childFrame(child *codexSubagent, method string, param
 		return c.p.finishSubagent(child.adapter, "error")
 	}
 	if method == "turn/started" {
-		child.turnID = str(object(params["turn"]), "id")
-		return nil
+		turnID := str(object(params["turn"]), "id")
+		if !codexIdentifier(turnID) {
+			return errors.New("Codex returned a subagent turn without a valid identifier.")
+		}
+		if child.turns[turnID] != "" {
+			return nil
+		}
+		if child.parentKey == "" || child.adapter.subagentResults[child.parentKey] != "" {
+			child.parentKey = "codex/subagent/turn/" + turnID + "/" + str(params, "threadId")
+			child.callID = ""
+		}
+		child.turnID = turnID
+		child.turns[turnID] = child.parentKey
+		if err := c.p.startSubagent(child.adapter, child.parentKey); err != nil {
+			return err
+		}
+		return c.p.put(child.parentKey, "subagent", "", "", "running", false, map[string]any{"nativeAgentId": str(params, "threadId"), "nativeTurnId": turnID, "childSessionId": child.adapter.id, "subagentExecutionId": child.parentKey})
 	}
 	if method == "turn/completed" {
 		turn := object(params["turn"])
-		if child.turnID != "" && str(turn, "id") != child.turnID {
+		execution := child.turns[str(turn, "id")]
+		if execution == "" || str(turn, "id") != child.turnID || child.adapter.subagentResults[execution] != "" {
 			return nil
 		}
 		status := "completed"
 		switch str(turn, "status") {
+		case "completed":
 		case "failed":
 			status = "error"
 		case "interrupted":
 			status = "cancelled"
+		default:
+			return errors.New("Codex returned an unknown terminal subagent turn status.")
 		}
-		if err := c.p.finishSubagent(child.adapter, status); err != nil {
+		if err := c.p.finishSubagentExecution(child.adapter, execution, status); err != nil {
 			return err
 		}
-		return c.p.put(child.parentKey, "subagent", "", "", status, false, map[string]any{"nativeAgentId": str(params, "threadId"), "childSessionId": child.adapter.id})
+		return nil
 	}
 	if method == "item/started" || method == "item/completed" {
 		item := object(params["item"])

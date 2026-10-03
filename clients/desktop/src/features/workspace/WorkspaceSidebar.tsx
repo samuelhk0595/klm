@@ -1,9 +1,10 @@
-import { Archive, ArchiveRestore, Bot, Folder, FolderPlus, MoreHorizontal, PanelLeftClose, Pencil, Plus, Search, Settings, SquarePen, Workflow, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Bot, ClipboardList, Folder, FolderPlus, MoreHorizontal, PanelLeftClose, Pencil, Plus, Search, Settings, SquarePen, Workflow, X } from 'lucide-react';
 import { Fragment, useLayoutEffect, useRef, useState } from 'react';
 import { Button, IconButton } from '../../design-system/Button';
 import { Menu, MenuItem } from '../../design-system/Menu';
 import { ProjectActionsMenu } from '../projects/ProjectActionsMenu';
 import type { Session, Project } from '../../engine';
+import { runStatusLabel, taskSessionTitle, type TaskRun } from '../tasks/prototype';
 import { animateSortPositions, captureSortPositions, type SortPositions } from '../sortAnimation';
 
 function sessionRuntimeState(session: Session) {
@@ -39,13 +40,15 @@ function sessionBeforeAt(container: HTMLElement, draggingId: string, clientY: nu
   return '';
 }
 
-export function WorkspaceSidebar({ project, sessions, activeId, activeSection, collapsed, archivedCollapsed, onCollapsedChange, onArchivedCollapsedChange, onSelect, onNew, onCreateFolder, onRename, onPosition, onReorderFolder, onArchiveSession, onArchiveFolder, onClose, onAgents, onGraphs, onEditProject, onRemoveProject }: {
+export function WorkspaceSidebar({ project, sessions, taskRuns = [], taskTimezone = 'UTC', activeId, activeSection, collapsed, archivedCollapsed, onCollapsedChange, onArchivedCollapsedChange, onSelect, onNew, onCreateFolder, onRename, onPosition, onReorderFolder, onArchiveSession, onArchiveFolder, onClose, onAgents, onGraphs, onTasks, onEditProject, onRemoveProject }: {
+  taskRuns?: TaskRun[];
+  taskTimezone?: string;
   project: Project; sessions: Session[]; activeId: string; collapsed: string[]; archivedCollapsed: boolean; onCollapsedChange: (folders: string[]) => void; onArchivedCollapsedChange: (collapsed: boolean) => void;
   onSelect: (id: string) => void; onNew: (folder?: string) => void; onCreateFolder: (name: string) => Promise<string | null>;
   onRename: (session: Session) => void; onPosition: (session: Session, folder: string, beforeId: string) => Promise<boolean>;
   onReorderFolder: (folder: string, before: string) => Promise<boolean>;
   onArchiveSession: (session: Session, archived: boolean) => Promise<boolean>; onArchiveFolder: (folder: string, archived: boolean) => Promise<boolean>;
-  onClose: () => void; activeSection: 'chat' | 'design' | 'agents' | 'graphs'; onAgents: () => void; onGraphs: () => void;
+  onClose: () => void; activeSection: 'chat' | 'design' | 'agents' | 'graphs' | 'tasks'; onAgents: () => void; onGraphs: () => void; onTasks: () => void;
   onEditProject: (project: Project) => void; onRemoveProject: (project: Project) => Promise<string | null>;
 }) {
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -66,7 +69,7 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, c
   const folderPositions = useRef<SortPositions>(new Map());
   const sessionPositions = useRef<SortPositions>(new Map());
   const archivedFolders = new Set(project.archivedFolders);
-  const activeFolders = project.folders.filter(folder => !archivedFolders.has(folder));
+  const activeFolders = [...new Set([...project.folders.filter(folder => !archivedFolders.has(folder)), ...taskRuns.map(run => run.session.workspace).filter(folder => folder !== 'Ungrouped')])];
   const archivedSessions = sessions.filter(session => session.archived && !archivedFolders.has(session.workspace));
   const query = (search ?? '').toLowerCase();
   const matchingArchivedFolders = project.archivedFolders.filter(folder => folder.toLowerCase().includes(query));
@@ -132,6 +135,7 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, c
     <p className="project-folder-label" title={project.folder}><bdi dir="ltr">{project.folder}</bdi></p>
     <nav className="sidebar-navigation" aria-label="Project navigation">
       <Button variant="ghost" size="sm" onClick={() => onNew()}><SquarePen />New session</Button>
+      <Button variant="ghost" size="sm" aria-current={activeSection === 'tasks' ? 'page' : undefined} onClick={onTasks}><ClipboardList />Tasks</Button>
       <Button variant="ghost" size="sm" aria-current={activeSection === 'agents' ? 'page' : undefined} onClick={onAgents}><Bot />Agents</Button>
       <Button variant="ghost" size="sm" aria-current={activeSection === 'graphs' ? 'page' : undefined} onClick={onGraphs}><Workflow />Graphs</Button>
     </nav>
@@ -166,23 +170,25 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, c
       }}><input autoFocus required maxLength={60} disabled={savingFolder} aria-label="Session folder name" placeholder="Topic name" value={folderName} onChange={event => setFolderName(event.target.value)} /><div><Button type="submit" size="sm" disabled={!folderName.trim() || savingFolder}>Create folder</Button><IconButton label="Cancel creating folder" disabled={savingFolder} onClick={() => setAddingFolder(false)}><X /></IconButton></div>{folderError && <p role="alert" className="form-error">{folderError}</p>}</form>}
       {search !== null && <input autoFocus className="search-input" aria-label="Search sessions" placeholder="Find a session..." value={search} onChange={event => setSearch(event.target.value)} />}
       {[...activeFolders, 'Ungrouped'].map(workspace => {
-        const matches = sessions.filter(session => !session.archived && session.workspace === workspace && session.title.toLowerCase().includes(query));
+        const matches = sessions.filter(session => !session.archived && !archivedFolders.has(session.workspace) && session.workspace === workspace && session.title.toLowerCase().includes(query));
+        const localMatches = taskRuns.filter(run => run.session.workspace === workspace && taskSessionTitle(run, taskTimezone).toLowerCase().includes(query));
+        const realFolder = workspace === 'Ungrouped' || project.folders.includes(workspace) && !archivedFolders.has(workspace);
         const expanded = search !== null || !collapsed.includes(workspace);
         const isDropTarget = folderDropTarget === workspace;
         return <Fragment key={workspace}>
           {dragging?.kind === 'folder' && (folderDropBefore === workspace || workspace === 'Ungrouped' && folderDropBefore === '') ? <div className="workspace-folder-placeholder" aria-hidden="true" /> : null}
           <div className={`workspace-group ${isDropTarget ? 'is-drop-target' : ''}`} data-folder-sort-key={workspace}
-          onDragOver={event => { if (dragging?.kind !== 'session') return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; changeSessionDrop(null); setFolderDropTarget(workspace); }}
+          onDragOver={event => { if (!realFolder || dragging?.kind !== 'session') return; event.preventDefault(); event.dataTransfer.dropEffect = 'move'; changeSessionDrop(null); setFolderDropTarget(workspace); }}
           onDragLeave={event => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setFolderDropTarget(''); }}
           onDrop={event => {
-            if (dragging?.kind !== 'session') return;
+            if (!realFolder || dragging?.kind !== 'session') return;
             event.preventDefault();
             const session = sessions.find(item => item.id === dragging.id);
             if (session) void positionSession(session, workspace, '');
           }}>
-          <div className={`workspace-folder-row ${dragging?.kind === 'folder' && dragging.name === workspace ? 'is-dragging' : ''}`} data-folder-name={workspace}
+          <div className={`workspace-folder-row ${dragging?.kind === 'folder' && dragging.name === workspace ? 'is-dragging' : ''}`} data-folder-name={realFolder ? workspace : undefined}
             onDragStart={event => {
-              if (workspace === 'Ungrouped') return;
+              if (!realFolder || workspace === 'Ungrouped') return;
               const index = activeFolders.indexOf(workspace);
               setDragging({ kind: 'folder', name: workspace }); setFolderDropBefore(activeFolders[index + 1] ?? '');
               event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-klm-folder', workspace);
@@ -192,35 +198,36 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, c
               setDragging(null); setFolderDropTarget(''); changeSessionDrop(null); setFolderDropBefore(null);
             }}
             onDragOver={event => {
-              if (dragging?.kind !== 'session') return;
+              if (!realFolder || dragging?.kind !== 'session') return;
               event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; changeSessionDrop(null); setFolderDropTarget(workspace);
             }}
             onDrop={event => {
-              if (dragging?.kind !== 'session') return;
+              if (!realFolder || dragging?.kind !== 'session') return;
               event.preventDefault(); event.stopPropagation();
               const session = sessions.find(item => item.id === dragging.id);
               if (session) void positionSession(session, workspace, '');
             }}>
-            <button className="workspace-folder" draggable={workspace !== 'Ungrouped' && !busyAction && search === null} aria-expanded={expanded} onClick={() => { if (search === null) onCollapsedChange(collapsed.includes(workspace) ? collapsed.filter(item => item !== workspace) : [...collapsed, workspace]); }}><Folder />{workspace}</button><IconButton label={`New session in ${workspace}`} onClick={() => { onCollapsedChange(collapsed.filter(item => item !== workspace)); onNew(workspace); }}><Plus /></IconButton>{workspace !== 'Ungrouped' && <Menu label={`${workspace} actions`} role="menu" className="workspace-action-menu" open={folderMenu === workspace} onOpenChange={open => { setActionError(''); setFolderMenu(open ? workspace : ''); }} side="bottom" trigger={props => <IconButton {...props} label={`${workspace} actions`}><MoreHorizontal /></IconButton>}><MenuItem role="menuitem" disabled={!!busyAction} onClick={() => void runAction(`archive-folder:${workspace}`, () => onArchiveFolder(workspace, true), 'Could not archive the folder. Try again.')}><Archive />Archive</MenuItem></Menu>}
+             <button className="workspace-folder" draggable={realFolder && workspace !== 'Ungrouped' && !busyAction && search === null} aria-expanded={expanded} onClick={() => { if (search === null) onCollapsedChange(collapsed.includes(workspace) ? collapsed.filter(item => item !== workspace) : [...collapsed, workspace]); }}><Folder />{workspace}</button>{realFolder && <IconButton label={`New session in ${workspace}`} onClick={() => { onCollapsedChange(collapsed.filter(item => item !== workspace)); onNew(workspace); }}><Plus /></IconButton>}{realFolder && workspace !== 'Ungrouped' && <Menu label={`${workspace} actions`} role="menu" className="workspace-action-menu" open={folderMenu === workspace} onOpenChange={open => { setActionError(''); setFolderMenu(open ? workspace : ''); }} side="bottom" trigger={props => <IconButton {...props} label={`${workspace} actions`}><MoreHorizontal /></IconButton>}><MenuItem role="menuitem" disabled={!!busyAction} onClick={() => void runAction(`archive-folder:${workspace}`, () => onArchiveFolder(workspace, true), 'Could not archive the folder. Try again.')}><Archive />Archive</MenuItem></Menu>}
           </div>
           {expanded && <div className="session-list"
             onDragOver={event => {
-              if (dragging?.kind !== 'session') return;
+              if (!realFolder || dragging?.kind !== 'session') return;
               event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'; setFolderDropTarget('');
               changeSessionDrop({ workspace, beforeId: sessionBeforeAt(event.currentTarget, dragging.id, event.clientY) });
             }}
             onDrop={event => {
-              if (dragging?.kind !== 'session') return;
+              if (!realFolder || dragging?.kind !== 'session') return;
               event.preventDefault(); event.stopPropagation();
               const moved = sessions.find(item => item.id === dragging.id);
               if (moved) void positionSession(moved, workspace, sessionBeforeAt(event.currentTarget, dragging.id, event.clientY));
             }}>
-            {matches.map(session => <Fragment key={session.id}>
+             {matches.map(session => <Fragment key={session.id}>
               {dragging?.kind === 'session' && sessionDropPosition?.workspace === workspace && sessionDropPosition.beforeId === session.id ? <div className="session-drop-placeholder" aria-hidden="true" /> : null}
               {sessionRow(session)}
-            </Fragment>)}
+             </Fragment>)}
+             {localMatches.map(run => <div key={run.session.id} className="session-row"><button className={`session-item ${run.session.id === activeId ? 'is-active' : ''}`} aria-current={run.session.id === activeId ? 'page' : undefined} onClick={() => onSelect(run.session.id)}><span>{taskSessionTitle(run, taskTimezone)}</span><i className={`session-runtime-led is-${run.status === 'waiting' ? 'waiting' : run.status === 'running' ? 'running' : run.status === 'failed' || run.status === 'interrupted' ? 'error' : 'off'}`} role="img" aria-label={runStatusLabel[run.status]} title={runStatusLabel[run.status]} /></button></div>)}
             {dragging?.kind === 'session' && sessionDropPosition?.workspace === workspace && sessionDropPosition.beforeId === '' ? <div className="session-drop-placeholder" aria-hidden="true" /> : null}
-            {matches.length === 0 && !(dragging?.kind === 'session' && sessionDropPosition?.workspace === workspace) ? <p className="empty-workspace">No sessions</p> : null}
+             {matches.length + localMatches.length === 0 && !(dragging?.kind === 'session' && sessionDropPosition?.workspace === workspace) ? <p className="empty-workspace">No sessions</p> : null}
           </div>}
         </div>
         </Fragment>;

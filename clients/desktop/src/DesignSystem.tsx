@@ -11,6 +11,8 @@ import { Input } from './design-system/Input';
 import { Textarea } from './design-system/Textarea';
 import { RadioGroup } from './design-system/RadioGroup';
 import { Toggle } from './design-system/Toggle';
+import { ToggleGroup } from './design-system/ToggleGroup';
+import { TimePicker } from './design-system/TimePicker';
 import { TokenTextarea } from './design-system/TokenTextarea';
 import { SearchSelect } from './design-system/SearchSelect';
 import { ListTile } from './design-system/ListTile';
@@ -76,6 +78,8 @@ export function DesignSystem() {
   const [model, setModel] = useState('');
   const [graph, setGraph] = useState('');
   const [required, setRequired] = useState(true);
+  const [selectedFormats, setSelectedFormats] = useState(['bold']);
+  const [time, setTime] = useState('09:00');
   const [template, setTemplate] = useState('Review {{choice.findings}} for {{run.input.task}}.');
   return <div className="design-system">
     <Badge tone="accent">KLM foundations / 0.1</Badge><h2>A quiet workspace for complex work.</h2><p className="muted">Tokens and components extracted from the supplied Harness page. Shared primitives below power the actual workspace.</p>
@@ -88,6 +92,8 @@ export function DesignSystem() {
     <Section title="Inputs"><div className="component-row"><Input aria-label="Agent name" placeholder="Agent name" /><Input aria-label="Search agents" type="search" placeholder="Search agents" /><Input aria-label="Disabled input" value="Disabled" disabled /></div></Section>
     <Section title="Form controls"><div className="component-row"><Input aria-label="Identifier" readOnly value="security-reviewer" /><Select label="Default harness" variant="field"><option>OpenCode</option><option>Codex</option><option>Pi</option></Select><Textarea aria-label="Prompt" placeholder="Prompt" /></div></Section>
     <Section title="Toggles"><div className="component-row"><Toggle label="Required" checked={required} onCheckedChange={setRequired} /><Toggle label="Disabled" checked={false} disabled onCheckedChange={() => {}} /></div></Section>
+    <Section title="Time picker"><div className="component-row"><TimePicker label="Time" value={time} onValueChange={setTime} /><TimePicker label="Disabled time" value="18:30" disabled onValueChange={() => {}} /></div></Section>
+    <Section title="Toggle groups"><div className="component-row"><ToggleGroup label="Text formatting" value={selectedFormats} onValueChange={setSelectedFormats} options={[{ value: 'bold', label: 'Bold' }, { value: 'italic', label: 'Italic' }, { value: 'underline', label: 'Underline' }]} /><ToggleGroup label="Disabled formatting" value={['bold']} disabled onValueChange={() => {}} options={[{ value: 'bold', label: 'Bold' }, { value: 'italic', label: 'Italic' }]} /></div></Section>
     <Section title="Inline tokens"><TokenTextarea aria-label="Template value" value={template} onChange={event => setTemplate(event.target.value)} spellCheck={false} tokens={[...template.matchAll(/\{\{\s*[^{}]+?\s*\}\}/g)].map(match => ({ start: match.index, end: match.index + match[0].length }))} /></Section>
     <Section title="Radio buttons and searchable select"><div style={{ display: 'grid', gap: 16 }}><RadioGroup label="Default harness" value={harness} onChange={setHarness} options={[{ value: 'opencode', label: 'OpenCode' }, { value: 'codex', label: 'Codex' }, { value: 'pi', label: 'Pi' }]} /><SearchSelect label="Model" value={model} onChange={setModel} placeholder="Select model" searchPlaceholder="Search models" options={[{ value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', description: 'OpenAI' }, { value: 'gpt-5.4', label: 'GPT-5.4', description: 'OpenAI' }, { value: 'claude-sonnet-4.6', label: 'Claude Sonnet 4.6', description: 'Anthropic' }]} /></div></Section>
     <Section title="List tiles"><ListTile title="Planner" description="Turns a request into a focused implementation plan." metadata={<><span>GPT-5.6 Terra</span><span>High</span></>} onClick={() => setNotice('Planner opened')} actions={<IconButton label="Planner actions" onClick={() => setNotice('Planner actions clicked')}><MoreHorizontal /></IconButton>} /></Section>

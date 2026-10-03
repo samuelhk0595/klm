@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { KeyRound, MessageSquare, Mic, Plus, Trash2, X } from 'lucide-react';
+import { Globe, KeyRound, MessageSquare, Mic, Plus, Send, Trash2, X } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import { ENGINE_URL, getTranscriptionSettings, updateTranscriptionSettings, type TranscriptionSettings } from '../../engine';
 import { configureEngineURL } from '../../platform';
+import { TelegramSettings } from './TelegramSettings';
+import { EngineTimeSettings } from './EngineTimeSettings';
+import type { TelegramLink } from '../tasks/prototype';
 
-type SettingsSection = 'chat' | 'transcription';
+export type SettingsSection = 'chat' | 'engine' | 'transcription' | 'telegram';
 
 const emptyTranscription: TranscriptionSettings = {
   apiKeyConfigured: false,
@@ -18,9 +21,13 @@ function failureMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Could not update transcription settings.';
 }
 
-export function SettingsDialog({ onClose, onDesignSystem }: { onClose: () => void; onDesignSystem: () => void }) {
+export function SettingsDialog({ onClose, onDesignSystem, initialSection = 'chat', telegram, onTelegramChange, timezone, onTimezoneChange }: {
+  onClose: () => void; onDesignSystem: () => void; initialSection?: SettingsSection;
+  telegram: TelegramLink; onTelegramChange: (link: TelegramLink) => void;
+  timezone: string; onTimezoneChange: (timezone: string) => void;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [section, setSection] = useState<SettingsSection>('chat');
+  const [section, setSection] = useState<SettingsSection>(initialSection);
   const [engineURL, setEngineURL] = useState(ENGINE_URL);
   const [engineError, setEngineError] = useState('');
   const [settings, setSettings] = useState(emptyTranscription);
@@ -83,7 +90,9 @@ export function SettingsDialog({ onClose, onDesignSystem }: { onClose: () => voi
     <div className="app-settings-layout">
       <nav className="settings-sidebar" aria-label="Settings sections">
         <button type="button" className={section === 'chat' ? 'is-active' : ''} aria-current={section === 'chat' ? 'page' : undefined} onClick={() => setSection('chat')}><MessageSquare />Chat</button>
+        <button type="button" className={section === 'engine' ? 'is-active' : ''} aria-current={section === 'engine' ? 'page' : undefined} onClick={() => setSection('engine')}><Globe />Engine</button>
         <button type="button" className={section === 'transcription' ? 'is-active' : ''} aria-current={section === 'transcription' ? 'page' : undefined} onClick={() => setSection('transcription')}><Mic />Transcription</button>
+        <button type="button" className={section === 'telegram' ? 'is-active' : ''} aria-current={section === 'telegram' ? 'page' : undefined} onClick={() => setSection('telegram')}><Send />Telegram</button>
       </nav>
       <div className="settings-panel">
         {section === 'chat' ? <section aria-labelledby="chat-settings-title">
@@ -95,7 +104,7 @@ export function SettingsDialog({ onClose, onDesignSystem }: { onClose: () => voi
             <div className="dialog-actions"><Button variant="primary" type="submit">Connect</Button></div>
           </form>
           <div className="settings-design-system"><span>Interface components and tokens</span><Button onClick={onDesignSystem}>Open design system</Button></div>
-        </section> : <section aria-labelledby="transcription-settings-title">
+        </section> : section === 'engine' ? <EngineTimeSettings timezone={timezone} onChange={onTimezoneChange} /> : section === 'telegram' ? <TelegramSettings link={telegram} onChange={onTelegramChange} /> : <section aria-labelledby="transcription-settings-title">
           <div className="settings-panel-title"><div><h3 id="transcription-settings-title">Transcription</h3>{settings.apiKeyConfigured && !removeAPIKey && <span className="settings-configured"><KeyRound />API key configured</span>}</div>{loading && <span className="muted">Loading...</span>}</div>
           <form className="settings-form transcription-settings-form" onSubmit={saveTranscription}>
             <div className="settings-field settings-api-key">

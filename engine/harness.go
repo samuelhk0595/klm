@@ -475,6 +475,8 @@ type adapter struct {
 	commands            map[string]string
 	subagents           map[string]*adapter
 	subagent            bool
+	subagentExecution   string
+	subagentResults     map[string]string
 	piMessage           int
 	failed              bool
 	completed           bool
@@ -548,6 +550,9 @@ func (p *adapter) put(key, kind, title, text, status string, appendText bool, ra
 		}
 	}
 	data := map[string]any{"harness": p.harness}
+	if p.subagent && p.subagentExecution != "" {
+		data["subagentExecutionId"] = p.subagentExecution
+	}
 	for k, v := range raw {
 		data[k] = v
 	}

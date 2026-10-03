@@ -247,11 +247,16 @@ function subagentEventLabel(event: EngineEvent | undefined) {
 
 function SubagentActivity({ event, session, onOpen }: { event: EngineEvent; session?: Session; onOpen?: (sessionId: string) => void }) {
   const childSessionId = typeof event.data?.childSessionId === 'string' ? event.data.childSessionId : '';
-  const running = ['running', 'pending', 'started'].includes(event.status ?? 'running') && (!session || session.status === 'running');
-  const detail = running ? subagentEventLabel(session?.events.at(-1)) || 'starting' : 'completed';
+  const status = event.status ?? 'unknown';
+  const running = ['running', 'pending', 'started'].includes(status);
+  const latest = session?.events.at(-1);
+  const executionId = event.data?.subagentExecutionId;
+  const currentActivity = !executionId || latest?.data?.subagentExecutionId === executionId ? latest : undefined;
+  const failed = ['error', 'failed', 'interrupted'].includes(status);
+  const detail = running ? subagentEventLabel(currentActivity) || 'starting' : failed ? status === 'interrupted' ? 'interrupted' : 'failed' : status;
   return <button type="button" className={`subagent-activity ${running ? 'is-running' : ''}`} disabled={!childSessionId || !onOpen} onClick={() => onOpen?.(childSessionId)}>
     <span className="subagent-activity-icon"><Bot aria-hidden="true" /></span>
-    <span className="subagent-activity-copy"><strong>{event.title || 'Subagent'}</strong><small title={detail}>{detail}</small></span>
+    <span className="subagent-activity-copy"><strong>{event.title || 'Subagent'}</strong><small className={failed ? 'form-error' : undefined} title={detail}>{detail}</small></span>
   </button>;
 }
 

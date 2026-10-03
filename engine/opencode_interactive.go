@@ -803,6 +803,22 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	infos := map[string]map[string]any{}
 	parts := map[string]map[string]any{}
 	children := map[string]*openCodeSubagent{}
+	registerChild := func(nativeID string, child *adapter) {
+		if children[nativeID] != nil {
+			return
+		}
+		windows := map[string]*int64{}
+		for id, window := range usage.windows {
+			windows[id] = window
+		}
+		children[nativeID] = &openCodeSubagent{adapter: child, infos: map[string]map[string]any{}, parts: map[string]map[string]any{}, usage: &openCodeUsage{messages: map[string]map[string]any{}, steps: map[string]map[string]map[string]any{}, windows: windows}}
+	}
+	if err := p.restoreSubagents(); err != nil {
+		return err
+	}
+	for nativeID, child := range p.subagents {
+		registerChild(nativeID, child)
+	}
 	putPart := func(target *adapter, nativeSessionID string, targetBaseline map[string]bool, targetInfos map[string]map[string]any, part map[string]any, discoverSubagent bool) error {
 		messageID, partID := str(part, "messageID"), str(part, "id")
 		if targetBaseline[messageID] || str(targetInfos[messageID], "role") != "assistant" {
@@ -824,7 +840,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			} else if strings.TrimSpace(body) == "" {
 				return nil
 			}
-			if object(part["time"])["end"] != nil || object(infos[messageID]["time"])["completed"] != nil {
+			if object(part["time"])["end"] != nil || object(targetInfos[messageID]["time"])["completed"] != nil {
 				status = "completed"
 			}
 			// Reasoning metadata can contain encrypted provider state; retain text only.
@@ -862,15 +878,18 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 					}
 					if child != nil {
 						raw["childSessionId"], raw["nativeAgentId"] = child.id, nativeChildID
-						if children[nativeChildID] == nil {
-							windows := map[string]*int64{}
-							for id, window := range usage.windows {
-								windows[id] = window
+						registerChild(nativeChildID, child)
+						execution := "opencode/" + messageID + "/" + partID
+						raw["subagentExecutionId"] = execution
+						if result := child.subagentResults[execution]; result != "" {
+							status = result
+						} else if subagentRunning(status) {
+							if err := p.startSubagent(child, execution); err != nil {
+								return err
 							}
-							children[nativeChildID] = &openCodeSubagent{adapter: child, infos: map[string]map[string]any{}, parts: map[string]map[string]any{}, usage: &openCodeUsage{messages: map[string]map[string]any{}, steps: map[string]map[string]map[string]any{}, windows: windows}}
 						}
 						if status == "completed" || status == "error" || status == "cancelled" {
-							if err := p.finishSubagent(child, status); err != nil {
+							if err := p.finishSubagentExecution(child, execution, status); err != nil {
 								return err
 							}
 						}

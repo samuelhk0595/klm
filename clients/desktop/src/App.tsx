@@ -26,7 +26,10 @@ import { connectUpdates } from './features/chat/updatesConnection';
 import { DesignSystem } from './DesignSystem';
 import { ProjectRail } from './features/projects/ProjectRail';
 import { ProjectDialog } from './features/projects/ProjectDialog';
-import { SettingsDialog } from './features/settings/SettingsDialog';
+import { SettingsDialog, type SettingsSection } from './features/settings/SettingsDialog';
+import { TasksPage } from './features/tasks/TasksPage';
+import { TaskSessionChat } from './features/tasks/TaskSessionChat';
+import { taskSessionTitle, useTaskPrototype } from './features/tasks/prototype';
 import { ENGINE_URL, EngineRequestError, getConversationGraph, mergeGraphState, selectConversationGraph, request, type ConversationGraphState, type EngineEvent, type EngineState, type EngineSnapshot, type EventPage, type Harness, type Project, type Session, type SessionResponse, type SessionMetadata, type SourceReference } from './engine';
 import { Select } from './design-system/Select';
 import paperBoatIcon from './features/projects/paper-boat-rail.png';
@@ -142,7 +145,14 @@ export function App() {
   const awaitingPermission = !!session?.permissions?.length;
   const awaitingQuestion = !!session?.questions?.length;
   const createProject = projects.find(item => item.id === creatingSession?.projectId);
-  const [view, setView] = useState<'chat' | 'design' | 'agents' | 'graphs'>('chat');
+  const [view, setView] = useState<'chat' | 'design' | 'agents' | 'graphs' | 'tasks'>('chat');
+  const taskPrototype = useTaskPrototype();
+  const [taskSessionIds, setTaskSessionIds] = useState<Record<string, string>>({});
+  const [taskDetailsId, setTaskDetailsId] = useState('');
+  const projectTaskRuns = project ? taskPrototype.runsFor(project.id) : [];
+  const taskRun = projectTaskRuns.find(run => run.session.id === taskSessionIds[project?.id ?? '']);
+  const taskSession = taskRun?.session;
+  const sourceTask = project && taskRun ? taskPrototype.tasksFor(project.id).find(task => task.id === taskRun.taskId) : undefined;
   const { catalog, error: catalogError, loading: catalogLoading, reload: reloadCatalog } = useAuthoringCatalog(project?.id ?? '');
   const catalogGraphs = useMemo(() => catalog?.graphs.map(graphListEntry) ?? [], [catalog]);
   const [graphErrors, setGraphErrors] = useState<Record<string, string>>({});
@@ -169,13 +179,14 @@ export function App() {
   const [graphsVisit, setGraphsVisit] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const sideOpen = openSideSessions.includes(activeId);
-  const sideVisible = sideOpen && view === 'chat' && !sidebarOpen && !creatingSession && !editingProject && addingProject === null;
+  const sideVisible = sideOpen && view === 'chat' && !taskSession && !sidebarOpen && !creatingSession && !editingProject && addingProject === null;
   const sideSession = sessions.find(item => item.parentId === activeId && item.role === 'side_agent');
   const [sideSources, setSideSources] = useState<Record<string, SourceReference[]>>({});
   const [sideErrors, setSideErrors] = useState<Record<string, string>>({});
   const openingSide = useRef(new Set<string>());
   const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>({});
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('chat');
   const shell = useRef<HTMLDivElement>(null);
   const drag = useRef<{ pointerId: number; x: number; y: number; left: number; top: number; minX: number; maxX: number; minY: number; maxY: number } | null>(null);
   useEffect(() => {
@@ -363,6 +374,15 @@ export function App() {
     if (!project) return;
     navigation.current += 1;
     setCreatingSession({ projectId: project.id, workspace: folder });
+    setSidebarOpen(false);
+  }
+  function openTaskSession(id: string, sessionFolder?: string) {
+    if (!project) return;
+    navigation.current += 1;
+    setTaskSessionIds(current => ({ ...current, [project.id]: id }));
+    const folder = sessionFolder ?? projectTaskRuns.find(run => run.session.id === id)?.session.workspace;
+    if (folder) setWorkspaceNavigation(current => ({ ...current, collapsedFolders: { ...current.collapsedFolders, [project.id]: (current.collapsedFolders[project.id] ?? []).filter(item => item !== folder) } }));
+    setView('chat');
     setSidebarOpen(false);
   }
   async function updateSession(target: Session, action: 'messages' | 'stop' | 'harness', body: (ComposerDraft & { sources?: SourceReference[]; mode?: SendMode }) | { harness: Harness['id'] } | Record<string, never>) {
@@ -592,6 +612,7 @@ export function App() {
       setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [next]) }));
       if (navigation.current === selection) {
         setWorkspaceNavigation(current => ({ ...current, activeProjectId: created.projectId, selectedSessions: { ...current.selectedSessions, [created.projectId]: created.id } }));
+        setTaskSessionIds(current => ({ ...current, [created.projectId]: '' }));
         setView('chat');
       }
       return null;
@@ -675,19 +696,25 @@ export function App() {
     onLostPointerCapture={() => { drag.current = null; if (shell.current) delete shell.current.dataset.dragging; }}
     onPointerCancel={() => { drag.current = null; if (shell.current) delete shell.current.dataset.dragging; }}
   >
-    <ProjectRail projects={projects} sessions={sessions} activeId={project?.id ?? ''} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onReorder={reorderProject} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />
+    <ProjectRail projects={projects} sessions={sessions} activeId={project?.id ?? ''} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onReorder={reorderProject} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); setSettingsSection('chat'); setSettingsOpen(true); }} />
     {sidebarOpen && <button className="panel-backdrop" aria-label="Close side panel" onClick={() => setSidebarOpen(false)} />}
-    {project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} collapsed={collapsedFolders[project.id] ?? []} archivedCollapsed={collapsedArchivedProjects.includes(project.id)} onCollapsedChange={folders => setWorkspaceNavigation(current => ({ ...current, collapsedFolders: { ...current.collapsedFolders, [project.id]: folders } }))} onArchivedCollapsedChange={collapsed => setWorkspaceNavigation(current => ({ ...current, collapsedArchivedProjects: collapsed ? [...new Set([...current.collapsedArchivedProjects, project.id])] : current.collapsedArchivedProjects.filter(id => id !== project.id) }))} onNew={newSession} onCreateFolder={createFolder} onRename={setRenamingSession} onPosition={async (target, workspace, beforeId) => (await patchSession(target, { position: { workspace, beforeId } })) === null} onReorderFolder={reorderFolder} onArchiveSession={async (target, archived) => (await patchSession(target, { archived })) === null} onArchiveFolder={archiveFolder} onSelect={id => { navigation.current += 1; setWorkspaceNavigation(current => ({ ...current, selectedSessions: { ...current.selectedSessions, [project.id]: id } })); setView('chat'); setSidebarOpen(false); }} onClose={() => setSidebarOpen(false)} onAgents={() => { navigation.current += 1; setAgentsVisit(current => current + 1); setView('agents'); setSidebarOpen(false); }} onGraphs={() => { navigation.current += 1; setGraphsVisit(current => current + 1); setView('graphs'); setSidebarOpen(false); }} onEditProject={openProjectEditor} onRemoveProject={target => removeProject(target.id)} />}
+    {project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} taskRuns={projectTaskRuns} taskTimezone={taskPrototype.timezone} activeId={view === 'chat' ? taskSession?.id ?? activeId : ''} activeSection={view} collapsed={collapsedFolders[project.id] ?? []} archivedCollapsed={collapsedArchivedProjects.includes(project.id)} onCollapsedChange={folders => setWorkspaceNavigation(current => ({ ...current, collapsedFolders: { ...current.collapsedFolders, [project.id]: folders } }))} onArchivedCollapsedChange={collapsed => setWorkspaceNavigation(current => ({ ...current, collapsedArchivedProjects: collapsed ? [...new Set([...current.collapsedArchivedProjects, project.id])] : current.collapsedArchivedProjects.filter(id => id !== project.id) }))} onNew={newSession} onCreateFolder={createFolder} onRename={setRenamingSession} onPosition={async (target, workspace, beforeId) => (await patchSession(target, { position: { workspace, beforeId } })) === null} onReorderFolder={reorderFolder} onArchiveSession={async (target, archived) => (await patchSession(target, { archived })) === null} onArchiveFolder={archiveFolder} onSelect={id => {
+      if (projectTaskRuns.some(run => run.session.id === id)) { openTaskSession(id); return; }
+      navigation.current += 1;
+      setTaskSessionIds(current => ({ ...current, [project.id]: '' }));
+      setWorkspaceNavigation(current => ({ ...current, selectedSessions: { ...current.selectedSessions, [project.id]: id } }));
+      setView('chat'); setSidebarOpen(false);
+    }} onClose={() => setSidebarOpen(false)} onAgents={() => { navigation.current += 1; setAgentsVisit(current => current + 1); setView('agents'); setSidebarOpen(false); }} onGraphs={() => { navigation.current += 1; setGraphsVisit(current => current + 1); setView('graphs'); setSidebarOpen(false); }} onTasks={() => { navigation.current += 1; setTaskDetailsId(''); setView('tasks'); setSidebarOpen(false); }} onEditProject={openProjectEditor} onRemoveProject={target => removeProject(target.id)} />}
     <main className="main-panel">
-      <header className="session-header"><div id="workspace-header-leading" className="header-leading">{project && <IconButton label="Open sessions" className="mobile-nav" onClick={() => setSidebarOpen(true)}><PanelLeft /></IconButton>}<h1>{view === 'chat' && session ? <button className="session-title-button" title="Rename session" onClick={() => setRenamingSession(session)}>{session.title}</button> : view === 'design' ? 'Design system' : view === 'agents' ? 'Agents' : view === 'graphs' ? 'Graphs' : project?.name ?? 'KLM'}</h1>{view === 'chat' && session && gitBranch && <span className="mode-label session-header-branch" title={gitBranch}><GitBranch aria-hidden="true" /><span>{gitBranch}</span></span>}</div><div id="workspace-header-actions" className="header-actions">
-        {session && view === 'chat' && <Button size="sm" className="export-button" onClick={exportSession}>Session log<Download /></Button>}
+      <header className="session-header"><div id="workspace-header-leading" className="header-leading">{project && <IconButton label="Open sessions" className="mobile-nav" onClick={() => setSidebarOpen(true)}><PanelLeft /></IconButton>}<h1>{view === 'chat' && taskRun ? taskSessionTitle(taskRun, taskPrototype.timezone) : view === 'chat' && session ? <button className="session-title-button" title="Rename session" onClick={() => setRenamingSession(session)}>{session.title}</button> : view === 'design' ? 'Design system' : view === 'agents' ? 'Agents' : view === 'graphs' ? 'Graphs' : view === 'tasks' ? 'Tasks' : project?.name ?? 'KLM'}</h1>{view === 'chat' && taskRun && <Button size="sm" variant="ghost" className="task-chat-reference" onClick={() => { setTaskDetailsId(sourceTask?.id ?? ''); setView('tasks'); }}>Task · {sourceTask?.name ?? taskRun.taskName}</Button>}{view === 'chat' && !taskSession && session && gitBranch && <span className="mode-label session-header-branch" title={gitBranch}><GitBranch aria-hidden="true" /><span>{gitBranch}</span></span>}</div><div id="workspace-header-actions" className="header-actions">
+        {session && !taskSession && view === 'chat' && <Button size="sm" className="export-button" onClick={exportSession}>Session log<Download /></Button>}
         {IS_DESKTOP && <IconButton label="Focus" onClick={() => void focus()}><Focus /></IconButton>}
-        {session && view === 'chat' && <IconButton label={sideOpen ? 'Close side agent' : 'Open side agent'} aria-expanded={sideOpen} onClick={() => { setSideOpen(!sideOpen); setSidebarOpen(false); }}><PanelRight /></IconButton>}
+        {session && !taskSession && view === 'chat' && <IconButton label={sideOpen ? 'Close side agent' : 'Open side agent'} aria-expanded={sideOpen} onClick={() => { setSideOpen(!sideOpen); setSidebarOpen(false); }}><PanelRight /></IconButton>}
       </div></header>
       {focusError && <div role="alert" className="storage-error">{focusError} <Button size="sm" onClick={() => void focus()}>Retry</Button></div>}
       {connectionError && <div role="alert" className="storage-error">{connectionError} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}
-      {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav<SessionTab> value={view === 'design' ? 'chat' : activeTab} onChange={tab => { setView('chat'); setSessionTabs(current => ({ ...current, [activeId]: tab })); }} items={view === 'chat' ? tabItems : [{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <Select label="Move session to folder" value={session.workspace} disabled={pendingSessions[session.id] || !!connectionError} onChange={event => void patchSession(session, { workspace: event.target.value })}>{[...project.folders.filter(folder => !project.archivedFolders.includes(folder)), 'Ungrouped'].map(folder => <option key={folder} value={folder}>{folder}</option>)}</Select>}</div>}
-      {view === 'design' ? <DesignSystem /> : (view === 'agents' || view === 'graphs') && project ? <ProjectAuthoring key={`${project.id}:${view}:${agentsVisit}:${graphsVisit}`} projectId={project.id} area={view} /> : !loaded ? <div className="empty-chat"><h2>{connectionError ? 'Engine disconnected' : 'Connecting to engine...'}</h2></div> : !project ? <div className="empty-chat"><h2>Add a project</h2><Button onClick={() => void openProjectPicker()}>Add project</Button></div> : !session ? <div className="empty-chat"><h2>Create a session</h2><Button onClick={() => newSession()} disabled={!!connectionError}>Create session</Button></div> : <>
+      {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav<SessionTab> value={view === 'design' || taskSession ? 'chat' : activeTab} onChange={tab => { setView('chat'); if (!taskSession) setSessionTabs(current => ({ ...current, [activeId]: tab })); }} items={view === 'chat' && !taskSession ? tabItems : [{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && (taskSession ? <Select label="Move session to folder" value={taskSession.workspace} onChange={event => { const workspace = event.target.value; taskPrototype.updateSession(project.id, taskSession.id, current => ({ ...current, workspace })); }}>{[...new Set(['Tasks', taskSession.workspace, ...project.folders.filter(folder => !project.archivedFolders.includes(folder)), 'Ungrouped'])].map(folder => <option key={folder} value={folder}>{folder}</option>)}</Select> : session && <Select label="Move session to folder" value={session.workspace} disabled={pendingSessions[session.id] || !!connectionError} onChange={event => void patchSession(session, { workspace: event.target.value })}>{[...project.folders.filter(folder => !project.archivedFolders.includes(folder)), 'Ungrouped'].map(folder => <option key={folder} value={folder}>{folder}</option>)}</Select>)}</div>}
+      {view === 'design' ? <DesignSystem /> : view === 'tasks' && project ? <TasksPage key={`${project.id}:${taskDetailsId}`} projectId={project.id} tasks={taskPrototype.tasksFor(project.id)} runs={projectTaskRuns} initialTaskId={taskDetailsId} nextFiringFor={task => taskPrototype.nextFiringFor(project.id, task)} folders={project.folders.filter(folder => !project.archivedFolders.includes(folder))} telegram={taskPrototype.telegram} timezone={taskPrototype.timezone} onSave={(draft, id) => taskPrototype.saveTask(project.id, draft, id)} onDelete={id => taskPrototype.deleteTask(project.id, id)} onRun={task => { const id = taskPrototype.runTask(project.id, task); if (id) openTaskSession(id, task.sessionFolder); }} onOpenSession={openTaskSession} onTelegramSettings={() => { setSettingsSection('telegram'); setSettingsOpen(true); }} /> : (view === 'agents' || view === 'graphs') && project ? <ProjectAuthoring key={`${project.id}:${view}:${agentsVisit}:${graphsVisit}`} projectId={project.id} area={view} /> : taskRun && project ? <TaskSessionChat key={taskRun.session.id} run={taskRun} timezone={taskPrototype.timezone} telegram={taskPrototype.telegram} draft={drafts[taskRun.session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [taskRun.session.id]: draft }))} onSend={text => taskPrototype.appendMessage(project.id, taskRun.session.id, text)} onYoloChange={yolo => taskPrototype.updateSession(project.id, taskRun.session.id, current => ({ ...current, yolo }))} onFavorite={(eventId, favorite) => taskPrototype.updateSession(project.id, taskRun.session.id, current => ({ ...current, events: current.events.map(event => event.id === eventId ? { ...event, favorite } : event) }))} /> : !loaded ? <div className="empty-chat"><h2>{connectionError ? 'Engine disconnected' : 'Connecting to engine...'}</h2></div> : !project ? <div className="empty-chat"><h2>Add a project</h2><Button onClick={() => void openProjectPicker()}>Add project</Button></div> : !session ? <div className="empty-chat"><h2>Create a session</h2><Button onClick={() => newSession()} disabled={!!connectionError}>Create session</Button></div> : <>
         {activeTab === 'chat' && <ConversationHistory session={session} subagents={sessions.filter(item => item.parentId === activeId && item.role === 'subagent')} working={working} label="Conversation" onSnapshot={receiveSession} onHistory={receiveHistory} onEventChange={receiveEvent} onAskSide={askSide} onOpenSubagent={openSubagent} empty={<div className="empty-chat"><div className="empty-chat-brand" role="img" aria-label="KLM Harness"><img className="empty-chat-brand-icon" src={paperBoatIcon} alt="" /><span className="empty-chat-wordmark" aria-hidden="true"><span>K</span><span>L</span><span>M</span></span><Badge>Harness</Badge></div><h2>What would you like to work on?</h2></div>} />}
         {activeTab.startsWith('subagent:') && <SubagentView session={activeSubagent} onSnapshot={receiveSession} onHistory={receiveHistory} />}
         {(catalogError || !!catalog?.errors.length) && <div role="alert" className="storage-error">{catalogError || catalog?.errors.join(' ')} <Button size="sm" disabled={catalogLoading} onClick={() => void reloadCatalog().catch(() => {})}>Retry</Button></div>}
@@ -734,6 +761,6 @@ export function App() {
     {editingProject && <ProjectDialog key={`edit-project:${editingProject.id}`} initialFolder={editingProject.folder} project={editingProject} onSave={input => editProject(editingProject.id, input)} onClose={() => setEditingProject(null)} />}
     {creatingSession && createProject && <CreateSessionDialog project={createProject} harnesses={harnesses} workspace={creatingSession.workspace} onCreate={createSession} onClose={() => { navigation.current += 1; setCreatingSession(null); }} />}
     {renamingSession && <RenameSessionDialog key={renamingSession.id} session={renamingSession} onRename={title => patchSession(renamingSession, { title })} onClose={() => setRenamingSession(null)} />}
-    {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} onDesignSystem={() => { setSettingsOpen(false); setView('design'); }} />}
+    {settingsOpen && <SettingsDialog initialSection={settingsSection} telegram={taskPrototype.telegram} onTelegramChange={taskPrototype.setTelegram} timezone={taskPrototype.timezone} onTimezoneChange={taskPrototype.setTimezone} onClose={() => setSettingsOpen(false)} onDesignSystem={() => { setSettingsOpen(false); setView('design'); }} />}
   </div>;
 }
