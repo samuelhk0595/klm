@@ -172,6 +172,9 @@ func (a *app) scheduleMessagesLocked() {
 		return
 	}
 	for _, s := range a.state.Sessions {
+		if run := a.state.sessionTaskRun(s.ID); run != nil && (run.Status == "queued" || run.Status == "finishing" || run.Status == "cancelling") {
+			continue
+		}
 		if a.runs[s.ID] != nil || len(s.Queue) == 0 {
 			continue
 		}

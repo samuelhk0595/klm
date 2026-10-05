@@ -58,7 +58,7 @@ func graphConversationFactory(a *app, t *turn, s Session) (*GraphAdapterHooks, e
 	}
 	if mutable {
 		tools = append(tools,
-			graphTool("graph_invoke", "Invoke or schedule an expressly authorized graph activity. Selection alone is not authorization. Omitted workspace uses the project folder (original) without confirmation.", map[string]any{"operationId": textField, "graphId": textField, "objective": textField, "task": textField, "authorization": graphAuthorizationSchema(), "workspace": graphWorkspaceSchema(), "dependencies": map[string]any{"type": "array", "items": textField}, "priority": integer}, "operationId", "graphId", "objective", "task", "authorization"),
+			graphTool("graph_invoke", "Invoke an authorized graph. Ordinary chat requires real user-event authorization; an active Task Run may instead supply its captured taskGrantId and exact saved objective. Never combine them. Selection alone grants nothing. Omitted workspace uses original.", map[string]any{"operationId": textField, "graphId": textField, "objective": textField, "task": textField, "authorization": graphAuthorizationSchema(), "taskGrantId": textField, "workspace": graphWorkspaceSchema(), "dependencies": map[string]any{"type": "array", "items": textField}, "priority": integer}, "operationId", "graphId", "objective", "task"),
 			graphTool("graph_assess", "Assess whether a completed run met its authorized objective; normal completion is not semantic success.", map[string]any{"activityId": textField, "runId": textField, "operationId": textField, "expectedVersion": integer, "satisfied": map[string]any{"type": "boolean"}, "reason": textField}, "activityId", "runId", "operationId", "expectedVersion", "satisfied", "reason"),
 			graphTool("graph_update_activity", "Versioned activity update. Retry retains the activity authorization and needs concrete correction, a self-contained task and an explicit fresh/reuse decision after a prior run.", map[string]any{"activityId": textField, "operationId": textField, "expectedVersion": integer, "action": map[string]any{"type": "string", "enum": []string{"retry", "await_user", "abandon", "reprioritize", "change_dependencies"}}, "task": textField, "correction": textField, "workspace": graphWorkspaceSchema(), "userEventId": map[string]any{"type": "string", "description": "Real user event required for abandon, reprioritize or change_dependencies; not a workspace default justification or replacement activity authorization."}, "priority": integer, "dependencies": map[string]any{"type": "array", "items": textField}}, "activityId", "operationId", "expectedVersion", "action"))
 	}
@@ -69,6 +69,11 @@ func graphConversationFactory(a *app, t *turn, s Session) (*GraphAdapterHooks, e
 		return nil, errors.New("Graph conversation owner is unavailable.")
 	}
 	projection := a.state.graphProjection(owner)
+	var taskContext any
+	if run := a.state.sessionTaskRun(owner); mutable && taskAuthorityActive(run) {
+		taskContext = map[string]any{"runId": run.ID, "taskGrantId": run.Snapshot.AuthorizationID, "instructions": run.Snapshot.Instructions, "allowedGraphIds": run.Snapshot.AllowedGraphIDs, "input": taskRunInput(*run), "status": run.Status}
+		tools = append(tools, graphTool("task_finish", "Record an assessed Task result, frozen after native settlement. Graph completion or turn end is not Task success.", map[string]any{"runId": textField, "operationId": textField, "outcome": map[string]any{"type": "string", "enum": []string{"succeeded", "failed"}}, "summary": textField, "report": textField, "graphRunIds": map[string]any{"type": "array", "items": textField}}, "runId", "operationId", "outcome", "summary", "report", "graphRunIds"))
+	}
 	events := []map[string]string{}
 	for _, e := range parent.Events {
 		if e.Type == "user" {
@@ -88,6 +93,10 @@ func graphConversationFactory(a *app, t *turn, s Session) (*GraphAdapterHooks, e
 		return nil, err
 	}
 	t.prompt = prompt + "\n" + t.prompt
+	if taskContext != nil {
+		contextJSON, _ := json.Marshal(taskContext)
+		t.prompt = "Active saved Task authorization (distinct from human messages): " + string(contextJSON) + "\nFor this active Task, graph_invoke uses taskGrantId and the exact saved instructions as objective, omitting authorization. This standing Task grant is the express activity authorization; never fabricate event IDs. It covers only selected graphs fulfilling these instructions. Inspect and assess graph reports, then call task_finish. Questions remain interactive; retry still needs explicit fresh/reuse. Task authority expires on termination.\n" + t.prompt
+	}
 	hooks := &GraphAdapterHooks{Node: false, Tools: tools, Call: func(ctx context.Context, name string, raw json.RawMessage) (any, error) {
 		return a.graphConversationCall(ctx, owner, mutable, name, raw)
 	}}
@@ -265,6 +274,8 @@ func (a *app) graphConversationCall(ctx context.Context, owner string, mutable b
 		return nil, errors.New("Only the main conversation orchestrator may mutate graph activities.")
 	}
 	switch name {
+	case "task_finish":
+		return a.finishTaskTool(owner, raw)
 	case "graph_invoke":
 		return a.invokeGraphActivity(ctx, owner, raw)
 	case "graph_assess":
@@ -327,7 +338,11 @@ func (a *app) invokeGraphActivity(ctx context.Context, owner string, raw json.Ra
 		return nil, err
 	}
 	normalizeGraphWorkspaceDecision(&args.Workspace)
-	if !validLinkedText(args.OperationID, 200) || !validAuthoringID(args.GraphID) || !validLinkedText(args.Task, 128<<10) || !validLinkedText(args.Objective, 16<<10) {
+	objectiveLimit := 16 << 10
+	if args.TaskGrantID != "" {
+		objectiveLimit = 48 << 10
+	} // captured 12,000 UTF-16 units may exceed 16 KiB
+	if !validLinkedText(args.OperationID, 200) || !validAuthoringID(args.GraphID) || !validLinkedText(args.Task, 128<<10) || !validLinkedText(args.Objective, objectiveLimit) {
 		return nil, errors.New("Provide valid operationId, graphId, objective and a self-contained task.")
 	}
 	a.mu.Lock()
@@ -343,7 +358,21 @@ func (a *app) invokeGraphActivity(ctx context.Context, owner string, raw json.Ra
 		a.mu.Unlock()
 		return nil, errors.New("Main conversation is unavailable.")
 	}
-	if err := validateGraphAuthorization(&a.state, owner, args.Authorization); err != nil {
+	activity := GraphActivity{ID: newID(), ConversationID: owner, ProjectID: s.ProjectID, GraphID: args.GraphID, Objective: args.Objective, Task: args.Task, Authorization: args.Authorization, Workspace: args.Workspace, Dependencies: args.Dependencies, Priority: args.Priority, Status: "ready", Version: 1, OperationIDs: []string{args.OperationID}, CreatedAt: now(), UpdatedAt: now()}
+	if args.TaskGrantID != "" {
+		if run := a.state.sessionTaskRun(owner); run != nil {
+			activity.TaskRunID, activity.TaskGrantID, activity.TaskYOLO = run.ID, args.TaskGrantID, run.Snapshot.YOLO
+		}
+		if activity.TaskRunID == "" {
+			a.mu.Unlock()
+			return nil, errors.New("No active Task grant in this session.")
+		}
+	}
+	if run := a.state.sessionTaskRun(owner); run != nil && !taskRunTerminal(run.Status) && args.TaskGrantID == "" {
+		a.mu.Unlock()
+		return nil, errors.New("An accepted Task Run requires its captured Task grant.")
+	}
+	if err := validateActivityAuthority(&a.state, activity, true); err != nil {
 		a.mu.Unlock()
 		return nil, err
 	}
@@ -357,7 +386,7 @@ func (a *app) invokeGraphActivity(ctx context.Context, owner string, raw json.Ra
 			order = activity.Order + 1
 		}
 	}
-	activity := GraphActivity{ID: newID(), ConversationID: owner, ProjectID: s.ProjectID, GraphID: args.GraphID, Objective: args.Objective, Task: args.Task, Authorization: args.Authorization, Workspace: args.Workspace, Dependencies: args.Dependencies, Priority: args.Priority, Order: order, Status: "ready", Version: 1, OperationIDs: []string{args.OperationID}, CreatedAt: now(), UpdatedAt: now()}
+	activity.Order = order
 	err := a.graphChangeLocked(func(d *diskState) error { d.GraphActivities = append(d.GraphActivities, activity); return nil })
 	canStart := err == nil && a.state.activeGraphRun(owner) == nil && a.graphActivityReadyLocked(activity.ID) && a.graphFirstReadyLocked(owner) == activity.ID && !a.graphStarting[owner]
 	if err == nil && !canStart {
@@ -429,6 +458,11 @@ func (a *app) assessGraphActivity(owner string, raw json.RawMessage) (any, error
 		if activity.Version != args.ExpectedVersion {
 			return errors.New("Activity version changed; read current state before updating.")
 		}
+		if activity.TaskRunID != "" {
+			if err := validateActivityAuthority(d, *activity, true); err != nil {
+				return err
+			}
+		}
 		run := d.graphRun(args.RunID)
 		if run == nil || run.ActivityID != activity.ID || graphRunActive(run.Status) {
 			return errors.New("Assess a terminal run of this activity.")
@@ -484,6 +518,11 @@ func (a *app) updateGraphActivity(owner string, raw json.RawMessage) (any, error
 		}
 		if activity.Status == "running" {
 			return errors.New("An active run cannot be stopped or replaced by the orchestrator.")
+		}
+		if activity.TaskRunID != "" {
+			if err := validateActivityAuthority(d, *activity, true); err != nil {
+				return err
+			}
 		}
 		switch args.Action {
 		case "retry":

@@ -68,6 +68,8 @@ func (a *app) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", a.health)
 	mux.HandleFunc("GET /api/state", a.getState)
+	mux.HandleFunc("GET /api/settings/timezone", a.getEngineTime)
+	mux.HandleFunc("PATCH /api/settings/timezone", a.updateEngineTime)
 	mux.HandleFunc("GET /api/transcription/settings", a.getTranscriptionSettings)
 	mux.HandleFunc("PATCH /api/transcription/settings", a.updateTranscriptionSettings)
 	mux.HandleFunc("POST /api/transcriptions", a.transcribe)
@@ -79,6 +81,19 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /api/projects/{id}/paths", a.projectPaths)
 	mux.HandleFunc("GET /api/projects/{id}/authoring", a.authoring)
 	mux.HandleFunc("GET /api/projects/{id}/models/{harness}", a.projectModels)
+	mux.HandleFunc("GET /api/projects/{id}/tasks", a.listTasks)
+	mux.HandleFunc("GET /api/projects/{id}/tasks/{taskId}", a.getTask)
+	mux.HandleFunc("POST /api/projects/{id}/tasks", a.saveTask)
+	mux.HandleFunc("PATCH /api/projects/{id}/tasks/{taskId}", a.saveTask)
+	mux.HandleFunc("PATCH /api/projects/{id}/tasks/{taskId}/enabled", a.mutateTask)
+	mux.HandleFunc("DELETE /api/projects/{id}/tasks/{taskId}", a.mutateTask)
+	mux.HandleFunc("GET /api/projects/{id}/tasks/{taskId}/webhook", a.getWebhookBinding)
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{taskId}/webhook", a.saveWebhookBinding)
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{taskId}/webhook/secret", a.rotateWebhookSecret)
+	mux.HandleFunc("GET /api/projects/{id}/tasks/{taskId}/runs", a.listTaskRuns)
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{taskId}/runs", a.runTaskNow)
+	mux.HandleFunc("POST /api/projects/{id}/tasks/{taskId}/runs/{runId}/cancel", a.cancelTaskRun)
+	mux.HandleFunc("POST /hooks/tasks/{bindingId}", a.receiveTaskWebhook)
 	mux.HandleFunc("POST /api/projects/{id}/agents", a.saveAgent)
 	mux.HandleFunc("PATCH /api/projects/{id}/agents/{item}", a.saveAgent)
 	mux.HandleFunc("DELETE /api/projects/{id}/agents/{item}", a.deleteAgent)
@@ -439,6 +454,13 @@ func (a *app) removeProject(w http.ResponseWriter, r *http.Request) {
 		if session.ProjectID == id && a.runs[session.ID] != nil {
 			a.mu.Unlock()
 			fail(w, 409, "Stop running sessions before removing this project.")
+			return
+		}
+	}
+	for _, run := range a.state.TaskRuns {
+		if run.ProjectID == id && !taskRunTerminal(run.Status) {
+			a.mu.Unlock()
+			fail(w, 409, "Cancel pending Task runs before removing this project.")
 			return
 		}
 	}

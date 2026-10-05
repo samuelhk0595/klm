@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 )
@@ -45,8 +46,11 @@ func (p *adapter) openCodePermissionGate(ctx context.Context, raw json.RawMessag
 		Cwd       string         `json:"cwd"`
 		Input     map[string]any `json:"input"`
 	}
-	if json.Unmarshal(raw, &call) != nil || call.SessionID == "" || call.CallID == "" || call.Tool == "" || call.Input == nil || !piSamePath(call.Cwd, p.cwd) {
-		return false, errors.New("Invalid OpenCode tool preflight.")
+	if json.Unmarshal(raw, &call) != nil || call.SessionID == "" || call.CallID == "" || call.Tool == "" || call.Input == nil {
+		return false, errors.New("OpenCode tool preflight is missing its session, call, tool or arguments.")
+	}
+	if !piSamePath(call.Cwd, p.cwd) {
+		return false, fmt.Errorf("OpenCode tool directory %q does not match the conversation directory %q.", call.Cwd, p.cwd)
 	}
 	if err := p.turn.ctx.Err(); err != nil {
 		return false, err

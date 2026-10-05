@@ -138,7 +138,7 @@ func BindGraphAdapter(t *turn, hooks GraphAdapterHooks) error {
 	seen := map[string]bool{}
 	for _, tool := range hooks.Tools {
 		name := str(tool, "name")
-		if !strings.HasPrefix(name, "graph_") || name == "graph_submit_choice" || seen[name] {
+		if (!strings.HasPrefix(name, "graph_") && (name != "task_finish" || hooks.Node)) || name == "graph_submit_choice" || seen[name] {
 			return errors.New("Graph tool names must be unique graph_ capabilities and cannot replace graph_submit_choice.")
 		}
 		seen[name] = true

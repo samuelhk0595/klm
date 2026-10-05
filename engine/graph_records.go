@@ -43,6 +43,9 @@ type GraphAssessment struct {
 	CreatedAt   string `json:"createdAt"`
 }
 type GraphActivity struct {
+	TaskRunID      string                 `json:"taskRunId,omitempty"`
+	TaskGrantID    string                 `json:"taskGrantId,omitempty"`
+	TaskYOLO       bool                   `json:"taskYolo,omitempty"`
 	Task           string                 `json:"task,omitempty"`
 	Error          string                 `json:"error,omitempty"`
 	ID             string                 `json:"id"`
@@ -73,6 +76,8 @@ type GraphRunResult struct {
 	Error  string            `json:"error,omitempty"`
 }
 type GraphRun struct {
+	TaskRunID          string                 `json:"taskRunId,omitempty"`
+	TaskYOLO           bool                   `json:"taskYolo,omitempty"`
 	FinalityError      string                 `json:"finalityError,omitempty"`
 	ID                 string                 `json:"id"`
 	ActivityID         string                 `json:"activityId"`
@@ -470,6 +475,12 @@ type validatedGraphSnapshot struct {
 // Captured definitions are immutable across transitions. Validate/compile a new
 // definition once, while still checking relational/lifecycle invariants each time.
 func validateGraphRecordsCached(d *diskState, cache map[string]validatedGraphSnapshot) error {
+	if err := validateEngineTimeSettings(d.EngineTime); err != nil {
+		return err
+	}
+	if err := validateTaskRecords(d); err != nil {
+		return err
+	}
 	bad := func(kind, id string) error {
 		return fmt.Errorf("Invalid graph %s %s in state.json; refusing to overwrite.", kind, id)
 	}
@@ -532,7 +543,7 @@ func validateGraphRecordsCached(d *diskState, cache map[string]validatedGraphSna
 		if !claim(activity.ID) || s == nil || s.ParentID != "" || s.GraphRunID != "" || s.ProjectID != activity.ProjectID || !validAuthoringID(activity.GraphID) || strings.TrimSpace(activity.Objective) == "" || activity.Version == 0 || !validGraphTime(activity.CreatedAt) || !validGraphTime(activity.UpdatedAt) || !slices.Contains([]string{"scheduled", "ready", "running", "awaiting_user", "awaiting_assessment", "succeeded", "abandoned"}, activity.Status) {
 			return bad("activity", activity.ID)
 		}
-		if err := validateGraphAuthorization(d, activity.ConversationID, activity.Authorization); err != nil {
+		if err := validateActivityAuthority(d, activity, false); err != nil {
 			return fmt.Errorf("Graph activity %s: %w", activity.ID, err)
 		}
 		dependencies := map[string]bool{}
@@ -606,6 +617,9 @@ func validateGraphRecordsCached(d *diskState, cache map[string]validatedGraphSna
 	compiled := map[string]*CompiledGraph{}
 	for _, r := range d.GraphRuns {
 		activity := d.graphActivity(r.ActivityID)
+		if activity != nil && (r.TaskRunID != activity.TaskRunID || r.TaskYOLO != activity.TaskYOLO) {
+			return bad("task execution policy", r.ID)
+		}
 		if !claim(r.ID) || activity == nil || r.ProjectID != activity.ProjectID || r.ConversationID != activity.ConversationID || r.GraphID != r.Snapshot.GraphID || strings.TrimSpace(r.Input.Task) == "" || r.Revision == 0 || !validGraphTime(r.CreatedAt) || !validGraphTime(r.UpdatedAt) {
 			return bad("run", r.ID)
 		}

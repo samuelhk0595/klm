@@ -337,6 +337,10 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 		p.failed = true
 	}
 	delete(a.runs, s.ID)
+	if finalErr != nil {
+		graphResult.Outcome, graphResult.Error = "failed", finalErr
+	}
+	a.taskTurnSettledLocked(s.ID, graphResult, t.stopErr)
 	for _, c := range a.state.Consultations {
 		if c.From == s.ID && c.Status == "cancelled" {
 			if recipient := a.runs[c.To]; recipient != nil && recipient.consultationID == c.ID {

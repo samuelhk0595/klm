@@ -2,7 +2,7 @@ import { useId, useState } from 'react';
 import { Bot, Check, Link2, Send, Unplug, UserRound } from 'lucide-react';
 import { Button } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
-import type { TelegramLink } from '../tasks/prototype';
+import type { TelegramLink } from '../tasks/types';
 import './telegram.css';
 
 // Deliberately no editable credential, network transport, or persisted token.

@@ -4,9 +4,7 @@ import { Button, IconButton } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import { ENGINE_URL, getTranscriptionSettings, updateTranscriptionSettings, type TranscriptionSettings } from '../../engine';
 import { configureEngineURL } from '../../platform';
-import { TelegramSettings } from './TelegramSettings';
 import { EngineTimeSettings } from './EngineTimeSettings';
-import type { TelegramLink } from '../tasks/prototype';
 
 export type SettingsSection = 'chat' | 'engine' | 'transcription' | 'telegram';
 
@@ -21,10 +19,8 @@ function failureMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Could not update transcription settings.';
 }
 
-export function SettingsDialog({ onClose, onDesignSystem, initialSection = 'chat', telegram, onTelegramChange, timezone, onTimezoneChange }: {
+export function SettingsDialog({ onClose, onDesignSystem, initialSection = 'chat' }: {
   onClose: () => void; onDesignSystem: () => void; initialSection?: SettingsSection;
-  telegram: TelegramLink; onTelegramChange: (link: TelegramLink) => void;
-  timezone: string; onTimezoneChange: (timezone: string) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [section, setSection] = useState<SettingsSection>(initialSection);
@@ -104,7 +100,7 @@ export function SettingsDialog({ onClose, onDesignSystem, initialSection = 'chat
             <div className="dialog-actions"><Button variant="primary" type="submit">Connect</Button></div>
           </form>
           <div className="settings-design-system"><span>Interface components and tokens</span><Button onClick={onDesignSystem}>Open design system</Button></div>
-        </section> : section === 'engine' ? <EngineTimeSettings timezone={timezone} onChange={onTimezoneChange} /> : section === 'telegram' ? <TelegramSettings link={telegram} onChange={onTelegramChange} /> : <section aria-labelledby="transcription-settings-title">
+        </section> : section === 'engine' ? <EngineTimeSettings /> : section === 'telegram' ? <section><h3>Telegram</h3><p className="muted">Not connected</p></section> : <section aria-labelledby="transcription-settings-title">
           <div className="settings-panel-title"><div><h3 id="transcription-settings-title">Transcription</h3>{settings.apiKeyConfigured && !removeAPIKey && <span className="settings-configured"><KeyRound />API key configured</span>}</div>{loading && <span className="muted">Loading...</span>}</div>
           <form className="settings-form transcription-settings-form" onSubmit={saveTranscription}>
             <div className="settings-field settings-api-key">

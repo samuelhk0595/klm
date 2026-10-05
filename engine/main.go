@@ -90,11 +90,20 @@ func runEngine(dir string) error {
 	if err := replayStreamJournal(dir, &state); err != nil {
 		return fmt.Errorf("cannot replay stream journal: %w", err)
 	}
+	if err := migrateTasks(dir, &state); err != nil {
+		return fmt.Errorf("cannot migrate Tasks storage: %w", err)
+	}
+	if err := initializeEngineTime(dir, &state); err != nil {
+		return fmt.Errorf("cannot initialize engine timezone: %w", err)
+	}
 	if err := recoverGraphCatalogChanges(dir, &state); err != nil {
 		return err
 	}
 	recoveryRevision := state.GraphRevision
 	interrupted := interruptGraphState(&state, "Graph run interrupted by engine restart; execution was not replayed.")
+	if interruptTaskState(&state) {
+		interrupted = true
+	}
 	interruptedConsultations := map[string]string{}
 	for i := range state.Consultations {
 		c := &state.Consultations[i]
@@ -168,6 +177,9 @@ func runEngine(dir string) error {
 	// Pay snapshot validation/compilation once at startup, before serving commands.
 	a.graphValidation = map[string]validatedGraphSnapshot{}
 	if err := validateGraphRecordsCached(&a.state, a.graphValidation); err != nil {
+		return err
+	}
+	if err := a.migrateWebhookSettings(); err != nil {
 		return err
 	}
 	go a.expireConsultations()

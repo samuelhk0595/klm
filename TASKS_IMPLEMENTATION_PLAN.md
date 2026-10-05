@@ -1,9 +1,30 @@
 # Tasks implementation plan
 
+## Latest correction — provider-independent webhooks (2026-10-05)
+
+The user clarified that a Task must not know about GitHub or any other webhook
+provider. This overrides the GitHub-specific slice/runtime assumptions below.
+The endpoint authenticates and captures generic input, then starts the normal Task
+orchestrator. Event filtering, repository access, PR review and output behavior
+belong to saved task instructions and selected graphs. No repository binding,
+PR lookup, hard-coded `opened` filter or mandatory review graph belongs in admission.
+Tasks can explicitly finish without invoking a graph when none is needed.
+
+Current setup/contract: [Generic Task webhooks](TASKS_WEBHOOK_HANDOFF.md). The source
+now shows an engine endpoint without requiring a public hostname, allows an optional
+editable public origin, supports configurable signature/delivery headers and generic
+manual input, and retains prior history. The earlier progress sections below are
+historical where they describe provider-specific runtime. Runtime acceptance remains
+pending; this clarification does not authorize a tunnel deployment or GitHub action.
+
 Updated: incorporating the user question-round decisions and subsequent local-layout
 alignment confirmations (following the 2026-10-02 revision).
-Status: planning; automation is not implemented. This update changes the plan only,
-not the mock screens or engine. Remaining mock adjustments are recorded below.
+Status: implementation in progress. Slice A's durable configuration, operations
+UI and engine timezone Settings are implemented. The focused GitHub PR-opened
+vertical path now implements the necessary run lifecycle from B/E; deployment and
+human runtime acceptance remain pending. Telegram, scheduling/catch-up and general
+Tasks execution remain outside that path. See the current-state notes below before
+using the original prototype observations in section 2.
 
 This document records the approved Tasks decisions and proposes small implementation
 slices, following `AGENTS.md` and `product.md`. **Approved** sections describe the
@@ -133,6 +154,19 @@ is not approval for changing a running harness's permissions mid-turn.
   A normal message/turn ending is not Task completion. The engine also records
   infrastructure failure/interruption. Exact tool schema/state names remain design
   work; the need for explicit completion is approved.
+- **Resolved during implementation:** if a turn ends with no active graph or
+  pending question and no explicit Task finish, show **Needs attention**, retain
+  the serial slot, and allow the user to resume for an explicit result or cancel.
+  No successful outcome is inferred from that idle turn.
+- **Resolved during implementation:** provide a separate **Cancel run** action.
+  Queued runs cancel without starting; active cancellation includes the orchestrator
+  and all run-owned graph work. Release the serial slot only after native settlement.
+  Unresolved execution finality is Interrupted, not claimed cancellation. Late output
+  cannot reopen a terminated run. Ordinary chat Stop retains its existing meaning.
+- **Resolved during implementation:** corrective retries keep the existing mandatory
+  explicit fresh-versus-reuse user decision, through KLM and optionally Telegram.
+  Reuse requires recorded workspace IDs. Initial invocation still defaults to the
+  original project directory; no automatic Task retry/workspace policy is introduced.
 - User questions **do not expire automatically**. A run waits until answered or
   cancelled, or until its native execution fails/is interrupted. Persisting a
   question cannot make its in-memory callback survive a restart.
@@ -153,9 +187,15 @@ is not approval for changing a running harness's permissions mid-turn.
   scheduled firings and continue with the next future firing. When on, recover
   **only the most recent missed firing**, through normal admission/queue rules.
   This is missed-trigger recovery, not resumption of an interrupted run.
-- Initial timezone selection, DST gaps/overlaps and behavior when the global
-  timezone changes still require decisions. Persist instants independently of
-  display timezone; changing presentation must not rewrite historical instants.
+- Timezone decisions resolved during implementation: detect the **engine OS's IANA
+  timezone once**, persist it, and require explicit Settings selection if detection
+  fails. Later OS changes do not silently change the persisted setting. A manual
+  timezone change reformats history and affects future firings only; accepted runs
+  and their snapshots remain unchanged, and the timezone change alone generates no
+  catch-up. For DST, skip nonexistent local scheduled times and fire once at the
+  first occurrence of repeated local times. Persist instants independently of display
+  timezone; changing presentation must not rewrite historical instants. Catch-up
+  revision/eligibility reconciliation remains open.
 
 ### Approved Telegram behavior and deferred security work
 
@@ -185,8 +225,78 @@ is not approval for changing a running harness's permissions mid-turn.
 
 ## 2. Current implementation and gaps
 
-Source observations below describe the working tree inspected for this plan; it
-contains concurrent prototype edits and unvalidated runtime capabilities.
+### Focused GitHub PR-opened path — 2026-10-05
+
+The current source implements signed/bounded GitHub ingress, trusted repository
+bindings and DPAPI secrets, durable delivery/logical deduplication, atomic normal
+session/run admission, captured revisions/PR SHAs/grants, FIFO/captured parallel
+policy, default YOLO propagation, explicit assessed finish, Needs attention,
+settlement-aware Cancel run, restart interruption without replay, manual bound-PR
+reruns while disabled, delete refusal and retained session/result identity.
+The Details/Runs UI uses real bindings/history/report projections, PR links and the
+normal chat backlink. Saving configuration still does not create a folder or run.
+
+This is the path selected by `TASKS_GITHUB_PR_REVIEW_SLICE_PLAN.md`, not delivery of
+the entire Tasks roadmap. `TASKS_GITHUB_PR_REVIEW_HANDOFF.md` contains exact setup,
+graph example, proxy boundary and manual acceptance. Actual repositories/projects,
+review graphs/models and the public hostname must be configured by the user.
+No live GitHub/HTTPS/model run or production migration has been validated.
+Go development build and frontend TypeScript checks passed; no test suite was run.
+The older Slice A progress below is retained as the baseline for this additive work.
+
+### Implementation progress — 2026-10-03
+
+- **Slice A, configuration:** `engine/tasks.go` adds project-scoped listing,
+  creation, revision-checked editing/enabling/disabling and tombstoned deletion.
+  Save stores an authorization identity with that revision's selected graphs and
+  instructions. Runtime consumption/enforcement of this declaration remains gated;
+  no synthetic user events or ordinary graph authorization changes were added.
+- Definitions use the existing durable state transaction/journal path. Startup
+  replays the journal, retains a complete `state.pre-tasks-<id>.json` recovery copy,
+  then persists additive `taskSchema: 1` in state version 2 before serving. Older
+  binaries reject the unknown field. Existing installations start with no Tasks.
+- Create has a persistent operation ID; repeated identical requests resolve to the
+  same definition. New tasks are always enabled. Save creates no session or folder.
+  Validation uses UTF-16 code units for the 80/240/12000 limits to match HTML/JS,
+  trimmed fields, case-insensitive names, weekday/time validation and real harness
+  model/effort catalogs. Existing missing graph/folder references remain inspectable
+  rather than silently remapped; execution handling is still an open decision.
+- **UI:** `TasksPage.tsx` now fetches and mutates engine definitions. It retains the
+  approved Details/Runs layout, sectioned draft and confirmation flow, with loading,
+  network, model and revision-conflict errors. Existing update SSE emits Task
+  invalidations to other clients. Saving/enabling does not launch work.
+- `prototype.ts` was replaced by shared `types.ts`; all sample task/run generation
+  was removed. `TaskSessionChat.tsx` and App/sidebar local task-chat branches were
+  removed. Runs is empty and Run now disabled until real admission is implemented.
+  History rendering retains every older waiting row without duplicating the latest
+  five. There is no Task-specific YOLO lock or separate production task chat.
+- Telegram simulation is no longer mounted in Settings; it shows Not connected.
+  Per-task routing/parallelism/missed-run preferences persist, but no delivery,
+  dispatch or scheduler is claimed. The isolated Telegram component remains unused.
+- **Engine timezone:** `engine/engine_time.go` persists one OS-detected IANA zone
+  using Windows WinRT (fallback: explicit selection). Detection is attempted once,
+  including recording failure, so later OS changes never override Settings. Validated,
+  revision-checked GET/PATCH timezone Settings and live SSE synchronize clients.
+  Date formatting for Task presentation and quota timestamps uses the engine zone;
+  if unconfigured/unavailable, explicit ISO instants avoid browser-zone fallback.
+  `time/tzdata` is bundled so installed Windows engines do not need a Go SDK.
+- **Still open:** all execution gates for B, verified
+  Telegram C, scheduling D, webhook E. Active-run deletion refusal must be added
+  atomically with admission in B; no queued/running/waiting Task records exist yet.
+- **Human acceptance pending:** durable CRUD across reload/restart and two clients,
+  draft preservation on save errors/conflicts, model errors, defaults, delete/cancel
+  and no lazy folder creation on save. External behavior has not been exercised.
+- **Focused checks passed:** Go development build (`go build -tags dev`, output
+  outside the repo) and frontend `npx tsc --noEmit -p tsconfig.json`. The first TS
+  command targeted a nonexistent `tsconfig.app.json`; the corrected invocation
+  exposed a duplicate identifier, fixed before the successful final check. No test
+  suite, application runtime, migration on user data or Telegram behavior was run.
+
+### Baseline prototype observations (historical)
+
+The table and mock-alignment notes below describe the pre-implementation working
+tree inspected for the approved plan. The progress section above supersedes their
+claims about current files/state; they remain useful background for later slices.
 
 | Area | Existing integration point | Missing for Tasks |
 | --- | --- | --- |
@@ -294,8 +404,9 @@ and settlement protocol remain proposed. Do not finalize success while required
 work/questions remain unresolved or abandon pending effects by merely finishing a
 turn. Native settlement must precede releasing the serial slot. Normal turn end
 while waiting for a graph allows its result notification to resume this orchestrator.
-A missing finish must become an observable recoverable condition, not false success;
-its fallback policy is still open. Late results must not reopen terminal runs.
+A missing finish becomes Needs attention, retains its serial slot, and can be
+resumed or cancelled (approved during implementation). Late results must not reopen
+terminal runs.
 
 Proposed state-to-UI mapping (names are not a finalized wire schema):
 
@@ -465,8 +576,9 @@ do not deliver to a replacement question or recreate an expired native callback.
 
 ### D. Weekday/time scheduling and global timezone
 
-**Gate:** DST gaps/overlaps, initial global timezone and changes to it, cross-task
-resource policy and precise missed-occurrence reconciliation. Per-task FIFO/parallel
+**Gate:** cross-task resource policy and precise missed-occurrence reconciliation.
+Initial OS timezone, future-only changes and skip-gap/first-overlap DST rules are
+now approved (section 1). Per-task FIFO/parallel
 behavior, latest-only optional catch-up and interrupted-run non-replay are approved.
 
 Implement selected weekdays plus one time of day in the persisted engine timezone.
@@ -547,9 +659,9 @@ new automatic admission while leaving accepted deliveries and manual launches in
 
 ## 6. Validation and delivery policy
 
-This assignment changes documentation only; no build, runtime validation or tests
-are required or claimed. During implementation, use the smallest relevant syntax,
-type or build check, followed by the slice's manual acceptance path. Full suites,
+The original planning assignment changed documentation only. Implementation now
+uses the smallest relevant syntax, type or build check, followed by the slice's
+manual acceptance path. Full suites,
 integration tests and adversarial/review-agent work require an explicit request.
 The acceptance paths above describe future checks, not completed verification.
 
@@ -590,11 +702,11 @@ or design contracts, not reasons to keep the approved core behavior provisional.
 | Decision/design contract | Resolve before |
 | --- | --- |
 | Manual input for webhook tasks; ingress deployment, endpoint/signatures, filters, replay window/dedup retention and payload storage | Webhook launch/admission. Run now eligibility is approved; a new ingress port is not. |
-| Task-wide cancellation across orchestrator and graph, queued cancellation, late results, exact finish schema/settlement and missing-finish recovery | First run lifecycle. Explicit completion and indefinite question wait are approved; chat Stop is not yet whole-run cancellation. |
+| Exact finish schema/settlement integration | First run lifecycle. Missing finish → Needs attention/retained slot; separate whole-run cancellation, queued cancellation and late-result behavior are now approved in section 1. |
 | Task grant wire/audit contract, explicit emergency revocation, numeric invocation limits, graph changes/rename/disable after capture | Graph-backed execution. Save authorization, empty=no graphs and trigger-time snapshots are approved; no numeric limit is approved. |
-| Workspace and corrective retry policy, fresh/reuse decisions and cross-run artifacts | Corrections. Existing default remains original directory; mandatory new_worktree is not approved. |
+| Cross-run artifacts beyond the existing recorded workspace contract | Corrections retain explicit fresh/reuse decisions (now reconfirmed). Initial default remains original directory; mandatory new_worktree is not approved. |
 | Concurrency-mode edits with queued/active runs, bounded queue/resource limits and concurrent writes across different tasks | Dispatch. Per-task optional parallelism/default-off/FIFO independent of failure are approved. |
-| Initial global timezone, DST gaps/overlaps, timezone change effects on future/queued/catch-up work; captured revision for recovered missed occurrences | Scheduling/settings. Engine-global timezone and optional latest-only catch-up are approved. |
+| Captured revision and eligibility reconciliation for recovered missed occurrences | Scheduling. Initial OS timezone, explicit selection on failed detection, future-only manual changes with no change-induced catch-up, and skip-gap/first-overlap DST are now approved. |
 | Precise user-blocked time when parallel branches still work, multiple pending questions and interruption timing | Timing projection. Exclude actual user-blocked time and display it separately; no double counting. |
 | Telegram token storage, pairing protocol details, unsupported forms, identity replacement while requests are pending and verified answer provenance for graph decisions | Telegram transport. One bot/recipient, long polling, KLM fallback and initial secret delivery are approved. |
 | Archived/renamed destination folders, archived sessions, project removal and deleted-task backlink destination | Normal session/history integration. Preserve history and refuse task deletion while active/queued. |

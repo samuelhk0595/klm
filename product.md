@@ -387,6 +387,20 @@ Nested Forks, worktree cleanup, user interruption/resumption controls, concurren
 runs within one conversation, rich graph inputs/files, activation limits and task
 timeouts remain outside this delivery.
 
+## Task Webhooks
+
+Tasks receive provider-independent webhook input. A webhook activates the normal
+Task orchestrator with the captured body and metadata; the engine does not require
+a GitHub repository or interpret PR events. Event relevance, repository operations
+and review behavior belong to saved Task instructions and selected graphs. External
+payloads remain untrusted data and cannot expand saved authorization. A Task may
+explicitly finish without invoking a graph when none is needed.
+
+Endpoint setup exposes an engine URL and secret, with an optional editable public
+HTTPS origin and configurable signature/delivery headers. Creating an endpoint does
+not provision internet access. Runtime/setup details and human acceptance are tracked
+in `TASKS_WEBHOOK_HANDOFF.md`; the earlier provider-specific slice is superseded.
+
 ## Graph Selection in Chat
 
 The main chat composer has a graph selector at the bottom left, opposite model

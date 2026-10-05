@@ -15,7 +15,8 @@ export default async function (context) {
       });
       if (!response.ok) throw new Error("KLM permission gate is unavailable.");
       const envelope = await response.json();
-      if (envelope.error || envelope.result?.allowed !== true) throw new Error("Permission denied by KLM.");
+      if (envelope.error) throw new Error("KLM tool preflight failed: " + (envelope.error.message || "Unknown gate error."));
+      if (envelope.result?.allowed !== true) throw new Error("Permission denied by KLM.");
       // Admission happens after permission resolution; a sealed graph still denies.
       await hooks["tool.execute.before"]?.(input, output);
     },

@@ -35,6 +35,22 @@ var openCodeGraphPlugin string
 //go:embed opencode-permissions-plugin.mjs
 var openCodePermissionsPlugin string
 
+// A KLM engine started from an agent's terminal can inherit that turn's inline
+// plugin configuration. Its bridge belongs to the launcher, not the new runtime.
+// Replace only our generated policy plugin; preserve every user plugin/config.
+func inheritedKLMPolicyPlugin(value any) bool {
+	path, ok := value.(string)
+	if !ok {
+		return false
+	}
+	if u, err := url.Parse(path); err == nil && u.Scheme == "file" {
+		path = u.Path
+	}
+	path = strings.ReplaceAll(path, "\\", "/")
+	parts := strings.Split(strings.TrimRight(path, "/"), "/")
+	return len(parts) >= 2 && parts[len(parts)-1] == "klm-policy.mjs" && strings.HasPrefix(parts[len(parts)-2], ".opencode-graph-")
+}
+
 func (p *adapter) openCodeGraphConfig() (string, func(), error) {
 	config := map[string]any{}
 	if existing := os.Getenv("OPENCODE_CONFIG_CONTENT"); strings.TrimSpace(existing) != "" {
@@ -62,11 +78,15 @@ func (p *adapter) openCodeGraphConfig() (string, func(), error) {
 	}
 	plugins := []any{}
 	if value, ok := config["plugin"]; ok {
-		var valid bool
-		plugins, valid = value.([]any)
+		inherited, valid := value.([]any)
 		if !valid {
 			cleanup()
 			return "", nil, errors.New("OpenCode plugin configuration is not a list.")
+		}
+		for _, plugin := range inherited {
+			if !inheritedKLMPolicyPlugin(plugin) {
+				plugins = append(plugins, plugin)
+			}
 		}
 	}
 	path := filepath.ToSlash(pluginPath)

@@ -247,7 +247,10 @@ func applyGraphCatalogChange(d *diskState, change GraphCatalogChange) {
 	if change.NewID != "" {
 		for i := range d.GraphActivities {
 			activity := &d.GraphActivities[i]
-			if activity.ProjectID == change.ProjectID && activity.GraphID == change.OldID {
+			// Task grants retain their captured graph identity. A queued invocation
+			// of a renamed graph reports unavailable rather than widening/replacing
+			// that grant; historical authority remains valid for inspection.
+			if activity.ProjectID == change.ProjectID && activity.GraphID == change.OldID && activity.TaskRunID == "" {
 				activity.GraphID, activity.UpdatedAt = change.NewID, now()
 				activity.Version++
 			}

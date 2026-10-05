@@ -289,6 +289,7 @@ func (a *app) scheduleLinkedLocked() {
 	if a.closing || a.storageErr != nil {
 		return
 	}
+	a.scheduleTasksLocked()
 	a.scheduleMessagesLocked()
 	a.scheduleGraphActivitiesLocked()
 	a.scheduleGraphNotificationsLocked()

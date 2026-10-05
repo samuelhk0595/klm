@@ -8,6 +8,7 @@ import (
 )
 
 type graphInvokeArgs struct {
+	TaskGrantID   string                 `json:"taskGrantId"`
 	OperationID   string                 `json:"operationId"`
 	GraphID       string                 `json:"graphId"`
 	Objective     string                 `json:"objective"`
@@ -69,7 +70,7 @@ func graphWorkspaceSchema() map[string]any {
 func checkGraphActivityArgumentShape(raw json.RawMessage, invoke bool) error {
 	fields := []string{"activityId", "operationId", "expectedVersion", "action", "task", "correction", "workspace", "userEventId", "priority", "dependencies"}
 	if invoke {
-		fields = []string{"operationId", "graphId", "objective", "task", "authorization", "workspace", "dependencies", "priority"}
+		fields = []string{"operationId", "graphId", "objective", "task", "authorization", "taskGrantId", "workspace", "dependencies", "priority"}
 	}
 	args, err := graphArgumentObject(raw, "arguments", fields)
 	if err != nil {

@@ -4,7 +4,6 @@ import { Button, IconButton } from '../../design-system/Button';
 import { Menu, MenuItem } from '../../design-system/Menu';
 import { ProjectActionsMenu } from '../projects/ProjectActionsMenu';
 import type { Session, Project } from '../../engine';
-import { runStatusLabel, taskSessionTitle, type TaskRun } from '../tasks/prototype';
 import { animateSortPositions, captureSortPositions, type SortPositions } from '../sortAnimation';
 
 function sessionRuntimeState(session: Session) {
@@ -40,9 +39,7 @@ function sessionBeforeAt(container: HTMLElement, draggingId: string, clientY: nu
   return '';
 }
 
-export function WorkspaceSidebar({ project, sessions, taskRuns = [], taskTimezone = 'UTC', activeId, activeSection, collapsed, archivedCollapsed, onCollapsedChange, onArchivedCollapsedChange, onSelect, onNew, onCreateFolder, onRename, onPosition, onReorderFolder, onArchiveSession, onArchiveFolder, onClose, onAgents, onGraphs, onTasks, onEditProject, onRemoveProject }: {
-  taskRuns?: TaskRun[];
-  taskTimezone?: string;
+export function WorkspaceSidebar({ project, sessions, activeId, activeSection, collapsed, archivedCollapsed, onCollapsedChange, onArchivedCollapsedChange, onSelect, onNew, onCreateFolder, onRename, onPosition, onReorderFolder, onArchiveSession, onArchiveFolder, onClose, onAgents, onGraphs, onTasks, onEditProject, onRemoveProject }: {
   project: Project; sessions: Session[]; activeId: string; collapsed: string[]; archivedCollapsed: boolean; onCollapsedChange: (folders: string[]) => void; onArchivedCollapsedChange: (collapsed: boolean) => void;
   onSelect: (id: string) => void; onNew: (folder?: string) => void; onCreateFolder: (name: string) => Promise<string | null>;
   onRename: (session: Session) => void; onPosition: (session: Session, folder: string, beforeId: string) => Promise<boolean>;
@@ -69,7 +66,7 @@ export function WorkspaceSidebar({ project, sessions, taskRuns = [], taskTimezon
   const folderPositions = useRef<SortPositions>(new Map());
   const sessionPositions = useRef<SortPositions>(new Map());
   const archivedFolders = new Set(project.archivedFolders);
-  const activeFolders = [...new Set([...project.folders.filter(folder => !archivedFolders.has(folder)), ...taskRuns.map(run => run.session.workspace).filter(folder => folder !== 'Ungrouped')])];
+  const activeFolders = project.folders.filter(folder => !archivedFolders.has(folder));
   const archivedSessions = sessions.filter(session => session.archived && !archivedFolders.has(session.workspace));
   const query = (search ?? '').toLowerCase();
   const matchingArchivedFolders = project.archivedFolders.filter(folder => folder.toLowerCase().includes(query));
@@ -171,7 +168,6 @@ export function WorkspaceSidebar({ project, sessions, taskRuns = [], taskTimezon
       {search !== null && <input autoFocus className="search-input" aria-label="Search sessions" placeholder="Find a session..." value={search} onChange={event => setSearch(event.target.value)} />}
       {[...activeFolders, 'Ungrouped'].map(workspace => {
         const matches = sessions.filter(session => !session.archived && !archivedFolders.has(session.workspace) && session.workspace === workspace && session.title.toLowerCase().includes(query));
-        const localMatches = taskRuns.filter(run => run.session.workspace === workspace && taskSessionTitle(run, taskTimezone).toLowerCase().includes(query));
         const realFolder = workspace === 'Ungrouped' || project.folders.includes(workspace) && !archivedFolders.has(workspace);
         const expanded = search !== null || !collapsed.includes(workspace);
         const isDropTarget = folderDropTarget === workspace;
@@ -225,9 +221,8 @@ export function WorkspaceSidebar({ project, sessions, taskRuns = [], taskTimezon
               {dragging?.kind === 'session' && sessionDropPosition?.workspace === workspace && sessionDropPosition.beforeId === session.id ? <div className="session-drop-placeholder" aria-hidden="true" /> : null}
               {sessionRow(session)}
              </Fragment>)}
-             {localMatches.map(run => <div key={run.session.id} className="session-row"><button className={`session-item ${run.session.id === activeId ? 'is-active' : ''}`} aria-current={run.session.id === activeId ? 'page' : undefined} onClick={() => onSelect(run.session.id)}><span>{taskSessionTitle(run, taskTimezone)}</span><i className={`session-runtime-led is-${run.status === 'waiting' ? 'waiting' : run.status === 'running' ? 'running' : run.status === 'failed' || run.status === 'interrupted' ? 'error' : 'off'}`} role="img" aria-label={runStatusLabel[run.status]} title={runStatusLabel[run.status]} /></button></div>)}
             {dragging?.kind === 'session' && sessionDropPosition?.workspace === workspace && sessionDropPosition.beforeId === '' ? <div className="session-drop-placeholder" aria-hidden="true" /> : null}
-             {matches.length + localMatches.length === 0 && !(dragging?.kind === 'session' && sessionDropPosition?.workspace === workspace) ? <p className="empty-workspace">No sessions</p> : null}
+             {matches.length === 0 && !(dragging?.kind === 'session' && sessionDropPosition?.workspace === workspace) ? <p className="empty-workspace">No sessions</p> : null}
           </div>}
         </div>
         </Fragment>;

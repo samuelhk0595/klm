@@ -15,6 +15,8 @@ const (
 )
 
 type SessionSummary struct {
+	TaskID          string                  `json:"taskId,omitempty"`
+	TaskRunID       string                  `json:"taskRunId,omitempty"`
 	Queue           []QueuedMessage         `json:"queue"`
 	Role            string                  `json:"role,omitempty"`
 	GraphRunID      string                  `json:"graphRunId,omitempty"`
@@ -85,6 +87,7 @@ type sessionJournal struct {
 
 func sessionSummary(view *Session) SessionSummary {
 	return SessionSummary{
+		TaskID: view.TaskID, TaskRunID: view.TaskRunID,
 		Queue: view.Queue,
 		Role:  view.Role, GraphRunID: view.GraphRunID, GraphNodeID: view.GraphNodeID, ExecutionCWD: view.ExecutionCWD,
 		SelectedGraphID: view.SelectedGraphID, Graph: view.Graph, ParentID: view.ParentID, ID: view.ID, ProjectID: view.ProjectID,

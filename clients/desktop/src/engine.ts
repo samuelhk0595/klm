@@ -40,6 +40,8 @@ export type SessionUsage = {
 export type QueuedMessage = { id: string; text: string; mode: "queue" | "steer"; status: "queued" | "steering" | "sending" | "paused" | "uncertain"; error?: string; origin?: { sessionId: string; title: string } };
 
 export type Session = {
+	taskId?: string;
+	taskRunId?: string;
   queue?: QueuedMessage[] | null;
   role?: 'side_agent' | 'subagent' | 'graph_node';
   selectedGraphId?: string;
@@ -189,6 +191,31 @@ export type TranscriptionSettingsUpdate = {
   language?: string;
   vocabulary?: TranscriptionVocabularyEntry[];
 };
+
+export type TaskDefinition = import('./features/tasks/types').TaskDraft & {
+  runtimeSummary?: string;
+  id: string; projectId: string; revision: number; operationId: string;
+  createdAt: string; updatedAt: string; authorizationId: string; deletedAt?: string;
+};
+const tasksPath = (projectId: string) => `/api/projects/${encodeURIComponent(projectId)}/tasks`;
+export const getTasks = (projectId: string) => request<TaskDefinition[]>(tasksPath(projectId));
+export const getTask = (projectId: string, taskId: string) => request<TaskDefinition>(`${tasksPath(projectId)}/${encodeURIComponent(taskId)}`);
+export type WebhookBinding = { id: string; taskId: string; revision: number; path: string; publicOrigin: string; signatureHeader: string; deliveryHeader: string; lastReceiptAt: string; lastDisposition: string };
+const taskPath = (task: TaskDefinition) => `${tasksPath(task.projectId)}/${encodeURIComponent(task.id)}`;
+export const getWebhookBinding = async (task: TaskDefinition) => (await request<{ binding: WebhookBinding | null }>(`${taskPath(task)}/webhook`)).binding;
+export const saveWebhookBinding = (task: TaskDefinition, settings: Pick<WebhookBinding, 'publicOrigin' | 'signatureHeader' | 'deliveryHeader'>, operationId: string, revision: number) => request<{ binding: WebhookBinding; secret?: string }>(`${taskPath(task)}/webhook`, 'POST', { ...settings, operationId, revision });
+export const rotateWebhookSecret = (task: TaskDefinition) => request<{ secret: string; binding: WebhookBinding }>(`${taskPath(task)}/webhook/secret`, 'POST', {});
+export const getTaskRuns = (task: TaskDefinition) => request<import('./features/tasks/types').TaskRun[]>(`${taskPath(task)}/runs`);
+export const runTaskNow = (task: TaskDefinition, body: string, contentType: string, operationId: string) => request<{ runId: string; sessionId: string }>(`${taskPath(task)}/runs`, 'POST', { body, contentType, operationId });
+export const cancelTaskRun = (task: TaskDefinition, runId: string) => request<{ status: string }>(`${taskPath(task)}/runs/${encodeURIComponent(runId)}/cancel`, 'POST', {});
+export const saveTask = (projectId: string, task: import('./features/tasks/types').TaskDraft, operationId: string, previous?: TaskDefinition) => request<TaskDefinition>(`${tasksPath(projectId)}${previous ? `/${encodeURIComponent(previous.id)}` : ''}`, previous ? 'PATCH' : 'POST', { task, operationId, revision: previous?.revision ?? 0 });
+export const setTaskEnabled = (task: TaskDefinition, enabled: boolean) => request<TaskDefinition>(`${tasksPath(task.projectId)}/${encodeURIComponent(task.id)}/enabled`, 'PATCH', { revision: task.revision, enabled });
+export const deleteTask = (task: TaskDefinition) => request<TaskDefinition>(`${tasksPath(task.projectId)}/${encodeURIComponent(task.id)}`, 'DELETE', { revision: task.revision });
+export const getTaskModels = (projectId: string, harness: Harness['id']) => request<ModelCatalog>(`/api/projects/${encodeURIComponent(projectId)}/models/${harness}`, 'GET', undefined, 60000);
+
+export type EngineTimeSettings = { timezone: string; revision: number; updatedAt: string };
+export const getEngineTimeSettings = () => request<EngineTimeSettings>('/api/settings/timezone');
+export const updateEngineTimeSettings = (timezone: string, revision: number) => request<EngineTimeSettings>('/api/settings/timezone', 'PATCH', { timezone, revision });
 
 export class EngineRequestError extends Error {
   constructor(message: string, public readonly status: number) { super(message); }

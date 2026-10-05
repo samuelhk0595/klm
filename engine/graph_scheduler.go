@@ -13,6 +13,9 @@ func (a *app) graphActivityReadyLocked(id string) bool {
 	if activity == nil || activity.Status != "ready" && activity.Status != "scheduled" {
 		return false
 	}
+	if activity.TaskRunID != "" && validateActivityAuthority(&a.state, *activity, true) != nil {
+		return false
+	}
 	for _, dependency := range activity.Dependencies {
 		prerequisite := a.state.graphActivity(dependency)
 		if prerequisite == nil || prerequisite.Status != "succeeded" {
@@ -98,12 +101,17 @@ func (a *app) startReservedGraphActivity(ctx context.Context, id string) error {
 	}
 	activity := *saved
 	normalizeGraphWorkspaceDecision(&activity.Workspace)
-	decisionErr := validateGraphAuthorization(&a.state, activity.ConversationID, activity.Authorization)
+	decisionErr := validateActivityAuthority(&a.state, activity, true)
 	if decisionErr == nil {
 		decisionErr = validateGraphWorkspaceDecision(&a.state, activity.ConversationID, activity.Workspace, graphActivityHasRun(&a.state, activity.ID))
 	}
 	a.mu.Unlock()
-	defer func() { a.mu.Lock(); delete(a.graphStarting, activity.ConversationID); a.mu.Unlock() }()
+	defer func() {
+		a.mu.Lock()
+		delete(a.graphStarting, activity.ConversationID)
+		a.scheduleLinkedLocked()
+		a.mu.Unlock()
+	}()
 	fail := func(cause error) error {
 		a.mu.Lock()
 		defer a.mu.Unlock()
@@ -189,10 +197,13 @@ func (a *app) startReservedGraphActivity(ctx context.Context, id string) error {
 	if err = validateGraphWorkspaceDecision(&a.state, activity.ConversationID, activity.Workspace, graphActivityHasRun(&a.state, activity.ID)); err != nil {
 		return err
 	}
+	if err = validateActivityAuthority(&a.state, activity, true); err != nil {
+		return err
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	run := GraphRun{ID: newID(), ActivityID: id, ProjectID: activity.ProjectID, ConversationID: activity.ConversationID, GraphID: activity.GraphID, Input: GraphRunInput{Task: activity.Task}, Workspace: activity.Workspace, Snapshot: snapshot, Status: "starting", Revision: 1, CreatedAt: now(), UpdatedAt: now()}
+	run := GraphRun{TaskRunID: activity.TaskRunID, TaskYOLO: activity.TaskYOLO, ID: newID(), ActivityID: id, ProjectID: activity.ProjectID, ConversationID: activity.ConversationID, GraphID: activity.GraphID, Input: GraphRunInput{Task: activity.Task}, Workspace: activity.Workspace, Snapshot: snapshot, Status: "starting", Revision: 1, CreatedAt: now(), UpdatedAt: now()}
 	if run.Input.Task == "" {
 		run.Input.Task = activity.Objective
 	}
@@ -239,6 +250,9 @@ func (a *app) scheduleGraphNotificationsLocked() {
 		if notice.Status != "pending" || a.runs[notice.ConversationID] != nil {
 			continue
 		}
+		if run := a.state.sessionTaskRun(notice.ConversationID); run != nil && !taskAuthorityActive(run) {
+			continue
+		}
 		if notice.RetryAfter != "" {
 			retry, _ := time.Parse(time.RFC3339Nano, notice.RetryAfter)
 			if time.Now().Before(retry) {
@@ -261,6 +275,14 @@ func (a *app) scheduleGraphNotificationsLocked() {
 		t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{}), graphNotificationID: notice.ID}
 		native := a.state.Native[s.ID]
 		session := *s
+		if run := a.state.sessionTaskRun(s.ID); taskAuthorityActive(run) {
+			session.Harness, session.Model, session.Effort = run.Snapshot.Harness, run.Snapshot.Model, run.Snapshot.Effort
+			b, ok = a.binaries[session.Harness]
+			if !ok {
+				cancel()
+				continue
+			}
+		}
 		cwd := p.Folder
 		err := a.graphChangeLocked(func(d *diskState) error {
 			notification := d.graphNotification(notice.ID)
@@ -302,6 +324,8 @@ func (a *app) scheduleGraphNotificationsLocked() {
 				a.mu.Lock()
 				delete(a.runs, session.ID)
 				_ = a.graphChangeLocked(func(d *diskState) error { d.session(session.ID).Status = "error"; return nil })
+				a.taskTurnSettledLocked(session.ID, GraphAdapterResult{Outcome: "failed", Error: err, ProcessesDrained: true}, nil)
+				a.scheduleTasksLocked()
 				close(t.done)
 				a.mu.Unlock()
 				cancel()

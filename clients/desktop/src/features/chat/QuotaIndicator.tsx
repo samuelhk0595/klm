@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { request, type QuotaSnapshot, type Session } from '../../engine';
+import { formatEngineDate, useEngineTime } from '../settings/engineTime';
 
 function remaining(seconds: number) {
   if (seconds < 60) return '<1 min';
@@ -8,6 +9,7 @@ function remaining(seconds: number) {
 }
 
 export function QuotaIndicator({ session }: { session: Session }) {
+  const { settings: engineTime } = useEngineTime();
   const [quota, setQuota] = useState<QuotaSnapshot | null>(null);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -35,6 +37,7 @@ export function QuotaIndicator({ session }: { session: Session }) {
     .map(window => ({ ...window, remainingPercent: Math.max(0, Math.min(100, 100 - window.usedPercent)) }));
   const lowest = windows.reduce<(typeof windows)[number] | undefined>((chosen, window) => !chosen || window.remainingPercent < chosen.remainingPercent ? window : chosen, undefined);
   if (!lowest) return null;
-  const title = [quota.source, ...windows.map(window => `${window.name}: ${Math.round(window.remainingPercent)}% remaining · Resets ${new Date(window.resetsAt * 1000).toLocaleString('en-US')}`), `Updated ${new Date(quota.observedAt).toLocaleTimeString('en-US')}${quota.stale ? ' · Refresh unavailable' : ''}`].join('\n');
+  const timezone = engineTime?.timezone ?? '';
+  const title = [quota.source, ...windows.map(window => `${window.name}: ${Math.round(window.remainingPercent)}% remaining · Resets ${formatEngineDate(window.resetsAt * 1000, timezone)}`), `Updated ${formatEngineDate(quota.observedAt, timezone, { timeStyle: 'short' })}${quota.stale ? ' · Refresh unavailable' : ''}`].join('\n');
   return <span title={title} aria-label={title}>{Math.round(lowest.remainingPercent)}% remaining · {remaining(lowest.resetsAt - now / 1000)}</span>;
 }

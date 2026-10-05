@@ -38,6 +38,8 @@ type Event struct {
 }
 
 type Session struct {
+	TaskID          string                  `json:"taskId,omitempty"`
+	TaskRunID       string                  `json:"taskRunId,omitempty"`
 	Queue           []QueuedMessage         `json:"queue"`
 	Role            string                  `json:"role,omitempty"`
 	GraphRunID      string                  `json:"graphRunId,omitempty"`
@@ -88,7 +90,14 @@ type TranscriptionSettings struct {
 }
 
 type diskState struct {
-	tx                  *stateTransaction
+	tx         *stateTransaction
+	TaskSchema int              `json:"taskSchema,omitempty"`
+	Tasks      []TaskDefinition `json:"tasks,omitempty"`
+	TaskRuns   []TaskRun        `json:"taskRuns,omitempty"`
+	// Keep the historical JSON keys for checkpoint/journal compatibility.
+	WebhookBindings     []WebhookBinding         `json:"githubBindings,omitempty"`
+	WebhookReceipts     []WebhookReceipt         `json:"githubReceipts,omitempty"`
+	EngineTime          *EngineTimeSettings      `json:"engineTime,omitempty"`
 	JournalFormat       int                      `json:"journalFormat,omitempty"`
 	AcceptedMessages    map[string]string        `json:"acceptedMessages,omitempty"`
 	SessionSpawns       []SessionSpawn           `json:"sessionSpawns,omitempty"`

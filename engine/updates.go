@@ -75,6 +75,9 @@ func (a *app) updates(w http.ResponseWriter, r *http.Request) {
 	seen := cursors
 	var knownProjects []Project
 	var knownIDs []string
+	var knownTasks map[string]uint64
+	var knownTaskRuntime string
+	var knownEngineTime *EngineTimeSettings
 	flush := func(initial bool) error {
 		a.mu.Lock()
 		allDirty, dirty := subscription.all, subscription.dirty
@@ -124,8 +127,38 @@ func (a *app) updates(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		revision := a.state.GraphRevision
+		tasks := map[string]uint64{}
+		for _, task := range a.state.Tasks {
+			if visible[task.ProjectID] {
+				tasks[task.ID] = task.Revision
+			}
+		}
+		// Compare compact runtime metadata, without serializing reports or secrets.
+		runtimeStamp := ""
+		for _, run := range a.state.TaskRuns {
+			runtimeStamp += run.ID + run.Status + run.StartedAt + run.EndedAt + run.UserWaitStartedAt + run.Summary
+		}
+		for _, binding := range a.state.WebhookBindings {
+			runtimeStamp += binding.ID + binding.PublicOrigin + binding.SignatureHeader + binding.DeliveryHeader + binding.LastReceiptAt + binding.LastDisposition
+		}
+		tasksChanged := initial || !reflect.DeepEqual(knownTasks, tasks) || runtimeStamp != knownTaskRuntime
+		engineTime := a.state.EngineTime
+		timeChanged := initial || !reflect.DeepEqual(knownEngineTime, engineTime)
 		harnesses := a.harnesses
 		a.mu.Unlock()
+		if timeChanged && engineTime != nil {
+			if err := send(map[string]any{"kind": "engine_time", "settings": engineTime}); err != nil {
+				return err
+			}
+			knownEngineTime = engineTime
+		}
+		if tasksChanged {
+			if err := send(map[string]any{"kind": "tasks_changed", "revision": revision}); err != nil {
+				return err
+			}
+			knownTasks = tasks
+			knownTaskRuntime = runtimeStamp
+		}
 		if inventoryChanged {
 			if err := send(map[string]any{"kind": "inventory", "projects": projects, "sessions": all, "harnesses": harnesses, "revision": revision}); err != nil {
 				return err
