@@ -144,8 +144,16 @@ engine. Opening another desktop shortcut restores the same instance.
 
 While Tauri is active, it serves the same built application on `0.0.0.0:7332`.
 The **Focus** header button, between **Session log** and **Side agent**, opens
-`http://localhost:7332` in the default browser. The browser retains the gradient
-and draggable central window and hides the redundant Focus button. Another device
+`http://localhost:7332` in the default browser. The browser opens with the gradient
+and draggable central window. In place of Focus, a Maximize window icon toggles an
+opaque, edge-to-edge layout that follows the browser viewport; Restore window returns
+to the floating layout, including its resized dimensions. The floating window can
+be resized by dragging any edge or corner, with the matching resize cursor and
+no visible resize icon. The invisible resize targets support arrow keys when
+focused. Minimum usable dimensions apply, but there is no maximum size or
+viewport-based resizing limit; oversized windows remain draggable.
+Resizing is unavailable in the maximized layout, narrow mobile layout and
+Flutter-hosted WebView. The toggle is absent in the Flutter-hosted WebView. Another device
 uses `http://IP-OF-ENGINE-COMPUTER:7332`; API and SSE use that same host on 7331.
 Ports remain fixed; collisions are reported instead of selecting another port.
 
