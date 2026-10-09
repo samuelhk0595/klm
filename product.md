@@ -84,6 +84,23 @@ snapshot accompanies each general turn; changing it does not start another turn.
 Retained runtimes are distinguished from working turns; unknown context usage
 remains unknown.
 
+On the user's request, the general agent can register a project with `project_add`
+using a name (1 to 60 characters) and an absolute existing directory on the engine
+computer. This works before any project exists and uses the normal persistent
+registration and client inventory updates. It returns `projectId`, `name`, `path`
+and `outcome` (`created`, `existing` or `restored`), available immediately to project
+inventory and session creation options. An active matching project is unchanged;
+a removed match retains its ID, sessions/history and visual grouping, using the
+requested name and default icon. Multiple matching legacy records conflict with
+their IDs instead of choosing one. Duplicate detection and mutation share one lock;
+matching cleans paths and ignores case on Windows without resolving aliases,
+junctions or symlinks. Invalid names/paths and persistence failures return errors.
+The path is never inferred from a client, selected project or general workspace.
+Registration does not authorize sessions, graphs or file operations. This capability
+is exclusive to the general agent and independent of Data Sources; directory creation,
+cloning, Git initialization, dependency installation and project editing/removal are
+outside it. Manual project registration keeps its existing HTTP contract.
+
 The general agent can send visible, self-contained instructions to project chats
 and ask questions with correlated replies. It can rename/move visual grouping,
 atomically update model/effort/YOLO between turns, select a graph without executing

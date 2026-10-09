@@ -115,6 +115,7 @@ graph-execution tools. Normal main/side scope is not widened.
 | Tool | Scope and behavior |
 | --- | --- |
 | `project_list` | Paginated nonremoved projects, registered directories and visual/archived folders. |
+| `project_add` | `{name,path}` on the user's registration request; absolute existing engine-computer directory. Returns `{projectId,name,path,outcome}` with `created`, `existing` or `restored`; conflicts identify matching legacy IDs. No session or file execution. |
 | `session_list` | Top-level chats by default; project/folder/title/state filters; explicit `parentId` lists side chats. |
 | `session_get` | Identity, visual folder vs effective cwd, configured/resolved harness settings, raw/working/runtime state, queue counts, usage, full pending questions/permissions and projected graph requests. |
 | `session_messages_list` / `session_messages_search` | Chronological bounded messages or literal case-insensitive excerpts; exact `messageId`/rune `offset` reads long content. Agent origins are retained. |
@@ -192,6 +193,50 @@ Manual validation is still needed across all three harnesses: singleton identity
 through simultaneous clients/reloads/restarts, queue acceptance and irreversible
 harness locking, model/effort changes, streaming/errors/Stop/permissions/questions,
 empty-project operation, and unchanged project history/navigation.
+
+#### Project registration by the general agent
+
+`project_add` is exclusive to the general role's authenticated private bridge. It
+uses internal helpers shared with `POST /api/projects`, not a loopback HTTP call.
+Names use the existing trimmed 1-to-60-character validation; `path` must be an
+absolute existing directory on the engine computer, distinct from a session's
+visual `folder`. No source project or destination session is required, so the
+first project can be registered directly. The prompt requires a user request and
+clarification of unclear paths, never inference from the selected project,
+web/mobile client or general workspace. Registration alone authorizes no sessions,
+graphs or file operations; Data Sources are outside this feature.
+
+Filesystem validation occurs outside the engine mutex, followed by active-turn,
+context and general-identity revalidation under the lock. Matching and mutation
+share that lock. Paths are compared after `filepath.Clean`, case-insensitively on
+Windows; aliases, junctions and symlinks are not resolved for deduplication. One
+active match returns its current name/path/ID unchanged, including its icon. One
+removed match restores its ID and visual/archived folders with the requested name
+and default icon; sessions and history are untouched. Multiple matches, including
+active and removed records together, return a conflict listing IDs without mutation.
+New projects use the existing default icon. `commitLocked` persists and notifies
+client inventory streams; a failed commit returns an error rather than success.
+The ID is immediately usable by `project_list` and `session_create_options`.
+Retries for an active path use persisted project identity, not a new receipt table.
+The manual HTTP contract and its existing restoration behavior are preserved.
+
+Manual acceptance in a disposable environment (not performed during implementation):
+
+- Register the first project for an existing directory; observe Project Rail,
+  `project_list`, and `session_create_options` with the returned ID.
+- Repeat registration, including after restart and with a different requested name:
+  the active ID, name and icon stay unchanged, with no duplicate.
+- Reject invalid names and relative, nonexistent or file paths without registration.
+- Restore a removed project and confirm the same ID, sessions/history and
+  active/archived visual folders.
+- Submit two simultaneous registrations for the same directory: one creation and
+  one existing result, both with the same ID. Confirm cleaned paths and Windows case
+  differences match; multiple legacy registrations conflict and report their IDs.
+- Only choose models/create a session when the user requests that separate action.
+- Confirm normal main/side chats, graph nodes and subagents lack `project_add`,
+  and manual registration still works.
+- Confirm cancellation during directory validation prevents a stale-turn write,
+  and a persistence failure returns an error without reporting registration success.
 
 ### Session collaboration (private harness bridge)
 
