@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -328,36 +327,21 @@ func (a *app) createProject(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	name, ok := cleanLabel(body.Name, 60)
-	if !ok {
-		fail(w, 400, "Project name must contain 1 to 60 characters.")
-		return
-	}
-	folder, err := existingDirectory(body.Folder)
+	p, err := prepareProject(body.Name, body.Folder, body.Icon)
 	if err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
-	if !validIcon(body.Icon) {
-		fail(w, 400, "Icon must be a PNG data URL, at most 128 KiB and 1024 by 1024 pixels.")
-		return
-	}
-	p := Project{ID: newID(), Name: name, Folder: folder, Icon: body.Icon, Folders: []string{}, ArchivedFolders: []string{}}
 	a.mu.Lock()
-	for _, previous := range a.state.Projects {
-		sameFolder := previous.Folder == folder || (runtime.GOOS == "windows" && strings.EqualFold(previous.Folder, folder))
-		if previous.Removed && sameFolder {
-			p.ID, p.Folders, p.ArchivedFolders = previous.ID, previous.Folders, previous.ArchivedFolders
+	var previous *Project
+	for i := range a.state.Projects {
+		candidate := &a.state.Projects[i]
+		if candidate.Removed && sameProjectFolder(candidate.Folder, p.Folder) {
+			previous = candidate
 			break
 		}
 	}
-	err = a.commitLocked(func(d *diskState) {
-		if previous := d.project(p.ID); previous != nil {
-			*previous = p
-		} else {
-			d.Projects = append(d.Projects, p)
-		}
-	})
+	p, err = a.registerProjectLocked(p, previous)
 	a.mu.Unlock()
 	if err != nil {
 		fail(w, 503, err.Error())

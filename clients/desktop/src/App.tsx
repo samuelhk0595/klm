@@ -1,10 +1,11 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Download, Focus, GitBranch, PanelLeft, PanelRight } from 'lucide-react';
-import { IS_DESKTOP, openFocus, startWindowDrag } from './platform';
+import { Download, Focus, GitBranch, Maximize2, Minimize2, PanelLeft, PanelRight } from 'lucide-react';
+import { IS_DESKTOP, IS_MOBILE_HOST, openFocus, startWindowDrag } from './platform';
 import { Button, IconButton } from './design-system/Button';
 import { Badge } from './design-system/Badge';
 import { TabNav } from './design-system/TabNav';
 import { WorkspaceSidebar } from './features/workspace/WorkspaceSidebar';
+import { FocusWindowResizeHandles } from './features/workspace/FocusWindowResizeHandles';
 import { ProjectAuthoring } from './features/graphs/ProjectAuthoring';
 import { useAuthoringCatalog } from './features/graphs/catalog';
 import { graphListEntry } from './features/graphs/files';
@@ -95,6 +96,7 @@ export function App() {
   const [loaded, setLoaded] = useState(false);
   const [connectionError, setConnectionError] = useState('');
   const [focusError, setFocusError] = useState('');
+  const [focusMaximized, setFocusMaximized] = useState(false);
   async function focus() {
     try { await openFocus(); setFocusError(''); }
     catch (error) { setFocusError(error instanceof Error ? error.message : String(error)); }
@@ -676,19 +678,21 @@ export function App() {
     tabItems.push({ value: `subagent:${id}`, label, closeLabel: `Close ${label}`, onClose: () => closeSubagent(id) });
   }
 
-  return <div ref={shell} className={`app-shell ${sidebarOpen ? 'sidebar-open' : ''} ${sideVisible && session ? 'side-agent-open' : ''}`}
+  return <div ref={shell} className={`app-shell ${focusMaximized ? 'is-maximized' : ''} ${sidebarOpen ? 'sidebar-open' : ''} ${sideVisible && session ? 'side-agent-open' : ''}`}
     onPointerDown={event => {
       const target = event.target as HTMLElement;
       if (event.button !== 0 || !event.isPrimary || !target.closest('.session-header') || target.closest('button, a, input, select, textarea')) return;
       if (IS_DESKTOP) { void startWindowDrag().catch(error => setFocusError(errorMessage(error))); return; }
-      if (window.innerWidth <= 760) return;
+      if (focusMaximized || window.innerWidth <= 760) return;
       const element = event.currentTarget;
       const bounds = element.getBoundingClientRect();
       drag.current = {
         pointerId: event.pointerId, x: event.clientX, y: event.clientY,
         left: parseFloat(element.style.left) || 0, top: parseFloat(element.style.top) || 0,
-        minX: 8 - bounds.left, maxX: window.innerWidth - bounds.right - 8,
-        minY: 8 - bounds.top, maxY: window.innerHeight - bounds.bottom - 8,
+        minX: bounds.width > window.innerWidth - 16 ? 80 - bounds.right : 8 - bounds.left,
+        maxX: bounds.width > window.innerWidth - 16 ? window.innerWidth - bounds.left - 80 : window.innerWidth - bounds.right - 8,
+        minY: 8 - bounds.top,
+        maxY: bounds.height > window.innerHeight - 16 ? window.innerHeight - bounds.top - 56 : window.innerHeight - bounds.bottom - 8,
       };
       element.setPointerCapture(event.pointerId);
       element.dataset.dragging = 'true';
@@ -714,7 +718,7 @@ export function App() {
     <main className="main-panel">
       <header className="session-header"><div id="workspace-header-leading" className="header-leading">{!generalView && project && <IconButton label="Open sessions" className="mobile-nav" onClick={() => setSidebarOpen(true)}><PanelLeft /></IconButton>}<h1>{generalView ? 'General agent' : view === 'chat' && session ? <button className="session-title-button" title="Rename session" onClick={() => setRenamingSession(session)}>{session.title}</button> : view === 'design' ? 'Design system' : view === 'agents' ? 'Agents' : view === 'graphs' ? 'Graphs' : project?.name ?? 'KLM'}</h1>{view === 'chat' && session && gitBranch && <span className="mode-label session-header-branch" title={gitBranch}><GitBranch aria-hidden="true" /><span>{gitBranch}</span></span>}</div><div id="workspace-header-actions" className="header-actions">
         {session && chatView && <Button size="sm" className="export-button" onClick={exportSession}>Session log<Download /></Button>}
-        {IS_DESKTOP && <IconButton label="Focus" onClick={() => void focus()}><Focus /></IconButton>}
+        {IS_DESKTOP ? <IconButton label="Focus" onClick={() => void focus()}><Focus /></IconButton> : !IS_MOBILE_HOST && <IconButton label={focusMaximized ? 'Restore window' : 'Maximize window'} aria-pressed={focusMaximized} onClick={() => setFocusMaximized(current => !current)}>{focusMaximized ? <Minimize2 /> : <Maximize2 />}</IconButton>}
         {session && view === 'chat' && <IconButton label={sideOpen ? 'Close side agent' : 'Open side agent'} aria-expanded={sideOpen} onClick={() => { setSideOpen(!sideOpen); setSidebarOpen(false); }}><PanelRight /></IconButton>}
       </div></header>
       {focusError && <div role="alert" className="storage-error">{focusError} <Button size="sm" onClick={() => void focus()}>Retry</Button></div>}
@@ -766,6 +770,7 @@ export function App() {
       onSend={sendSide} onStop={() => { if (sideSession) void updateSession(sideSession, 'stop', {}); }}
       onHarness={harness => { if (sideSession) void updateSession(sideSession, 'harness', { harness }); }}
       onModel={(model, effort) => sideSession ? applyModelSettings(sideSession, model, effort) : Promise.resolve(false)} />}
+    {!IS_DESKTOP && !IS_MOBILE_HOST && !focusMaximized && <FocusWindowResizeHandles />}
     {addingProject !== null && <ProjectDialog initialFolder={addingProject} onSave={addProject} onClose={() => { navigation.current += 1; setAddingProject(null); }} />}
     {editingProject && <ProjectDialog key={`edit-project:${editingProject.id}`} initialFolder={editingProject.folder} project={editingProject} onSave={input => editProject(editingProject.id, input)} onClose={() => setEditingProject(null)} />}
     {creatingSession && createProject && <CreateSessionDialog project={createProject} harnesses={harnesses} workspace={creatingSession.workspace} onCreate={createSession} onClose={() => { navigation.current += 1; setCreatingSession(null); }} />}
