@@ -37,7 +37,7 @@ export type SessionUsage = {
   context: { tokens: number | null; window: number | null } | null;
 };
 
-export type QueuedMessage = { id: string; text: string; mode: "queue" | "steer"; status: "queued" | "steering" | "sending" | "paused" | "uncertain"; error?: string; origin?: { sessionId: string; title: string; kind?: 'instruction' | 'question_answer' } };
+export type QueuedMessage = { id: string; text: string; mode: "queue" | "steer" | "interrupt"; status: "queued" | "steering" | "sending" | "accepted" | "interrupting" | "paused" | "uncertain"; error?: string; origin?: { sessionId: string; title: string; kind?: 'instruction' | 'question_answer' } };
 
 export type Session = {
   queue?: QueuedMessage[] | null;
@@ -49,6 +49,7 @@ export type Session = {
   id: string;
   projectId: string;
   title: string;
+  latestReasoningTitle?: string;
   workspace: string;
   harness: Harness['id'];
   harnessLocked?: boolean;

@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -74,6 +73,17 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/projects", a.createProject)
 	mux.HandleFunc("PATCH /api/projects/{id}", a.updateProject)
 	mux.HandleFunc("DELETE /api/projects/{id}", a.removeProject)
+	mux.HandleFunc("GET /api/projects/{id}/webhooks", a.listWebhooks)
+	mux.HandleFunc("POST /api/projects/{id}/webhooks", a.createWebhook)
+	mux.HandleFunc("PATCH /api/projects/{id}/webhooks/{webhookId}", a.patchWebhook)
+	mux.HandleFunc("DELETE /api/projects/{id}/webhooks/{webhookId}", a.deleteWebhook)
+	mux.HandleFunc("GET /api/projects/{id}/webhooks/{webhookId}/events", a.listWebhookEvents)
+	mux.HandleFunc("GET /api/projects/{id}/webhooks/{webhookId}/events/{eventId}", a.getWebhookEvent)
+	mux.HandleFunc("GET /api/projects/{id}/webhook-events", a.listWebhookReleases)
+	mux.HandleFunc("POST /api/webhooks/github/{webhookId}", a.receiveGithubWebhook)
+	mux.HandleFunc("GET /api/activity/github", a.listGithubActivity)
+	mux.HandleFunc("GET /api/activity/github/catalog", a.getGithubActivityCatalog)
+	mux.HandleFunc("GET /api/activity/github/{eventId}", a.getGithubActivity)
 	mux.HandleFunc("POST /api/projects/{id}/folders", a.createFolder)
 	mux.HandleFunc("PATCH /api/projects/{id}/folders", a.patchFolder)
 	mux.HandleFunc("GET /api/projects/{id}/paths", a.projectPaths)
@@ -129,9 +139,16 @@ func (a *app) routes() http.Handler {
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			_, pattern := mux.Handler(r)
+			// Signed ingress owns its raw-body/media/admission validation.
+			if pattern == "POST /api/webhooks/github/{webhookId}" {
+				mux.ServeHTTP(w, r)
+				return
+			}
+			webhookDelete := pattern == "DELETE /api/projects/{id}/webhooks/{webhookId}"
 			transcriptionUpload := r.Method == http.MethodPost && r.URL.Path == "/api/transcriptions"
 			kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-			if (!transcriptionUpload && (err != nil || kind != "application/json")) ||
+			if (!transcriptionUpload && !webhookDelete && (err != nil || kind != "application/json")) ||
 				(transcriptionUpload && (err != nil || kind != "multipart/form-data")) {
 				if transcriptionUpload {
 					fail(w, 415, "Transcriptions require multipart/form-data.")
@@ -328,36 +345,21 @@ func (a *app) createProject(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	name, ok := cleanLabel(body.Name, 60)
-	if !ok {
-		fail(w, 400, "Project name must contain 1 to 60 characters.")
-		return
-	}
-	folder, err := existingDirectory(body.Folder)
+	p, err := prepareProject(body.Name, body.Folder, body.Icon)
 	if err != nil {
 		fail(w, 400, err.Error())
 		return
 	}
-	if !validIcon(body.Icon) {
-		fail(w, 400, "Icon must be a PNG data URL, at most 128 KiB and 1024 by 1024 pixels.")
-		return
-	}
-	p := Project{ID: newID(), Name: name, Folder: folder, Icon: body.Icon, Folders: []string{}, ArchivedFolders: []string{}}
 	a.mu.Lock()
-	for _, previous := range a.state.Projects {
-		sameFolder := previous.Folder == folder || (runtime.GOOS == "windows" && strings.EqualFold(previous.Folder, folder))
-		if previous.Removed && sameFolder {
-			p.ID, p.Folders, p.ArchivedFolders = previous.ID, previous.Folders, previous.ArchivedFolders
+	var previous *Project
+	for i := range a.state.Projects {
+		candidate := &a.state.Projects[i]
+		if candidate.Removed && sameProjectFolder(candidate.Folder, p.Folder) {
+			previous = candidate
 			break
 		}
 	}
-	err = a.commitLocked(func(d *diskState) {
-		if previous := d.project(p.ID); previous != nil {
-			*previous = p
-		} else {
-			d.Projects = append(d.Projects, p)
-		}
-	})
+	p, err = a.registerProjectLocked(p, previous)
 	a.mu.Unlock()
 	if err != nil {
 		fail(w, 503, err.Error())
@@ -819,8 +821,11 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
-	if body.Mode != "" && body.Mode != "queue" && body.Mode != "steer" {
-		fail(w, 400, "Message mode must be queue or steer.")
+	if body.Mode == "" {
+		body.Mode = "steer"
+	}
+	if body.Mode != "queue" && body.Mode != "steer" && body.Mode != "interrupt" {
+		fail(w, 400, "Message mode must be queue, steer or interrupt.")
 		return
 	}
 	if body.ClientID != "" && (len(body.ClientID) > 128 || strings.IndexFunc(body.ClientID, func(r rune) bool {
@@ -919,6 +924,11 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "Message identity is already in use.")
 		return
 	}
+	if t := a.runs[id]; t != nil && t.ctx.Err() != nil {
+		a.mu.Unlock()
+		fail(w, 409, "Execution is still stopping. Retry the message when ready.")
+		return
+	}
 	if a.stopVersions[id] != stopVersion {
 		a.mu.Unlock()
 		fail(w, 409, "Message preparation interrupted by Stop. Send it again when ready.")
@@ -961,13 +971,24 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mode, status := body.Mode, "queued"
-	if mode == "" {
-		mode = "queue"
-	}
 	if mode == "steer" {
 		status = "steering"
 	}
 	q := QueuedMessage{ID: identity, Text: body.Text, Mode: mode, Status: status, Sources: body.Sources, Mentions: body.Mentions}
+	if mode == "steer" {
+		inputs := []submission{}
+		for _, pending := range steeringMessages(s) {
+			inputs = append(inputs, a.state.QueuePayloads[pending.ID].Submission)
+		}
+		inputs = append(inputs, payload)
+		batch := combineSubmissions(inputs)
+		batch.Text = guidance + "\n\n" + batch.Text
+		if err := validateSubmissionSize(batch, harness); err != nil {
+			a.mu.Unlock()
+			fail(w, 400, "Pending steering messages exceed the batch transport limit. Reduce the message or attachments.")
+			return
+		}
+	}
 	if err := a.commitLocked(func(d *diskState) {
 		if d.AcceptedMessages == nil {
 			d.AcceptedMessages = map[string]string{}
@@ -983,10 +1004,16 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 			d.QueuePayloads = map[string]queuedPayload{}
 		}
 		d.QueuePayloads[q.ID] = queuedPayload{Submission: payload, Harness: harness, Directory: folder}
+		if mode == "interrupt" {
+			prepareMessageInterrupt(d, id, q.ID, a.runs[id] != nil)
+		}
 	}); err != nil {
 		a.mu.Unlock()
 		fail(w, 503, err.Error())
 		return
+	}
+	if mode == "interrupt" {
+		a.interruptForMessageLocked(id, q.ID)
 	}
 	a.wakeSteeringLocked(id)
 	a.scheduleMessagesLocked()
@@ -1030,12 +1057,13 @@ func (a *app) stopSessionLocked(id string, origin *SpawnOrigin) (*turn, error) {
 	t := a.runs[id]
 	// Cancellation must not depend on a successful history/queue write.
 	if t != nil {
+		t.restartMessageID = "" // Explicit Stop cancels a pending Send now continuation.
 		t.cancel()
 	}
 	if err := a.commitLocked(func(d *diskState) {
 		s := d.session(id)
 		for i := range s.Queue {
-			if s.Queue[i].Status == "queued" || s.Queue[i].Status == "steering" {
+			if s.Queue[i].Status == "queued" || s.Queue[i].Status == "steering" || s.Queue[i].Status == "interrupting" {
 				s.Queue[i].Status, s.Queue[i].Error = "paused", "Execution stopped. Send queued messages when ready."
 			}
 		}

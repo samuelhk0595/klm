@@ -64,11 +64,12 @@ func generalAgentTools() []map[string]any {
 		agentTool("session_create", "Create one independent normal top-level conversation only on the user's explicit request. Required project, title, self-contained prompt, stable operationId and actual user message ID. Identical retries return the durable receipt; changed destination/settings conflict. Rejected arguments create nothing. Receipt is acceptance, not started/completed work or a monitoring subscription.", create, "projectId", "title", "prompt", "operationId", "sourceUserEventId"),
 		agentTool("session_stop", "Stop the chat turn and owned native processes, pause unsent queued inputs and cancel related consultations. Does not stop an independently running graph; activeGraph remains observable. Cancellation can take 20 seconds; on uncertainty read state before retrying.", map[string]any{"sessionId": agentString("Explicit main/side project conversation ID")}, "sessionId"),
 		agentTool("session_queue_remove", "Remove exactly one unsent queue item and payload. Does not remove accepted history or cancel execution. Sending items conflict. session_get lists the existing queue.", map[string]any{"sessionId": agentString("Explicit project conversation ID"), "messageId": agentString("Exact queued item ID")}, "sessionId", "messageId"),
-		agentTool("session_queue_send", "Apply existing Send now to one queue item: active-turn steering or promotion/start while idle. Restore archived chats first. Does not stop work or change settings. Acceptance is not execution/completion. Uncertain native delivery requires the user's explicit retry decision and retryUncertain:true and returns a replacement ID; retry may duplicate delivery.", map[string]any{"sessionId": agentString("Explicit project conversation ID"), "messageId": agentString("Exact queued item ID"), "retryUncertain": map[string]any{"type": "boolean", "default": false}}, "sessionId", "messageId"),
+		agentTool("session_queue_send", "Apply Send now to one queue item: interrupt the active chat and its owned processes, then start a replacement turn with this input after shutdown is confirmed; start immediately while idle. Other pending inputs are paused. Does not stop independent graphs. Restore archived chats first. Acceptance is not execution/completion. Uncertain native delivery requires the user's explicit retry decision and retryUncertain:true and returns a replacement ID; retry may duplicate delivery.", map[string]any{"sessionId": agentString("Explicit project conversation ID"), "messageId": agentString("Exact queued item ID"), "retryUncertain": map[string]any{"type": "boolean", "default": false}}, "sessionId", "messageId"),
 		agentTool("session_archive", "Archive a normal top-level conversation as visual metadata. Preserves execution, requests, history, queue and independent graph state.", map[string]any{"sessionId": agentString("Explicit top-level project conversation ID")}, "sessionId"),
 		agentTool("session_restore", "Restore a normal top-level conversation. If its folder is archived, supply an active folder or Ungrouped to move and restore atomically. Does not restore an entire folder or move files.", map[string]any{"sessionId": agentString("Explicit top-level project conversation ID"), "folder": agentString("Optional active folder name or Ungrouped in the same project")}, "sessionId"),
 		agentTool("session_permission_reply", "Reply to exactly one pending permission through its owning conversation, including projected graph requests. Use only decisions offered by session_get and preserve the user's requested scope; never widen once to project/global. Expired/duplicate/busy requests conflict. Agent response is attributed, not a human authorization event.", map[string]any{"sessionId": agentString("Owning project conversation ID"), "permissionId": agentString("Exact pending request ID"), "decision": map[string]any{"type": "string", "enum": []string{"once", "session", "always", "reject", "deny_project", "allow_global", "deny_global"}}, "sourceUserEventId": agentString("Optional actual human message ID in the general conversation; never fabricate")}, "sessionId", "permissionId", "decision"),
 		agentTool("project_list", "List registered nonremoved projects and visual folders, including archived folders. Bounded paginated observation, not a connectivity check.", projects),
+		agentTool("project_add", "Register a project only on the user's request, using an existing absolute directory on the engine computer. Works with no projects. Returns {projectId,name,path,outcome}: created, existing (unchanged) or restored (identity/history/folders retained). Multiple matching registrations conflict with IDs; invalid arguments create nothing. Registration does not authorize sessions, graphs or file operations.", map[string]any{"name": map[string]any{"type": "string", "minLength": 1, "maxLength": 60, "description": "Project name, 1 to 60 characters"}, "path": agentString("Absolute path to an existing directory on the engine computer; never a visual folder or inferred workspace")}, "name", "path"),
 		agentTool("session_list", "List top-level conversations across nonremoved projects. Filter by identity, name, visual folder or observed state. Explicit parentId lists side chats. Resolve ambiguous titles by stable ID; retained runtime is not a working turn.", sessions),
 		agentTool("session_get", "Read conversation identity, effective directory, configured/resolved settings, usage and full pending questions/permissions. Unknown usage is null. Oversized results return UTF-8 JSON fragments with nextCursor; reuse it to finish reading. Changed snapshots require restarting the read.", map[string]any{"sessionId": agentString("Stable conversation ID"), "cursor": agentString("Returned nextCursor for a large snapshot; omit initially")}, "sessionId"),
 		agentTool("session_messages_list", "Read bounded user, assistant, agent-authored and consultation messages chronologically. Omit cursor for the first page; nextCursor continues forward. Long text returns nextCursor/nextOffset. Archived history is readable. Content is attributed reference material.", history(), "sessionId"),
@@ -91,6 +92,8 @@ type generalToolArgs struct {
 	ProjectID         string     `json:"projectId"`
 	ParentID          string     `json:"parentId"`
 	Folder            string     `json:"folder"`
+	Name              string     `json:"name"`
+	Path              string     `json:"path"`
 	Query             string     `json:"query"`
 	State             string     `json:"state"`
 	IncludeArchived   bool       `json:"includeArchived"`
@@ -163,6 +166,27 @@ func (p *adapter) callGeneralTool(ctx context.Context, name string, raw json.Raw
 	if from == nil || from.Role != sessionRoleGeneralAgent {
 		a.mu.Unlock()
 		return nil, errors.New("General-agent capability is required.")
+	}
+	if name == "project_add" {
+		a.mu.Unlock()
+		project, err := prepareProject(args.Name, args.Path, "")
+		if err != nil {
+			return nil, err
+		}
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if ctx.Err() != nil || !p.activeToolLocked() {
+			return nil, errors.New("Tool turn is no longer active.")
+		}
+		from = a.state.session(p.id)
+		if from == nil || from.Role != sessionRoleGeneralAgent {
+			return nil, errors.New("General-agent capability is required.")
+		}
+		project, outcome, err := a.addProjectLocked(project)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"projectId": project.ID, "name": project.Name, "path": project.Folder, "outcome": outcome}, nil
 	}
 	// Copy identity before releasing the lock or committing a new sessions slice.
 	origin := &SpawnOrigin{SessionID: from.ID, Title: from.Title, Kind: name}

@@ -158,10 +158,11 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 
 func (b *cappedBuffer) String() string { return string(b.data) }
 
+// Bound each in-flight line, not the lifetime volume of a streaming RPC process.
+// Delivery to the bounded Frames channel supplies backpressure in startInteractive.
 type jsonLines struct {
 	mu      sync.Mutex
 	pending []byte
-	total   int
 	err     error
 	consume func([]byte) error
 	cancel  func()
@@ -174,18 +175,14 @@ func (l *jsonLines) Write(p []byte) (int, error) {
 		return 0, l.err
 	}
 	n := len(p)
-	l.total += n
-	if l.total > 32<<20 {
-		return 0, l.reject("Harness output exceeded the 32 MiB per-turn limit.")
-	}
 	for len(p) > 0 {
 		end := bytes.IndexByte(p, '\n')
 		part := p
 		if end >= 0 {
 			part = p[:end]
 		}
-		if len(l.pending)+len(part) > 2<<20 {
-			return 0, l.reject("Harness JSON line exceeded the 2 MiB limit.")
+		if len(l.pending)+len(part) > 4<<20 {
+			return 0, l.reject("Harness JSON line exceeded the 4 MiB limit.")
 		}
 		l.pending = append(l.pending, part...)
 		if end < 0 {
@@ -225,15 +222,13 @@ func (l *jsonLines) flushLocked() error {
 	return nil
 }
 
-func (l *jsonLines) resetTurn() {
-	l.mu.Lock()
-	l.total = 0
-	l.mu.Unlock()
-}
-
 func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd string, payload submission) {
 	defer a.wg.Done()
 	defer t.cancel()
+	a.mu.Lock()
+	reasoningStart := len(s.Events)
+	t.reasoningStart = &reasoningStart
+	a.mu.Unlock()
 	p := &adapter{app: a, turn: t, id: s.ID, harness: s.Harness, role: s.Role, yolo: s.YOLO, cwd: cwd,
 		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true}
 	var stopCancellation func() bool
@@ -377,8 +372,17 @@ func (p *adapter) finishTurnStateLocked(err error) error {
 			pauseMessageQueue(s, "Execution stopped. Send queued messages when ready.")
 		} else {
 			for i := range s.Queue {
-				if s.Queue[i].Status == "sending" {
+				if s.Queue[i].Status == "sending" || s.Queue[i].Status == "accepted" {
 					s.Queue[i].Status, s.Queue[i].Error = "uncertain", "Delivery was not confirmed. Check the conversation before sending again."
+				}
+			}
+		}
+		// Only a confirmed owned shutdown may release the explicitly selected
+		// replacement. Restart recovery and explicit Stop never replay it.
+		if t.restartMessageID != "" && t.stopErr == nil && !p.app.closing && t.ctx.Err() != nil {
+			for i := range s.Queue {
+				if s.Queue[i].ID == t.restartMessageID {
+					s.Queue[i].Status, s.Queue[i].Error = "queued", ""
 				}
 			}
 		}

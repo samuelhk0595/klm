@@ -51,7 +51,163 @@ assistant messages provide Copy and a durable Favorite toggle; like and dislike 
 not used. Failed or cancelled partial responses remain copyable but cannot be marked
 as favorites.
 
-### General Agent
+### Project Settings and GitHub Webhooks
+
+The **Project settings** button in the sessions sidebar opens a modal with
+**General** and **Webhooks** sections. General edits the project's name and icon,
+shows its fixed directory and provides confirmed project removal. Project creation
+and the rail's Edit/Remove menu retain their existing entry points. Webhooks belong
+to this project modal, not global Settings.
+
+Each project can have multiple independent GitHub connections, with their own name,
+secret, stable ID, endpoint, enabled state and explicit event retention. The UI
+provides Add and paginated rows showing name, retention, time since the
+last accepted receipt (or Never) and an enable/disable toggle. The visible list
+updates these timestamps and reloads its loaded rows every 30 seconds, pausing
+while hidden or during editing/mutations.
+Selecting a row opens read-only labels/text with Copy URL and an Edit action;
+editing exposes configuration and enabled state. Details also provide confirmed
+removal. Removal deletes the connection and all its stored events,
+pending entries and releases. Secrets are required, entered by the user and never
+returned by the API. The creation form generates a random 256-bit secret using
+Web Crypto; an inline reload button generates a replacement. The value remains
+editable and copyable and is discarded after saving or closing. Editing an existing
+connection requires opting into Change secret before replacing its credential.
+Changing a secret clears its previous ping verification.
+
+Copy URL uses the configured engine base plus `/api/webhooks/github/{webhookId}`.
+The local engine uses port **7331**, or **17331** in development, rather than the
+frontend's port. Existing remote bases, explicit ports and path prefixes are
+preserved. The user manually configures a GitHub repository or organization webhook
+with this receiving path, **application/json** and the same secret. GitHub must be
+able to reach it: any HTTPS proxy/tunnel setup and public URL substitution in GitHub
+are the user's responsibility. KLM does not manage a tunnel, public URL field,
+GitHub registration, OAuth or PAT. An ingress-only proxy should forward just the
+required receiving path, preserving body bytes and GitHub headers, without exposing
+engine administration. After a durably accepted signed `ping`, the connection detail shows
+**Verified** with `lastPingAt`; this is historical receipt verification, not an
+online status. GitHub redelivery after an outage or uncertain response is manual;
+automatic GitHub retries are not assumed.
+
+Reception requires HMAC-SHA256 over the exact raw body, a valid UTF-8 JSON object,
+and single signature, delivery and event headers. Original payload bytes, event
+type and optional action are preserved. HMAC authenticates the body, not the
+delivery/type headers. A connection plus `X-GitHub-Delivery` deduplicates while its
+event remains retained and unexpired; duplicates keep the same event ID and do not
+refresh receipt time, verification, TTL or sequences. After expiry or deletion,
+that delivery ID may be accepted again. New acceptance persists the event and
+pending entry together before returning 202; retained duplicates return 200.
+
+An engine worker releases accepted entries asynchronously into durable internal
+storage, independently of clients. **Emitted** means internally available, not
+processed by a feed, agent or automation. Pending entries resume after restart;
+existing releases retain their sequence and timestamp. Metadata/history and raw
+payload detail are available through project-scoped APIs. Released events use an
+independent persistent release sequence, with decimal-string `after`, `nextAfter`
+and `highWatermark` cursors. Reading does not consume events. SSE and in-memory wake
+signals are not durable webhook delivery. The KLM Agent timeline now reads retained
+releases through a separate global, descending projection. Consumer progress storage
+and automatic integration with sessions, agents or graphs remain outside this slice.
+
+Retention starts at UTC engine receipt, not GitHub occurrence or internal release:
+**1 day**, **3 days**, **1 week**, **1 month**, **3 months**, **6 months**, **1 year**
+or **Indefinitely**. Days/weeks are 24/72/168 hours; months/years use calendar
+arithmetic clamped to the last valid day of the destination month. Retention changes
+affect only newly accepted events. Expiry also removes pending entries and releases;
+expired events are unavailable even before physical cleanup. Initial engine limits
+are 25 MiB per payload, two simultaneous ingress bodies, 100 connections per project,
+1,000 connections per engine, and 10,000 events or 256 MiB of raw retained payloads
+per engine. Ping, pending entries and removed projects count toward capacity;
+Indefinitely does not remove quotas. Pages default to 50 items, with a maximum of 100.
+
+Disabling a connection rejects new deliveries but continues releasing already
+accepted entries. Removing a project preserves its identity, connections, secrets,
+endpoints and retained events; new ingress and webhook management/reads become
+unavailable, pending release pauses, and TTL continues. Restoring the same registered
+directory restores its identity and resumes only still-valid pending entries.
+
+Backend/frontend implementation is delivered; owners reported a successful Go dev
+build and TypeScript check. A short isolated local API smoke verified signed ping
+acceptance, invalid-signature rejection, deduplication, durable release, original
+payload and retained release/deduplication after restart. UI, real GitHub reception,
+pending recovery, retention and full lifecycle still await human validation. Setup,
+API contracts and the manual acceptance route are documented in `engine/README.md`
+and `GITHUB_WEBHOOKS_IMPLEMENTATION_PLAN.md`.
+
+### KLM Agent
+
+The general agent is presented as **KLM Agent** in the client. Its view splits the
+available area between the existing chat and an X-inspired activity feed, initially
+one-third chat and two-thirds feed. The divider supports dragging and keyboard
+resizing, with a 360px minimum per pane and a locally remembered split. Double-click
+restores the default proportions. Hovering or focusing the divider reveals a
+centered swap button that exchanges the panels while retaining their widths and
+content. Panel order is also remembered locally.
+The timeline displays real released GitHub deliveries across active projects, with
+project icons, GitHub provider, factual action/result, safe resource links, category
+and summary search, on-demand compact Details, and in-memory bookmarks. Feed settings
+starts with all 56 event families enabled; local preferences are scoped to browser
+origin and engine URL and affect display only. The push-ruleset bypass preference
+uses the documented request discriminator; its canonical header is still unconfirmed.
+No local fixtures or internal agent posts appear in the live timeline.
+When new posts arrive while reading below the top, the visible post keeps its
+position. A floating accent pill below the category bar shows an upward arrow and
+up to three distinct project icons (plus an overflow count). Clicking it scrolls
+to the top; reaching the top manually also clears the notice. Initial loads,
+older-page loads and filter changes do not announce new posts. Reduced-motion
+preferences disable smooth scrolling.
+**Happening now** uses the live session inventory across active projects.
+It includes normal top-level sessions with a running turn, a retained active runtime,
+pending permissions/questions, or a failed state, including independently spawned sessions,
+and excludes archived sessions, sessions in archived folders, removed projects,
+and general/side/subagent/graph-node conversations. Stopping a session or retaining
+an idle runtime does not close it, but an idle session without an active runtime or
+pending request is excluded. Cards show the real project icon, session title,
+and latest exposed reasoning title when available. Failed takes precedence over
+Needs attention (pending permissions/questions), then Working, then Idle; status
+dots reuse the sessions rail's runtime styles and reduced-motion behavior. Reasoning
+prefers an explicit title, otherwise the first meaningful text line, with simple
+Markdown formatting removed, whitespace collapsed and a 160-character limit. The
+subtitle is cleared when the turn ends. A new turn starts without a subtitle and
+only reasoning emitted during that turn can populate it; prior-turn reasoning is
+never replayed as the current subtitle.
+Sessions initially appear newest-created first so newly spawned sessions are visible
+immediately in the three-item collapsed list. Users can drag cards to reorder them,
+with a visible insertion indicator, or use Alt + Arrow keys on a focused card.
+Manual ordering is remembered locally per browser origin and engine and shared
+between the KLM Agent list and the Focus widget. Newly appearing sessions without
+a saved position precede the saved order, newest first; streaming does not reorder
+cards. Dropping a card does not open its chat. Show more expands a scrollable list with a persistent
+Show less control, including when the active list shrinks, and an empty state appears
+when none are active. Its column has a separate draggable divider and
+centered hover/focus swap button, retaining its width and side locally. It starts
+at 230px, with a 200px minimum and at least 320px left for the timeline; double-click
+resets the width. Timeline and sidebar scroll independently in the column layout.
+It moves above the feed in narrower split views, where this divider is hidden;
+compact windows switch between Chat and Activity. Happening now uses the existing
+engine state/update stream. Activity polls while visible and refreshes on focus;
+refresh reloads its contiguous loaded window before replacing it, preserving the
+pagination boundary. Retention/deletion and removed projects limit availability;
+readers do not consume deliveries or extend retention. No automatic agent monitoring
+or event-triggered execution is included.
+
+Clicking a Happening now session opens its live chat as a shorter overlay above
+the KLM Agent composer, flush with the chat column's sides and bottom and rounded
+at its top corners. A translucent backdrop, light in light theme and dark in dark
+theme, covers the general conversation
+and its Chat header; the foreground overlay and composer remain undimmed. The
+overlay casts no shadow and its bottom blends into the composer area without a
+border. The composer, model/settings,
+queue, Stop and pending requests target the
+overlay's real project session. Drafts remain separate per session; closing the
+overlay returns the composer to KLM Agent without stopping either conversation.
+Clicking the translucent backdrop also closes the overlay and restores the general draft.
+Both chats remain subscribed while the overlay is open. Its header has Close and
+Open in project actions; the same project-navigation action appears on row hover
+or keyboard focus (always visible on touch). Navigation selects the owning project,
+expands the session's folder and opens that session's Chat tab. On compact screens,
+opening an overlay switches Activity to Chat. Archiving the overlaid session or its
+folder, or removing its project, closes the overlay.
 
 The KLM logo at the top of Project Rail opens one persistent general-agent
 conversation per engine. Its identity and history are independent of the selected
@@ -84,6 +240,23 @@ snapshot accompanies each general turn; changing it does not start another turn.
 Retained runtimes are distinguished from working turns; unknown context usage
 remains unknown.
 
+On the user's request, the general agent can register a project with `project_add`
+using a name (1 to 60 characters) and an absolute existing directory on the engine
+computer. This works before any project exists and uses the normal persistent
+registration and client inventory updates. It returns `projectId`, `name`, `path`
+and `outcome` (`created`, `existing` or `restored`), available immediately to project
+inventory and session creation options. An active matching project is unchanged;
+a removed match retains its ID, sessions/history and visual grouping, using the
+requested name and default icon. Multiple matching legacy records conflict with
+their IDs instead of choosing one. Duplicate detection and mutation share one lock;
+matching cleans paths and ignores case on Windows without resolving aliases,
+junctions or symlinks. Invalid names/paths and persistence failures return errors.
+The path is never inferred from a client, selected project or general workspace.
+Registration does not authorize sessions, graphs or file operations. This capability
+is exclusive to the general agent and independent of Data Sources; directory creation,
+cloning, Git initialization, dependency installation and project editing/removal are
+outside it. Manual project registration keeps its existing HTTP contract.
+
 The general agent can send visible, self-contained instructions to project chats
 and ask questions with correlated replies. It can rename/move visual grouping,
 atomically update model/effort/YOLO between turns, select a graph without executing
@@ -114,8 +287,16 @@ and retain native-session/project/global grant ownership, rollback and attribute
 agent provenance. None of these replies become human graph/spawn authorization.
 
 No Hermes, linked side agent for the general conversation, project file mentions,
-general graph invocation, automatic monitoring, completion notifications or new global
-dashboard is included. Runtime behavior awaits human validation.
+general graph invocation, automatic monitoring or completion notifications is included.
+The activity timeline and Happening now are engine-backed. The GitHub feed passed
+Go/TypeScript compilation and a disposable local HMAC → release → feed/Details smoke,
+including filtering, pagination and retained history after restart. The standalone
+simulator covers 56 families in 124 partial synthetic scenarios (55 confirmed headers,
+one explicitly synthetic bypass header). Targeted Playwright checks covered cards,
+settings/reload, filters/search, bookmarks, responsive layouts, refresh recovery and
+a 105-event arrival across multiple pages while preserving the reading position.
+Human UI acceptance, real external GitHub delivery, elapsed TTL and remaining
+lifecycle cases still await validation.
 
 ### Windows Delivery and Focus
 
@@ -144,10 +325,73 @@ engine. Opening another desktop shortcut restores the same instance.
 
 While Tauri is active, it serves the same built application on `0.0.0.0:7332`.
 The **Focus** header button, between **Session log** and **Side agent**, opens
-`http://localhost:7332` in the default browser. The browser retains the gradient
-and draggable central window and hides the redundant Focus button. Another device
+`http://localhost:7332` in the default browser. The browser opens with the gradient
+and draggable central window. In place of Focus, a Maximize window icon toggles an
+opaque, edge-to-edge layout that follows the browser viewport; Restore window returns
+to the floating layout, including its resized dimensions. The floating window can
+be resized by dragging any edge or corner, with the matching resize cursor and
+no visible resize icon. The invisible resize targets support arrow keys when
+focused. Minimum usable dimensions apply, but there is no maximum size or
+viewport-based resizing limit; oversized windows remain draggable.
+Resizing is unavailable in the maximized layout, narrow mobile layout and
+Flutter-hosted WebView. The toggle is absent in the Flutter-hosted WebView. Another device
 uses `http://IP-OF-ENGINE-COMPUTER:7332`; API and SSE use that same host on 7331.
 Ports remain fixed; collisions are reported instead of selecting another port.
+
+In the browser's floating Focus layout, right-clicking the gradient opens a
+**Widgets** cascading menu with checked toggles for **Happening now** and **Feed**.
+The background picker also accepts a local image in place of its gradient presets.
+Images cover the viewport while retaining their aspect ratio, cropping overflow
+around the center rather than stretching. Image mode exposes **Blur** (0–80px),
+**Mask** opacity (0–100%) and a mask color picker; the mask is a separate layer
+above the blurred photo. Images can be replaced, removed or reselected after
+switching to a gradient. The photo is stored in browser IndexedDB and adjustments
+in localStorage, so they survive refresh/tab closure on the same browser origin.
+Images are decoded before saving, limited to 20 MiB and never uploaded to the engine.
+Each widget has its own softly shadowed, draggable and edge-resizable container.
+The floating Happening now widget renders all matching sessions without Show more
+or a fixed item limit; its list uses the available height and scrolls on overflow.
+Happening now initially sits at the upper left and Feed at the right, following
+the supplied visual reference. Position, dimensions and enabled widgets are saved
+locally per engine; toggling a widget off and on restores its geometry.
+The Focus layout survives refresh and closing/reopening the browser tab in the
+same browser origin and engine: open session windows (including KLM Agent), their
+opening order and foreground window, widget toggles, positions and sizes, and the
+main window's position, dimensions and minimized/maximized state. Saved session
+IDs are reconciled only after engine inventory loads, so a disconnected initial
+load does not discard the layout. Archived/unavailable sessions are omitted after
+reconciliation. Smaller viewports keep window headers reachable; entering a
+narrow layout does not overwrite the saved floating geometry.
+Clicking a Happening now row selects its project chat in the main window when
+that window is open. When the main window is minimized, the row opens or brings
+forward the session's chat-only floating window, keeping the main window minimized.
+The row's floating-window icon always opens or brings forward that same live
+session in an independent chat-only window within Focus, with its
+existing composer, draft, queue, requests and Stop. Closing this window does not
+stop the session. Session windows close when their session/folder is archived or
+their project is removed. Their geometry is retained locally for reopening.
+In Focus, the session navigation also has a floating-window icon to the left of the folder
+selector. It opens or brings forward that session's dedicated chat window and
+automatically minimizes the main window.
+
+The KLM Agent's Chat header and the minimized main-window bar also offer an
+**Open KLM Agent in floating window** icon. Both open or bring forward the same
+chat-only window for the engine's singleton general conversation. Its draft,
+history, model, harness selection/lock, queue, requests and Stop are shared with
+the main view. It remains available when switching projects or minimizing the
+main window. The general chat has no rename action or project graph selector;
+its Open in main window action returns to the KLM Agent view.
+
+A **Minimize window** button immediately before Maximize hides the main window
+while keeping its state, leaving a small bottom-centered bar with **Restore main
+window**. The bar offers the shared theme picker and Settings, usable without
+restoring the main window. Theme selection stays synchronized with Project Rail.
+Widgets remain available
+while the main window is minimized; maximizing hides the floating widgets until
+the main window is restored or minimized. These controls are absent on native
+desktop, the mobile host and narrow browser layouts. TypeScript validation covers
+compilation; visual layout, dragging/resizing and live interactions await human
+acceptance.
 
 Local development uses API **17331** and Tauri Focus/web **17332**, with Vite HMR
 on **5173**. Engine builds with the `dev` tag use a separate `engine-dev` data
@@ -282,25 +526,38 @@ Selecting context does not change tool permissions or sandbox settings.
 ## Messages During Execution
 
 Main and side chats accept messages while a turn is active. Enter or the send
-button adds a message to a persistent FIFO queue for the next turn. **Send now**
-submits steering to the active harness at its supported interaction boundary;
-when idle it starts a turn. Queued items can be removed or sent ahead of the queue.
-Steering does not stop the turn or change its model, permissions, or sandbox.
+button submits **steering** for the next model interaction, after the current
+native assistant/tool cycle, rather than waiting for the entire task to finish.
+Pending messages are delivered together: the engine batches pending inputs;
+Pi and OpenCode claim them through native boundary hooks. A message submitted
+after that boundary belongs to the following interaction; text and tool calls
+already emitted in one assistant response are not interrupted by ordinary Enter.
 
-Pi uses native RPC steering; Codex uses `turn/steer` with the expected turn ID;
-OpenCode submits another prompt to its existing session loop. Harness acceptance
-is distinct from proof that the model has acted on the instruction. Pending
-permissions and questions retain their own reply controls.
+**Send now** interrupts the active chat and its owned native processes, then starts
+a replacement turn with the selected message only after shutdown is confirmed.
+When idle it starts that input immediately. Other pending inputs are preserved as
+paused or delivery-unconfirmed, not silently replayed into the replacement turn.
+Explicit Stop cancels a pending replacement. Interruption cannot undo completed
+tool effects and does not stop an independently running graph.
+
+Pi queues one combined native message without changing shared settings; Codex uses
+`turn/steer` with expected-turn and client-message identities. OpenCode persists a
+complete batched prompt and adds it to the current native model snapshot rather
+than depending on delayed SSE acknowledgements. Native acceptance is distinct
+from proof that the model acted on an input. Pi/Codex payloads remain durable until
+a correlated native message event; OpenCode waits for all persisted parts. Pending permissions/questions
+retain their own reply controls; ordinary steering does not answer them.
 
 The engine stores up to 32 pending messages per conversation, including prepared
-attachments. Accepted inputs enter chat history. Stop, execution failure, and
-engine restart pause unsent inputs. Unconfirmed native delivery is marked for
-manual recovery and is never automatically replayed. These controls affect the
-chat agent; they do not stop or steer an independently running graph node.
+attachments. Batch size is bounded by the native transport limit. Stop, execution
+failure, and engine restart pause unsent inputs; uncertain native delivery requires
+manual recovery and is never automatically replayed. Unsent inputs can be removed;
+Send now can select a pending input for interruption/replacement. Explicit API
+`queue` mode and agent-authored `session_send` retain end-of-task FIFO behavior.
 Stopping a chat cancels its turn and terminates its owned process container,
 including native subagents and local tool subprocesses, without waiting for a
 permission reply or a successful native abort. The stopped runtime is discarded;
-the next turn starts a new runtime and resumes the stored native conversation.
+the replacement resumes the stored native conversation in a new runtime.
 Runtime behavior across the three harnesses awaits human validation.
 
 ## Linked Side Agent Conversation
@@ -353,6 +610,20 @@ originating session and cannot serve as a human authorization message in the new
 session. A durable operation ID prevents duplicate creation on retries. Creating
 a session does not subscribe the creator to its progress or completion; normal
 session controls and inventory show it to the user.
+
+The creation event in chat is a clickable card with the session title, harness
+icon/name, model and effort, without the internal session ID in its label. New
+events capture the creation settings; legacy events fall back to available session
+inventory. Default selections remain labeled Default instead of inventing resolved
+settings. The main chat navigates to the created session's project; a floating chat
+opens or brings forward a separate floating window for it. Archived/unavailable
+destinations remain visible but cannot be opened through the card.
+
+Opening a native subagent from a floating chat shows its existing read-only
+activity and status inside that same window, with a Back to parent-chat button.
+The main window remains in its current minimized/open state. The parent draft and
+chat remain mounted, both histories remain subscribed, and the selected subagent
+is saved with the Focus layout. Returning restores the parent chat's normal controls.
 
 Spawned sessions inherit the sender's current YOLO mode by default. An explicit
 `yolo:false` implements the user's request for a non-YOLO child before its first

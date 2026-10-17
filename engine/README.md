@@ -47,9 +47,11 @@ directories remain unchanged. The override is ignored by release builds. API and
 web ports remain fixed, so only one development engine can listen at a time.
 
 
-All mutation requests, including stop and directory picker, require
+JSON mutation requests, including stop and directory picker, require
 `Content-Type: application/json`. Stop and picker accept an empty body or `{}`.
-Other mutation bodies are a single JSON object; unknown fields are rejected.
+Other JSON mutation bodies are a single object; unknown fields are rejected.
+Transcription uploads use multipart; webhook deletion requires no body or content
+type. Signed GitHub ingress has its own raw JSON validation described below.
 Errors are non-2xx JSON objects: `{"error":"message"}`.
 
 | Method | Path | Body / response |
@@ -85,6 +87,380 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 Adding the same directory again restores a removed project's identity, folders,
 and session history with the name and icon chosen in the add dialog.
 
+### Project GitHub webhooks
+
+In the client, open **Project settings** from the sessions sidebar. **General**
+edits the name/icon, displays the fixed directory and confirms project removal;
+**Webhooks** manages multiple independent GitHub connections for that project.
+The rail's Edit/Remove menu and Add project remain separate entry points. Global
+Settings has no Webhooks section. List rows show connection name and retention,
+with an enable/disable toggle;
+Load more fetches another page. Each row shows time since the last accepted event,
+or Never; the visible list updates every 30 seconds without a Refresh button,
+preserving the loaded page size and pausing during detail/edit views and mutations.
+Clicking a row opens
+read-only details with Copy URL, Last received, Verified/Not verified and confirmed
+removal. Edit switches to the form, including enabled state and credential changes;
+Cancel returns to read mode. New connections also open in read mode after creation.
+The KLM Agent Activity timeline projects released, retained GitHub deliveries.
+The connection editor has no raw-payload history screen or automation consumer.
+
+#### Manual GitHub setup
+
+1. Choose **Add → GitHub**, enter a name (1–60 characters) and an explicit
+   retention. The form generates a random 256-bit secret using Web Crypto; the
+   reload icon inside its input generates another. You can also edit it. The secret must
+   contain 16–512 UTF-8 bytes without control characters; it is not trimmed or
+   normalized. **Copy secret** copies only the value currently entered. Store it
+   separately before saving: the form discards it on save/close, and the API only
+   returns `secretConfigured`, never the stored secret.
+2. **Copy URL** combines the configured `ENGINE_URL` with the connection's stable
+   `endpointPath`. Locally this is
+   `http://localhost:7331/api/webhooks/github/WEBHOOK_ID`, or
+   `http://localhost:17331/api/webhooks/github/WEBHOOK_ID` for a dev engine. Replace
+   the placeholder with the actual ID. Ports 7332/17332 serve the frontend, not
+   webhook ingress. A configured remote base retains its scheme, port and prefix;
+   the URL is not derived from the browser origin or inbound Host header.
+3. In the GitHub repository or organization settings, manually add a webhook with
+   the reachable **Payload URL**, **Content type: application/json**, the same
+   **Secret**, the desired events and **Active** enabled. Localhost on your engine
+   computer is not reachable by GitHub. Set up your own HTTPS ingress proxy/tunnel
+   and use its public URL with the same receiving path in GitHub. KLM neither
+   provisions that infrastructure nor registers GitHub webhooks; no public URL
+   field, GitHub App/OAuth or PAT is part of this feature.
+4. After GitHub sends a signed `ping`, return to the Webhooks list and reopen the
+   connection. **Verified** shows the
+   durable `lastPingAt`; **Last received** shows the latest durably accepted event.
+   Configuration creation alone does not verify receipt. These timestamps are
+   historical, not a connectivity monitor; list updates query accepted receipt
+   metadata rather than testing network connectivity. After changing a secret in
+   KLM and GitHub, send a new ping delivery to
+   verify the replacement. Redelivering an already retained ping is a duplicate
+   and does not update verification.
+5. If a delivery fails or its response is uncertain, inspect GitHub's Recent
+   deliveries and **Redeliver** manually after restoring availability. GitHub does
+   not automatically redeliver failed webhooks. Within retention, retrying the same
+   delivery ID recovers the existing receipt without inserting another event.
+
+For example, an ingress-only HTTPS proxy should use this exact-path mapping for
+each connection (placeholders only):
+
+```text
+POST https://hooks.example.com/api/webhooks/github/WEBHOOK_ID
+  -> http://127.0.0.1:7331/api/webhooks/github/WEBHOOK_ID
+All other public paths and methods: reject; do not forward.
+```
+
+Use 17331 as the upstream port for development. Preserve the original body and
+`X-Hub-Signature-256`, `X-GitHub-Delivery`, `X-GitHub-Event` and Content-Type headers;
+do not parse/reserialize or compress the JSON. This mapping exposes no project,
+session or other administration route. HMAC protects ingress only, not the engine's
+existing unauthenticated personal-use administrative API. The private harness
+bridge stays authenticated and loopback-only.
+
+#### Reception, storage and release
+
+`POST /api/webhooks/github/{webhookId}` requires `application/json` (media-type
+parameters allowed) and no compression other than identity. Required single headers:
+
+- `X-Hub-Signature-256`: `sha256=` plus 64 hexadecimal digits, HMAC-SHA256 of the
+  exact raw body using this connection's secret, compared with `hmac.Equal`.
+- `X-GitHub-Delivery`: 1–128 ASCII characters without spaces/control characters.
+- `X-GitHub-Event`: 1–100 ASCII token characters; event types are not allowlisted.
+
+After signature verification, the body must be a valid UTF-8 JSON object. `action`
+may be absent or a string of at most 100 characters. The engine retains the exact
+original UTF-8 JSON as an immutable string, plus delivery ID, event type and action,
+without normalizing whitespace or numbers. The signature authenticates the body,
+not the event/delivery headers; no signature, cookies or arbitrary header dump is
+stored. Payload is untrusted data, not an instruction to execute.
+
+Event, pending entry, receipt sequence and connection timestamps commit together
+through the existing journal's durable Sync before a new delivery returns
+`202 {"accepted":true,"duplicate":false,"eventId":"..."}`. A retained, unexpired
+duplicate of `(webhookId,deliveryId)` returns
+`200 {"accepted":true,"duplicate":true,"eventId":"..."}` without changing TTL,
+timestamps, verification, sequence or queue. The same delivery ID on another
+connection is independent; after expiry/deletion it can be accepted as a new event.
+An unavailable/disabled connection is rejected before duplicate recovery.
+
+The worker starts with the engine, wakes on acceptance and checks pending storage
+every second. It releases eligible entries in receipt order, up to 100 per
+transaction, atomically removing pending references and adding release records.
+Release assigns a separate global `releaseSequence` and `emittedAt`; the raw event
+remains retained. `status: "emitted"` means durably available internally, not
+delivered to a feed, session, agent or graph. No consumer ACK, action retry or
+external automation runs. Wake signals and session/inventory SSE are not the
+durable webhook log. After restart, pending entries resume without a client;
+already committed releases keep their sequence/time. Storage failure does not
+publish successful acceptance; recovery requires restarting the engine and manual
+redelivery when appropriate.
+
+Secrets and payloads live in the engine data directory, not the project repository
+or client localStorage. Secrets are needed for HMAC and stored with the engine's
+private records; encryption at rest is not promised. Existing data without webhook
+fields loads as empty; validation runs at load, after journal replay and before
+save/checkpoint. Downgrading to a binary that rejects these fields is not supported.
+
+#### Retention and lifecycle
+
+Retention is explicitly selected on creation; there is no assumed default. UTC
+`receivedAt` is captured when body reading completes, before commit, and represents
+engine receipt rather than GitHub occurrence or worker emission. `expiresAt` is
+computed once from that receipt and stored with each event:
+
+| API value | UI label | From receivedAt (UTC) |
+| --- | --- | --- |
+| `1d` | 1 day | 24 hours |
+| `3d` | 3 days | 72 hours |
+| `1w` | 1 week | 168 hours |
+| `1mo` | 1 month | 1 calendar month |
+| `3mo` | 3 months | 3 calendar months |
+| `6mo` | 6 months | 6 calendar months |
+| `1y` | 1 year | 1 calendar year |
+| `forever` | Indefinitely | No expiresAt |
+
+Calendar arithmetic preserves the time of day and clamps to the destination
+month's last valid day: January 31 plus one month becomes February 28/29;
+February 29, 2024 plus one year becomes February 28, 2025. Editing retention affects
+only newly accepted events; duplicates and release do not recalculate expiry.
+`expiresAt <= now` is unavailable to reads/release even before cleanup. Cleanup
+removes expired events, pending/release records and deduplication indexes at startup
+before HTTP, then every minute in batches of 100, including removed projects.
+
+- **Disabled connection:** new deliveries return 409, but accepted pending entries
+  continue releasing. Re-enable uses the same endpoint and secret.
+- **Change secret:** omission keeps the current secret; empty/null is invalid.
+  A replacement clears `lastPingAt`, has no dual-key grace period and requires the
+  matching GitHub update. A request racing a secret change returns 409 rather than
+  committing with the old key.
+- **Remove webhook:** the UI requires **Remove webhook?** confirmation. A single
+  transaction deletes the connection and all its events, pending entries and
+  releases; the old URL returns 404. It does not remove the GitHub-side registration.
+- **Removed project:** logical project removal retains identity/history and webhook
+  configuration/events, rejects new ingress and webhook management/reads with 404,
+  pauses pending releases and continues TTL. Other projects continue releasing.
+  Existing active-session/graph removal conflicts remain. Adding the same directory
+  again restores the ProjectID, connection IDs, URLs, secrets and enabled flags;
+  the worker resumes only still-valid pending entries.
+
+Deletion is logical and immediately removes API access. Physical space is reclaimed
+by the existing healthy checkpoint/rotation cycle (five minutes); older journal or
+checkpoint bytes may persist until then. Secure erasure of bytes/backups is not
+promised.
+
+#### Webhook API and cursors
+
+Project IDs and connection/event IDs are opaque and should be URL-encoded. Every
+management/read route requires an active project and checks actual record ownership.
+Creation starts enabled; PATCH requires at least one supported field and cannot
+change ID, project or provider. Manager JSON decoding is strict.
+
+| Method | Path | Body / response |
+| --- | --- | --- |
+| GET | `/api/projects/{id}/webhooks` | `limit`, `cursor` -> `{items:WebhookConnection[],nextCursor?,hasMore}` |
+| POST | `/api/projects/{id}/webhooks` | `{provider:"github",name,secret,retention}` -> 201 WebhookConnection |
+| PATCH | `/api/projects/{id}/webhooks/{webhookId}` | `{name?,enabled?,retention?,secret?}` -> 200 WebhookConnection |
+| DELETE | `/api/projects/{id}/webhooks/{webhookId}` | No body -> 200 `{removed:true}`; 404 if absent |
+| GET | `/api/projects/{id}/webhooks/{webhookId}/events` | `limit`, `cursor` -> `{items:WebhookEventMetadata[],nextCursor?,hasMore}` |
+| GET | `/api/projects/{id}/webhooks/{webhookId}/events/{eventId}` | `{event:WebhookEventMetadata,payload:string}`; 404 if expired/deleted or outside scope |
+| GET | `/api/projects/{id}/webhook-events` | `after`, `limit` -> `{items:WebhookEventMetadata[],nextAfter:string,highWatermark:string,hasMore}`; released events only |
+| POST | `/api/webhooks/github/{webhookId}` | Original signed body/headers -> 202 new receipt or 200 duplicate |
+
+Connection DTOs include `id`, `projectId`, `provider`, `name`, `enabled`, `retention`,
+`secretConfigured`, `endpointPath`, `createdAt`, `updatedAt` and optional
+`lastReceivedAt`/`lastPingAt`. Metadata includes event/connection/project identity,
+`deliveryId`, `eventType`, optional `action`, `isPing`, `receivedAt`, optional
+`expiresAt`, `receivedSequence`, `status` (`pending` or `emitted`), optional
+`emittedAt`/`releaseSequence` and `payloadBytes`. Times are UTC RFC3339Nano; optional
+fields are omitted, and empty pages contain `[]`. List pages contain no payload.
+
+Pages default to 50 items; `limit` must be 1–100. Connection pages sort by creation
+time/ID ascending; event pages sort by received sequence descending. Their returned
+`nextCursor` is an opaque, versioned, scoped string (maximum 1 KiB), not an offset.
+Use it unchanged for the same project/connection.
+
+For releases, start with `after=0`, then pass the returned `nextAfter`. Receipt and
+release sequences, `after`, `nextAfter` and `highWatermark` are **decimal strings**;
+do not convert them to JavaScript numbers. Release order is ascending and `after`
+is exclusive. Each response captures the global release high watermark; if more
+retained project results remain, nextAfter is the last returned sequence. At the
+end, nextAfter equals highWatermark, even for an empty page. A future release of an
+older pending event gets a higher release sequence and remains discoverable.
+Invalid cursors or after beyond the current counter return 400.
+
+Reads neither consume events nor update a consumer position. Separate consumers
+can retain their own nextAfter independently; KLM has no consumer-progress table
+yet. Counters survive restart and do not reset on expiry/deletion. Cursors remain
+usable across deleted/expired rows, but gaps are normal: an overdue consumer may
+lose events to TTL, with no complete-history or expired-payload recovery guarantee.
+After an uncertain management mutation, Refresh before retrying; creation is not
+automatically retried after a transport failure.
+
+#### GitHub Activity projection
+
+The KLM Agent timeline reads releases directly, without a second event store,
+journal, ACK or durable consumer cursor. It never starts an agent or graph.
+
+| Method | Path | Contract |
+| --- | --- | --- |
+| GET | `/api/activity/github/catalog` | `{version:1,items:[{id,label,defaultEnabled,category}]}`; 56 initial options, all enabled |
+| GET | `/api/activity/github` | `limit=1..100` (default 50), `cursor`, `category`, `q` (max 200 chars), repeated `exclude` catalog IDs -> `{items,nextCursor?,hasMore,highWatermark,asOf}` |
+| GET | `/api/activity/github/{eventId}` | `{id,fields:[{label,value}],body?,entries?:[{text,url?}],truncated}`; 404 if unavailable |
+
+Categories are `PRs`, `Pipelines`, `Issues`, `Security`, `Repository`, `Other`;
+absent/`All` means all. Unknown categories/exclusions or invalid cursors return 400.
+Search is case-insensitive substring matching on displayed summary fields, not raw
+payload full-text. Filters apply **before** pagination. Unknown event types remain
+visible in Other, even if all known types are excluded. Ping is never feed activity.
+
+Items include project/connection/event identity, original eventType/action, catalogId
+when known, GitHub provider, category/tone/icon, actionLabel/summary/title/reference,
+optional branches/result/actor/repository and safe targetUrl/targetKind. Sequence,
+receipt/release times and optional expiry come from retained engine records. Sender
+does not imply agent authorship. The project owner/name comes from engine inventory.
+
+Order is **descending releaseSequence**. The opaque, strict, versioned base64url
+cursor binds the canonical filters, captured high watermark and exclusive lower
+sequence. All sequences are decimal strings, never JavaScript numbers. New releases
+appear on refresh; pagination stays under its original watermark. TTL/deletion may
+create gaps. Each query rechecks active projects, extant connections and unexpired
+releases; disabled connections retain history, removed projects hide it until restored.
+Concurrent deletion can finish an already captured read, as with existing webhook APIs.
+
+Parsing runs outside `app.mu`, using immutable payload references. A per-engine
+volatile cache holds compact normalized summaries only (10,000 entries/64 MiB limit),
+pruned against eligible records on reads; it never authorizes visibility or stores raw
+payloads. Project names are applied outside this cache. Summary text/URLs are bounded,
+and compact Details has a 64 KiB serialized ceiling with explicit truncation. Body
+text is literal, allowlisted by event family; secret-scanning secret values, deploy
+key material and hook configuration are excluded. URLs must be absolute HTTP(S)
+without userinfo/controls; missing resource links fall back to repository pages,
+otherwise references are nonclickable. No GitHub enrichment request is performed.
+
+The 56 preferences correspond to the supplied GitHub screenshot. There are **55
+confirmed canonical headers** plus stable catalog ID `push_ruleset_bypass`, matched
+for unknown headers through `exemption_request.request_type=push_ruleset_bypass`.
+This deliberately does not assert a canonical header that has not been verified.
+See `../GITHUB_ACTIVITY_FEED_IMPLEMENTATION_PLAN.md` for sources and availability.
+
+Feed settings uses localStorage
+`klm.agent.github-feed.preferences.v1:${encodeURIComponent(ENGINE_URL)}` with
+`{version:1,overrides:{catalogId:boolean}}`. This is display configuration per client
+origin/engine URL, independent of webhook subscriptions, retention and other readers.
+Explicit overrides survive future default changes. Storage failures are reported.
+Bookmarks remain in memory and never retain expired content.
+
+The visible client refreshes every 15 seconds and on focus/visibility return. It
+reloads all pages through the previous loaded lower boundary, then swaps atomically;
+it never appends an old cursor to a new top. Load more is serialized with refresh,
+query changes cancel stale requests, and errors preserve the last complete snapshot.
+Refresh preserves the visible reading anchor in desktop and compact scroll containers.
+New releases arriving below the top show a floating arrow/project-icon pill;
+clicking it returns to the top, and scrolling to the top manually also dismisses it.
+Project icons are deduplicated, with at most three displayed plus an overflow count.
+Initial loads, Load more and filter changes do not count as new arrivals; expired or
+removed events are excluded from the notice. Browser scroll anchoring is disabled
+in these containers so it does not compete with the explicit reading anchor.
+The client hides expired items using the engine clock offset and requests Details
+only when expanded. Internal agent posts/Needs attention remain future work.
+
+Standalone simulator: `node scripts/github-webhooks/simulate.mjs --list` and
+`--all --dry-run` from the repository root; see
+[`scripts/github-webhooks/README.md`](../scripts/github-webhooks/README.md).
+It signs exact bytes, supports external payloads, duplicate/invalid-signature modes,
+and has **124 partial synthetic scenarios covering all 56 catalog IDs**. Push ruleset
+bypass explicitly uses `klm_simulated_push_ruleset_bypass` until a real header is known.
+
+Implementation checks (2026-10-13): `go build -tags dev ./...`, `npx tsc -b`,
+simulator list/dry-run passed. A disposable overlay build on port 27331 (new data,
+two synthetic projects/connections) exercised all 124 scenarios, 202/200/401 behavior,
+ping exclusion, all catalog classifications, compact Details, PR/CI/comment semantics,
+descending pagination/watermark, category/search/exclusion, safe URL fallback,
+large JSON numbers, cross-connection delivery independence and restart retention
+of 128 visible occurrences. Targeted Playwright checks then covered 50/100/128-card
+pagination, provider/copy/Details/links, bookmarks across filters, all 56 settings,
+preference persistence after reload, search and empty states, and 1440/900/390px
+layouts. Adding 105 signed deliveries refreshed the mounted feed to 233 unique
+cards while preserving its reading anchor; deleting that disposable connection
+returned it to 128. A simulated refresh error kept the loaded cards and Retry
+recovered. PR readiness copy and synthetic closed-PR states were corrected and
+checked; the final Go overlay build and targeted browser assertions passed.
+Browser validation used a separate Playwright context, the existing Vite assets,
+and request redirection only inside that context to the disposable API. No real
+engine was restarted. Human UI acceptance, external GitHub delivery, elapsed TTL,
+and remaining lifecycle cases are still pending. No full suites or versioned
+integration tests were run.
+
+#### Ingress limits and errors
+
+| Resource | Limit / response |
+| --- | --- |
+| Individual raw payload | 25 MiB; 413, including oversized chunked bodies |
+| Concurrent body read/hash/parse | 2 per engine; extra ingress returns 503 |
+| Connections | 100 per project, 1,000 per engine including removed projects; creation returns 409 at capacity |
+| Stored events/raw payloads | 10,000 events or 256 MiB per engine; new ingress returns 503 at capacity |
+| Pages | Default 50, maximum 100; invalid limit/cursor returns 400 |
+| Worker/expiry cleanup | Up to 100 events per transaction |
+| HTTP headers/timeouts | 16 KiB headers; 5s read-header, 15s read, 20s write, 60s idle |
+
+Ping, pending and released events, including removed projects, count toward global
+event/byte limits; expired rows occupy capacity until cleanup. Indefinitely is
+still bounded by quotas. No unexpired event is silently evicted. A retained
+duplicate passes the event/byte quota check without allocating space, but still
+requires an available/enabled connection, a valid signature and an ingress slot.
+Capacity/ingress-slot responses include `Retry-After: 5`; this does not schedule a
+GitHub retry. The engine holds state in memory and checkpoints it completely.
+
+Ingress errors use `{"error":"English message"}`: 400 invalid headers/JSON/UTF-8,
+401 signature, 404 absent/removed connection or project, 409 disabled/racing secret
+change, 413 oversized body, 415 content type/encoding, and 503 capacity/shutdown/
+storage failure. A timeout after durable acceptance may leave the sender uncertain;
+manual redelivery with the same ID handles this while the event is retained.
+
+#### Human acceptance (pending)
+
+Backend/frontend owners reported one successful `go build -tags dev ./...` in
+`engine` and one successful `npx tsc -b` in `clients/desktop`. Documentation was
+checked against current routes, DTOs, wrappers and component wiring. A short local
+API smoke used a dev executable and isolated disposable `KLM_DEV_DATA_DIR`: creation
+without secret exposure, rejection of a bad signature, signed ping acceptance,
+deduplication, release cursor, exact payload and ping verification passed. After
+stop/start, payload, release sequence/time and deduplication were preserved. The
+temporary engine was stopped afterwards. No full suite or UI/real GitHub validation
+was run; pending recovery, expiry, quotas and full lifecycle remain human checks.
+
+Use the dev engine with disposable data and the detailed checklist in
+[`GITHUB_WEBHOOKS_IMPLEMENTATION_PLAN.md`, section 10](../GITHUB_WEBHOOKS_IMPLEMENTATION_PLAN.md#10-aceitação-e-validação-humana-preparada).
+The primary manual route is:
+
+1. Open General/Webhooks from the sidebar; save name/icon and confirm Add project
+   and rail editing still work. Create two connections in one project and one in
+   another, with distinct secrets and URLs. Confirm global Settings has no Webhooks.
+2. Send a signed ping, Refresh and observe Verified; send a signed push and inspect
+   API metadata/raw payload. For local deliveries, HMAC exactly the UTF-8 bytes sent
+   and include all three required headers. Repeat the delivery ID: expect the same
+   eventId/TTL and one stored event; repeat it on a different connection: expect a
+   separate event. Do not commit real secrets or payload credentials.
+3. Read released events with after=0 then nextAfter; repeat independently to confirm
+   reads do not consume them. Restart and confirm retained releases keep their
+   sequence/time. Pending-at-restart recovery needs the controlled disposable-data
+   scenario in the plan; the normal worker may release too quickly to observe it.
+4. Change retention and compare old/new expiresAt; exercise calendar month/year
+   boundaries and expiry as specified in the plan, including pending expiry. There
+   is no public clock override; do not modify the live engine's state/journal.
+5. Disable/re-enable, rotate the secret and send a new ping, then confirm removal
+   deletes stored events and makes the old URL unavailable. Separately remove/
+   restore a project: same identity/configuration, pending paused while removed,
+   TTL still active and only valid pending entries resumed. Pending-state scenarios
+   require controlled disposable data rather than assuming a visible queue delay.
+6. On desktop, browser and compact WebView, check layout/scrolling, Tab/Shift+Tab,
+   keyboard activation, Escape/close and focus return, confirmation Cancel/Remove,
+   clipboard fallback, loading/errors, Refresh, pagination and late responses after
+   closing/changing project. Check release/dev/configured URL bases and real GitHub
+   delivery through the user's HTTPS mapping. No received event should populate the
+   fixture timeline or start a session, agent or graph.
+
 ### General conversation
 
 `POST /api/general-session` serializes get-or-create with the same durable state
@@ -115,6 +491,7 @@ graph-execution tools. Normal main/side scope is not widened.
 | Tool | Scope and behavior |
 | --- | --- |
 | `project_list` | Paginated nonremoved projects, registered directories and visual/archived folders. |
+| `project_add` | `{name,path}` on the user's registration request; absolute existing engine-computer directory. Returns `{projectId,name,path,outcome}` with `created`, `existing` or `restored`; conflicts identify matching legacy IDs. No session or file execution. |
 | `session_list` | Top-level chats by default; project/folder/title/state filters; explicit `parentId` lists side chats. |
 | `session_get` | Identity, visual folder vs effective cwd, configured/resolved harness settings, raw/working/runtime state, queue counts, usage, full pending questions/permissions and projected graph requests. |
 | `session_messages_list` / `session_messages_search` | Chronological bounded messages or literal case-insensitive excerpts; exact `messageId`/rune `offset` reads long content. Agent origins are retained. |
@@ -192,6 +569,50 @@ Manual validation is still needed across all three harnesses: singleton identity
 through simultaneous clients/reloads/restarts, queue acceptance and irreversible
 harness locking, model/effort changes, streaming/errors/Stop/permissions/questions,
 empty-project operation, and unchanged project history/navigation.
+
+#### Project registration by the general agent
+
+`project_add` is exclusive to the general role's authenticated private bridge. It
+uses internal helpers shared with `POST /api/projects`, not a loopback HTTP call.
+Names use the existing trimmed 1-to-60-character validation; `path` must be an
+absolute existing directory on the engine computer, distinct from a session's
+visual `folder`. No source project or destination session is required, so the
+first project can be registered directly. The prompt requires a user request and
+clarification of unclear paths, never inference from the selected project,
+web/mobile client or general workspace. Registration alone authorizes no sessions,
+graphs or file operations; Data Sources are outside this feature.
+
+Filesystem validation occurs outside the engine mutex, followed by active-turn,
+context and general-identity revalidation under the lock. Matching and mutation
+share that lock. Paths are compared after `filepath.Clean`, case-insensitively on
+Windows; aliases, junctions and symlinks are not resolved for deduplication. One
+active match returns its current name/path/ID unchanged, including its icon. One
+removed match restores its ID and visual/archived folders with the requested name
+and default icon; sessions and history are untouched. Multiple matches, including
+active and removed records together, return a conflict listing IDs without mutation.
+New projects use the existing default icon. `commitLocked` persists and notifies
+client inventory streams; a failed commit returns an error rather than success.
+The ID is immediately usable by `project_list` and `session_create_options`.
+Retries for an active path use persisted project identity, not a new receipt table.
+The manual HTTP contract and its existing restoration behavior are preserved.
+
+Manual acceptance in a disposable environment (not performed during implementation):
+
+- Register the first project for an existing directory; observe Project Rail,
+  `project_list`, and `session_create_options` with the returned ID.
+- Repeat registration, including after restart and with a different requested name:
+  the active ID, name and icon stay unchanged, with no duplicate.
+- Reject invalid names and relative, nonexistent or file paths without registration.
+- Restore a removed project and confirm the same ID, sessions/history and
+  active/archived visual folders.
+- Submit two simultaneous registrations for the same directory: one creation and
+  one existing result, both with the same ID. Confirm cleaned paths and Windows case
+  differences match; multiple legacy registrations conflict and report their IDs.
+- Only choose models/create a session when the user requests that separate action.
+- Confirm normal main/side chats, graph nodes and subagents lack `project_add`,
+  and manual registration still works.
+- Confirm cancellation during directory validation prevents a stale-turn write,
+  and a persistence failure returns an error without reporting registration success.
 
 ### Session collaboration (private harness bridge)
 
@@ -965,10 +1386,17 @@ execution, a full suite, or an adversarial review.
   snapshot; unconfirmed termination is reported as an error. There is no replay of
   the cancelled prompt. Force-killing the engine itself cannot run cleanup and
   may leave external children, which are not blindly killed by PID on restart.
-- Output is consumed concurrently from stdout and stderr. JSON lines are capped
-  at 2 MiB and total stdout at 32 MiB per turn; hitting a limit cancels the turn
-  with an explicit error. Stderr is capped at 16 KiB and is never persisted,
-  exposed, or logged. Exit failures report a bounded generic diagnostic instead.
+- Codex resumes threads with `excludeTurns: true` so the response omits the old
+  timeline already stored by KLM. Native conversation history and model context
+  remain intact; this does not compact the conversation or replay failed inputs.
+- Output is consumed concurrently from stdout and stderr. Pi/Codex JSON lines
+  are capped at 4 MiB; an oversized line cancels the process with an explicit
+  error. Their RPC readers use a bounded 64-frame channel with backpressure,
+  without a cumulative stdout quota per turn or process. Long executions and
+  repeated tool snapshots therefore do not exhaust a lifetime byte budget.
+  OpenCode retains its separate SSE-frame and HTTP-response bounds. Stderr is
+  capped at 16 KiB and is never persisted, exposed, or logged. Exit failures
+  report a bounded diagnostic instead. These are transport bounds, not history quotas.
 - Session history is durable and unbounded across turns. Full checkpoint/recovery
   cost still grows with retained history, but is outside the live application mutex.
   There is no history retention/deletion API yet. Back up the data directory with
@@ -1187,16 +1615,26 @@ deleted. No harness work is started by the cleanup.
 
 ## Queued messages and steering (issue #4)
 
-`POST /api/sessions/{id}/messages` accepts optional `mode: "queue" | "steer"`.
-The default is `queue`: idle conversations start immediately; active conversations
-retain messages FIFO until their current turn finishes successfully. `steer`
-requests native delivery during the active turn. If that turn finishes before
-submission, the input is used for a new turn in the same native session.
+`POST /api/sessions/{id}/messages` accepts optional
+`mode: "steer" | "interrupt" | "queue"`. The default and normal composer Enter
+are `steer`: deliver at the next native model boundary, not after all work ends.
+All pending steering inputs are claimed as one submission with separate timeline
+entries. Pi and OpenCode claim at their native boundary hooks. If the
+turn finishes before dispatch, pending steering takes priority over follow-ups
+and starts together in the same native conversation. Explicit `queue` mode and
+agent-authored `session_send` keep end-of-task FIFO semantics.
+
+`interrupt` is the composer's **Send now**: durably accept the selected input,
+cancel the active chat and its owned process container, then start only that input
+after confirmed shutdown. Other pending items are paused/unconfirmed. Explicit
+Stop cancels a pending replacement; restart never automatically replays it.
+Already completed effects are not undone. Independent graphs are not stopped.
 
 Session summaries and SSE include `queue`, with item ID, text, mode, status, and
 recoverable error. `POST /api/sessions/{id}/queue/{messageID}/send` sends a pending
-item now; `DELETE /api/sessions/{id}/queue/{messageID}` removes an unsent item.
-Already-dispatching items cannot be removed. Queue actions retain the normal
+item with the same interrupt-and-replace semantics; `DELETE
+/api/sessions/{id}/queue/{messageID}` removes an unsent item. Dispatching,
+native-pending, and interrupting items cannot be removed. Queue actions retain the normal
 chat-session restrictions; graph-node and observed subagent sessions are excluded.
 
 Queue entries and prepared attachment payloads are saved before acknowledgement,
@@ -1205,17 +1643,27 @@ HTTP/SSE projections. Selected passages and mention metadata enter user history
 when the message is dispatched/accepted. Queue delivery retains the existing
 one-turn reservation and uses the native session, model settings and grant flow.
 
-Pi uses RPC `steer`; Codex uses `turn/steer` with `expectedTurnId`; OpenCode posts
-`prompt_async` and waits for the matching persisted user-message notification.
-Neither an early OpenCode HTTP response nor a lost native acknowledgement proves
-acceptance. Failed/stopped turns pause unsent messages. Restart pauses the queue;
-inputs with uncertain delivery are not automatically replayed. Explicitly sending
-an uncertain item creates a fresh correlation ID; users should check the native
-conversation before retrying. Accepted steering belongs to the harness and cannot
-be removed using the KLM queue.
+Pi's owned extension pulls one combined input at `before_agent_start` / `turn_end`,
+without changing shared Pi settings. Payloads remain durable until the correlated
+native user/custom-message event; a runtime with unconfirmed steering is discarded.
+Codex uses `turn/steer` with `expectedTurnId` and `clientUserMessageId`; its 15-second
+ACK only marks input accepted. A matching native `userMessage.clientId` confirms
+incorporation. OpenCode's message-transform hook pulls the batch, persists it with
+`noReply`, appends the complete result to the current model snapshot, then confirms
+consumption over the private bridge. Header-only SSE events never erase payloads.
+OpenCode still owns loop completion; its parent-message bookkeeping can cause an
+additional model iteration after a boundary-injected prompt. Validate response
+ordering with the installed harness before relying on this behavior.
+Interrupted native-pending items become `uncertain`. Explicitly sending an
+uncertain or native-pending item creates a fresh correlation ID; retry can duplicate
+an input already consumed. No uncertain delivery is automatically replayed.
+Composer and queue-row Send now share browser submission invalidation across
+main, side and floating chats, including unsent HTTP tails.
 
-Manual validation: queue several messages during a tool call; check FIFO and
-remove one; send a queued item now and a new steering message; repeat in main and
-side chats for Pi, Codex and OpenCode. Check attachments, questions/permissions,
-Stop, end-of-turn races, reload, restart, and delivery errors. No live harness
-validation or full test suite was run for this implementation.
+Manual validation: during a long review tool, press Enter three times; verify all
+pending instructions reach the next model interaction. Click Send now and verify
+the current tool/subagents stop and the selected input starts after shutdown.
+Repeat in main/side/floating chats with all three harnesses. Check attachments,
+pending questions/permissions, explicit Stop during restart, end-of-turn races,
+reload, engine restart, and delivery errors. Live harness behavior still requires
+human validation; no full suite was run.
