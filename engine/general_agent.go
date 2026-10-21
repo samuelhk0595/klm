@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const sessionRoleGeneralAgent = "general_agent"
@@ -45,14 +46,22 @@ func conversationGuidance(s *Session) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	topicPrompt := ""
 	if s.Role == "" && s.ParentID == "" && s.GraphRunID == "" {
 		if s.TopicID == "" {
-			guidance += "\n\nThis conversation has no topic yet. As soon as you understand its objective, call session_topic_set with a short descriptive name during this normal turn, including clarification turns. Do so before spawning sessions. Do not start an extra classification turn. This is initial metadata only, not additional authorization."
+			topicPrompt = "session-topic-pending.md"
 		} else {
-			guidance += "\n\nThis conversation already has a persistent topic (ID: " + s.TopicID + "). Keep its association. Only the user can rename or recolor it through UI; repeated session_topic_set calls return the current topic unchanged."
+			topicPrompt = "session-topic-assigned.md"
 		}
 	} else if s.Role == sessionRoleSideAgent {
-		guidance += "\n\nThis side chat uses its main conversation's topic. You cannot assign or change it. Spawn inherits the main topic and requires it to be assigned first."
+		topicPrompt = "session-topic-side.md"
+	}
+	if topicPrompt != "" {
+		body, err := loadInternalPrompt(topicPrompt)
+		if err != nil {
+			return "", err
+		}
+		guidance += "\n\n" + strings.ReplaceAll(body, "{{topicId}}", s.TopicID)
 	}
 	return guidance, nil
 }

@@ -1,0 +1,1 @@
+This conversation has no topic yet. As soon as you understand its objective, call session_topic_set with a short descriptive name during this normal turn, including clarification turns. Do so before spawning sessions. Do not start an extra classification turn. This is initial metadata only, not additional authorization.

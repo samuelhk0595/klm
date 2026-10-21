@@ -757,6 +757,11 @@ OpenCode and Codex through its managed extension.
 
 Agent behavior is editable in `engine/prompts/session-collaboration.md` during
 development, or `prompts/session-collaboration.md` next to the installed engine.
+Topic guidance is also file-based: `session-topic-pending.md` for initial
+assignment, `session-topic-assigned.md` for an existing topic, and
+`session-topic-side.md` for side chats. The assigned-topic prompt substitutes
+`{{topicId}}` with the current session's topic ID. These files use the same loader
+and are appended to collaboration guidance according to the conversation role/state.
 `KLM_PROMPTS_DIR` overrides both. The Windows engine packaging copies all
 `engine/prompts/*.md` into the installer's prompts directory. Changes take effect
 on the next turn; missing or empty prompt files surface an error instead of
