@@ -1263,9 +1263,20 @@ Native subagent tools are disabled in this Codex profile until capability-safe
 native inheritance is validated; engine sessions/graph nodes remain independent.
 
 OpenCode/Codex rebuild their managed process at complete engine-turn boundaries,
-resuming the same native ID and directory. Codex requests EOF and waits for native
-shutdown before retiring a successful turn, preserving transcript flush. Steering
-never refreshes the profile. No global settings or CODEX_HOME are rewritten and no
+resuming the same native ID and directory. Successful ordinary OpenCode and Codex
+turns keep their session runtime active until the existing 40-minute idle timeout
+(while no workload remains), or the next turn. Before that next turn captures its
+selection, the old process container and gateways are closed; the old managed
+profile is never reused. This preserves the active LED and Happening now entry
+between turns. Stop during an active turn shuts down its runtime; Stop while already
+idle only pauses queued input. Failed/cancelled turns and graph nodes retain their
+shutdown paths. OpenCode retains its idle server. Codex requests EOF and waits for
+native shutdown to persist the transcript, then releases that app-server transport
+while retaining the owned process container and unbound role gateway (and any owned
+background workload). Runtime activity therefore does not imply a live Codex
+app-server; the next turn always starts a fresh managed process and resumes the
+persisted native history. Steering never refreshes the profile. No global settings
+or CODEX_HOME are rewritten and no
 additive path/CODEX_HOME-only isolation claim is made. Model catalog discovery uses
 the controlled OpenCode projection and the corresponding Codex discovery flags.
 

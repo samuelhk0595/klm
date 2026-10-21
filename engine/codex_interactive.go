@@ -85,7 +85,7 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 			return err
 		}
 		if p.runtime != nil {
-			if err := p.runtime.retainInteractive(process, "codex", "", "", toolKey, nil); err != nil {
+			if err := p.runtime.retainInteractive(process, "codex", "", "", toolKey, p.capabilities != nil, nil); err != nil {
 				closeRuntimeInteractive(&runtimeInteractive{process: process})
 				return err
 			}
@@ -95,9 +95,14 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 	cancelSettled := false
 	defer func() {
 		if p.runtime != nil && p.capabilities != nil {
-			shutdownErr := p.runtime.shutdown()
-			p.processesDrained = shutdownErr == nil && !p.processDrainFailed
-			err = errors.Join(err, shutdownErr)
+			// Native EOF/flush is separate from session disposal. After success,
+			// retain the owned container and unbound gateway until the next turn
+			// or idle expiry, including any owned background workload.
+			if err != nil || p.failed || !p.completed || p.turn.ctx.Err() != nil || p.processDrainFailed {
+				shutdownErr := p.runtime.shutdown()
+				p.processesDrained = shutdownErr == nil && !p.processDrainFailed
+				err = errors.Join(err, shutdownErr)
+			}
 		} else if p.runtime == nil {
 			_ = process.Close()
 			for frame := range process.Frames {
@@ -527,7 +532,14 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 func (p *adapter) finishCodexNative(process *interactiveProcess, b binary, cwd, threadID, turnID string) error {
 	if !p.graphNode() {
 		if p.capabilities != nil {
-			return finishCodexProcess(process, p.turn.ctx, nil)
+			if err := finishCodexProcess(process, p.turn.ctx, nil); err != nil {
+				return err
+			}
+			if p.runtime != nil {
+				// The app-server has exited and persisted its transcript. Release
+				// its transport without disposing the session's remaining resources.
+				p.runtime.discardInteractive(process)
+			}
 		}
 		return nil
 	}

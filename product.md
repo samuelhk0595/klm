@@ -551,7 +551,13 @@ profile; independent KLM sessions and graph agents retain their normal behavior.
 
 OpenCode/Codex use a fresh managed process per complete engine turn and resume the
 same native history; Codex waits for EOF shutdown before retiring it so the native
-transcript can flush. Changing selection during execution still waits for the next
+transcript can flush. Successful ordinary OpenCode and Codex turns retain their
+session runtime, keeping the session active and visible in Happening now. OpenCode
+retains its idle server; Codex releases its exited app-server but retains the owned
+process container and unbound gateway. That managed runtime is retired before the
+next turn captures its selection; Stop during an active turn and the existing
+40-minute idle timeout also retire it. Graph nodes retain their immediate shutdown
+rules. Changing selection during execution still waits for the next
 complete turn. Other versions/configuration variants fail preparation explicitly.
 The mandatory general-agent installation guidance remains independent of external
 selection and is delivered as engine-owned role context on all three harnesses.

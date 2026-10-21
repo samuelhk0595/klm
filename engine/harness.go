@@ -233,23 +233,25 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	p := &adapter{app: a, turn: t, id: s.ID, harness: s.Harness, role: s.Role, yolo: s.YOLO, cwd: cwd,
 		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true}
 	var stopCancellation func() bool
+	var err error
 	if s.Role != "graph_node" {
-		p.runtime = a.beginSessionRuntime(s.ID)
+		p.runtime, err = a.beginSessionRuntime(s.ID)
 		// Independent of the adapter's event loop and native abort response.
 		// A cancelled turn retires the entire conversation process container.
-		stopCancellation = context.AfterFunc(t.ctx, func() { _ = p.runtime.shutdown() })
+		if err == nil {
+			stopCancellation = context.AfterFunc(t.ctx, func() { _ = p.runtime.shutdown() })
+		}
 	}
 	p.graph = graphBinding(t)
 	defer UnbindGraphAdapter(t)
 	p.stream = newStreamBatch(p)
-	var err error
 	if t.prompt == "" {
 		t.prompt = payload.Text
 	}
 	if p.graph == nil && s.Role == "graph_node" {
 		err = errors.New("Private graph node requires its activation adapter binding.")
 	}
-	if p.graph == nil && s.Role != "graph_node" && s.Role != sessionRoleGeneralAgent && graphConversationHooks != nil {
+	if err == nil && p.graph == nil && s.Role != "graph_node" && s.Role != sessionRoleGeneralAgent && graphConversationHooks != nil {
 		var hooks *GraphAdapterHooks
 		hooks, err = graphConversationHooks(a, t, s)
 		if hooks != nil {

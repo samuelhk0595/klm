@@ -13,19 +13,20 @@ const sessionRuntimeIdleTimeout = 40 * time.Minute
 // sessionRuntime owns the process container shared by ordinary turns in one
 // conversation. Graph node processes intentionally never use this lifetime.
 type sessionRuntime struct {
-	app          *app
-	id           string
-	mu           sync.Mutex
-	group        *runtimeProcessGroup
-	bridge       *linkedBridge
-	interactive  *runtimeInteractive
-	openCode     *openCodeServer
-	openCodeKey  string
-	cancel       context.CancelFunc
-	closed       bool
-	turnActive   bool
-	shutdownDone chan struct{}
-	shutdownErr  error
+	app               *app
+	id                string
+	mu                sync.Mutex
+	group             *runtimeProcessGroup
+	bridge            *linkedBridge
+	interactive       *runtimeInteractive
+	openCode          *openCodeServer
+	openCodeKey       string
+	cancel            context.CancelFunc
+	closed            bool
+	turnActive        bool
+	refreshBeforeTurn bool // Retain idle resources, but never reuse their managed profile.
+	shutdownDone      chan struct{}
+	shutdownErr       error
 }
 
 type runtimeInteractive struct {
@@ -44,7 +45,7 @@ type runtimeShutdown struct {
 	openCode    *openCodeServer
 }
 
-func (a *app) beginSessionRuntime(id string) *sessionRuntime {
+func (a *app) beginSessionRuntime(id string) (*sessionRuntime, error) {
 	for {
 		a.mu.Lock()
 		r := a.runtimes[id]
@@ -53,8 +54,12 @@ func (a *app) beginSessionRuntime(id string) *sessionRuntime {
 			a.runtimes[id] = r
 		}
 		a.mu.Unlock()
-		if r.beginTurn() {
-			return r
+		ready, err := r.beginTurn()
+		if err != nil {
+			return nil, err
+		}
+		if ready {
+			return r, nil
 		}
 		a.mu.Lock()
 		if a.runtimes[id] == r {
@@ -64,12 +69,16 @@ func (a *app) beginSessionRuntime(id string) *sessionRuntime {
 	}
 }
 
-func (r *sessionRuntime) beginTurn() bool {
+func (r *sessionRuntime) beginTurn() (bool, error) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return false
+	if r.closed || r.refreshBeforeTurn {
+		r.mu.Unlock()
+		// Close the old process, Job and gateways before capturing or exposing a
+		// new turn's selection, including an idle shutdown already in progress.
+		// Shutdown errors must prevent the replacement.
+		return false, r.shutdown()
 	}
+	defer r.mu.Unlock()
 	if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
@@ -78,7 +87,7 @@ func (r *sessionRuntime) beginTurn() bool {
 	if r.group != nil {
 		r.group.BeginTurn()
 	}
-	return true
+	return true, nil
 }
 
 func (r *sessionRuntime) prepare(cmd *exec.Cmd) (*ownedProcess, error) {
@@ -166,13 +175,14 @@ func (r *sessionRuntime) getInteractive(harness, model, effort, tools string) (*
 	return nil, false
 }
 
-func (r *sessionRuntime) retainInteractive(process *interactiveProcess, harness, model, effort, tools string, cleanup func()) error {
+func (r *sessionRuntime) retainInteractive(process *interactiveProcess, harness, model, effort, tools string, perTurn bool, cleanup func()) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
 		return context.Canceled
 	}
 	r.interactive = &runtimeInteractive{process: process, harness: harness, model: model, effort: effort, tools: tools, cleanup: cleanup}
+	r.refreshBeforeTurn = perTurn
 	return nil
 }
 
@@ -205,7 +215,7 @@ func (r *sessionRuntime) getOpenCode(key string) (*openCodeServer, bool) {
 	return nil, false
 }
 
-func (r *sessionRuntime) retainOpenCode(server *openCodeServer, key string) error {
+func (r *sessionRuntime) retainOpenCode(server *openCodeServer, key string, perTurn bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
@@ -213,6 +223,7 @@ func (r *sessionRuntime) retainOpenCode(server *openCodeServer, key string) erro
 	}
 	r.openCode = server
 	r.openCodeKey = key
+	r.refreshBeforeTurn = perTurn
 	return nil
 }
 

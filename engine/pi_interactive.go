@@ -147,7 +147,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 			return err
 		}
 		if p.runtime != nil {
-			if err := p.runtime.retainInteractive(proc, "pi", p.model, p.effort, toolKey, cleanup); err != nil {
+			if err := p.runtime.retainInteractive(proc, "pi", p.model, p.effort, toolKey, false, cleanup); err != nil {
 				closeRuntimeInteractive(&runtimeInteractive{process: proc, cleanup: cleanup})
 				return err
 			}

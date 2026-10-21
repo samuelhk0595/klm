@@ -605,7 +605,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			return err
 		}
 		if p.runtime != nil {
-			if err := p.runtime.retainOpenCode(server, toolKey); err != nil {
+			if err := p.runtime.retainOpenCode(server, toolKey, p.capabilities != nil); err != nil {
 				server.Close()
 				return err
 			}
@@ -629,9 +629,14 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			abortCancel()
 		}
 		if p.runtime != nil && p.capabilities != nil {
-			shutdownErr := p.runtime.shutdown()
-			p.processesDrained = shutdownErr == nil
-			err = errors.Join(err, shutdownErr)
+			// A successful ordinary turn keeps its real idle runtime visible.
+			// beginSessionRuntime retires this managed profile before the next turn;
+			// Stop during execution and the normal idle timeout still dispose it.
+			if err != nil || p.failed || !p.completed || t.ctx.Err() != nil || !server.Alive() {
+				shutdownErr := p.runtime.shutdown()
+				p.processesDrained = shutdownErr == nil
+				err = errors.Join(err, shutdownErr)
+			}
 		} else if p.runtime == nil {
 			server.Close()
 			p.processesDrained = owner.Drained()
