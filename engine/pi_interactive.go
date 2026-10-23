@@ -214,13 +214,18 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 	statsTimer.Stop()
 	defer statsTimer.Stop()
 	var statsDeadline <-chan time.Time
+	baselineTimer := time.NewTimer(2 * time.Second)
+	baselineTimer.Stop()
+	defer baselineTimer.Stop()
+	var baselineDeadline <-chan time.Time
+	baselineDone := false
 	ready, stateReceived, prompted, capabilitiesReceived := reused, false, false, false
 reading:
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if !prompted && ready && stateReceived && capabilitiesReceived {
+		if !prompted && ready && stateReceived && capabilitiesReceived && baselineDone {
 			if err := p.bridge.waitReady(ctx); err != nil {
 				return err
 			}
@@ -231,6 +236,9 @@ reading:
 			default:
 			}
 			if err := p.markCapabilitiesApplied(); err != nil {
+				return err
+			}
+			if _, err := p.analyticsDispatch(); err != nil {
 				return err
 			}
 			if err := proc.Send(map[string]any{"id": "klm-prompt", "type": "prompt", "message": text}); err != nil {
@@ -247,6 +255,9 @@ reading:
 			return ctx.Err()
 		case <-statsDeadline:
 			return nil
+		case <-baselineDeadline:
+			baselineDone, baselineDeadline = true, nil
+			continue
 		case <-startup:
 			return errors.New("Pi permission bridge startup timed out.")
 		case raw, ok = <-proc.Frames:
@@ -272,9 +283,21 @@ reading:
 				data := object(raw["data"])
 				if truth(raw, "success") && str(raw, "command") == "get_session_stats" &&
 					piSamePath(str(data, "sessionFile"), native.Path) {
-					if err := p.setUsage(piSessionUsage(data)); err != nil {
-						return err
+					var usageErr error
+					if !prompted {
+						usageErr = p.setUsageBaseline(piSessionUsage(data))
+					} else if p.nativeSettled {
+						usageErr = p.setUsageFinal(piSessionUsage(data))
+					} else {
+						usageErr = p.setUsage(piSessionUsage(data))
 					}
+					if usageErr != nil {
+						return usageErr
+					}
+				}
+				if !prompted {
+					baselineDone, baselineDeadline = true, nil
+					baselineTimer.Stop()
 				}
 				if p.completed {
 					return nil
@@ -328,12 +351,15 @@ reading:
 				if err := p.nativeID(str(data, "sessionId")); err != nil {
 					return err
 				}
+				p.analyticsBindNative(str(data, "sessionId"), filepath.Clean(native.Path))
 				stateReceived = true
 				model := object(data["model"])
 				if err := p.resolvedSelection(str(model, "provider")+"/"+str(model, "id"), str(data, "thinkingLevel")); err != nil {
 					return err
 				}
 				_ = requestStats()
+				baselineTimer.Reset(2 * time.Second)
+				baselineDeadline = baselineTimer.C
 			case "klm-prompt":
 				if !prompted || str(raw, "command") != "prompt" {
 					return errors.New("Pi returned an unexpected prompt response.")
@@ -495,6 +521,11 @@ reading:
 			if !prompted {
 				continue
 			}
+			if str(raw, "type") == "agent_start" {
+				if err := p.analyticsStart(); err != nil {
+					return err
+				}
+			}
 			if message := object(raw["message"]); str(raw, "type") == "message_end" && (str(message, "role") == "user" || str(message, "customType") == "klm-steering") {
 				if err := p.finishPiSteering(contentText(message["content"])); err != nil {
 					return err
@@ -525,6 +556,11 @@ reading:
 					delete(pending, toolID)
 				}
 			}
+			if str(raw, "type") == "agent_settled" {
+				if err := p.analyticsEnd(); err != nil {
+					return err
+				}
+			}
 			if err := p.pi(raw); err != nil {
 				return err
 			}
@@ -532,9 +568,7 @@ reading:
 				p.nativeSettled = true
 				// Usage is optional. A correlated stats response received before
 				// settlement has already been applied; do not delay idle for it.
-				if p.completed {
-					return nil
-				}
+				// Keep the bounded final stats read; earlier totals are not final.
 			}
 			if p.completed {
 				if statsDeadline == nil {

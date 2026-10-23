@@ -683,6 +683,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 		return err
 	}
 	p.setGraphNativeSession(sessionID)
+	p.analyticsBindNative(sessionID, "")
 	sessionPath := "/session/" + url.PathEscape(sessionID)
 	baseline := map[string]bool{}
 	usage := &openCodeUsage{messages: map[string]map[string]any{}, steps: map[string]map[string]map[string]any{}, windows: map[string]*int64{}}
@@ -717,7 +718,12 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	}); err != nil {
 		return err
 	}
-	if err := p.setUsage(usage.snapshot()); err != nil {
+	initialUsage := usage.snapshot()
+	if initialUsage == nil {
+		zero := int64(0)
+		initialUsage = &SessionUsage{InputTokens: &zero, OutputTokens: &zero}
+	}
+	if err := p.setUsageBaseline(initialUsage); err != nil {
 		return err
 	}
 
@@ -830,8 +836,9 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			command = strings.Join(patterns, "\n")
 		}
 		req := Permission{
-			mcpTool: p.isOpenCodeMCPTool(kind),
-			ID:      newID(), Harness: p.harness, Kind: kind, Title: "Allow " + kind,
+			analyticsOrigin: analyticsHash(p.id, p.harness, str(properties, "sessionID"), ""),
+			mcpTool:         p.isOpenCodeMCPTool(kind),
+			ID:              newID(), Harness: p.harness, Kind: kind, Title: "Allow " + kind,
 			Description: strings.TrimSpace(description), Patterns: patterns,
 			Details: metadata, Command: command, AllowLabel: "Allow", CreatedAt: now(), SourceID: id,
 		}
@@ -1007,7 +1014,14 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	default:
 	}
 	promptAttempted = true
+	dispatchedAt, dispatchErr := p.analyticsDispatch()
+	if dispatchErr != nil {
+		return dispatchErr
+	}
 	if err := h.json(ctx, http.MethodPost, sessionPath+"/prompt_async", prompt, nil); err != nil {
+		return err
+	}
+	if err := p.analyticsStartAt(dispatchedAt); err != nil {
 		return err
 	}
 	// Events queued during prompt_async are processed only after submission succeeds.
@@ -1103,6 +1117,11 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 					child.infos[id] = info
 					child.usage.message(info)
 					if str(info, "role") == "assistant" {
+						if child.taskKey != "" {
+							if err := p.analyticsChildInvocation(child.adapter, child.taskKey); err != nil {
+								return err
+							}
+						}
 						if err := child.adapter.resolvedSelection(str(info, "providerID")+"/"+str(info, "modelID"), str(info, "variant")); err != nil {
 							return err
 						}
@@ -1257,6 +1276,8 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				if (typ != "session.idle" && status != "idle") || (!busy && !ownedMessage) {
 					continue
 				}
+				idleObservedAt := time.Now()
+				p.analyticsIdleCandidate(idleObservedAt)
 				// Retain only this turn, then reconcile oldest first for UI ordering.
 				var history []map[string]any
 				if err := h.walkMessages(ctx, sessionID, baseline, func(message map[string]any) error {
@@ -1334,11 +1355,11 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				if nativeFailure {
 					return nil
 				}
-				if err := p.setUsage(usage.snapshot()); err != nil {
-					return err
-				}
 				if incomplete || !terminalAssistant {
 					return errors.New("OpenCode became idle without a completed assistant response.")
+				}
+				if err := p.setUsageFinal(usage.snapshot()); err != nil {
+					return err
 				}
 				select {
 				case err := <-streamFailed:
@@ -1354,6 +1375,9 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				}
 				p.completed = true
 				p.nativeSettled = true
+				if err := p.analyticsEndAt(idleObservedAt); err != nil {
+					return err
+				}
 				if !p.graphMCPPending() {
 					return nil
 				}
@@ -1396,7 +1420,7 @@ func (p *adapter) requestOpenCodeQuestion(ctx context.Context, h *openCodeHTTP, 
 	if json.Unmarshal(encoded, &nativeQuestions) != nil {
 		return errors.New("OpenCode returned an invalid question request.")
 	}
-	req := QuestionRequest{SourceID: id}
+	req := QuestionRequest{SourceID: id, analyticsOrigin: analyticsHash(p.id, p.harness, str(properties, "sessionID"), "")}
 	for index, question := range nativeQuestions {
 		req.Items = append(req.Items, QuestionItem{
 			ID: strconv.Itoa(index), Header: question.Header, Text: question.Question,

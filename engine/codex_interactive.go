@@ -36,6 +36,7 @@ type codexSubagent struct {
 func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error) {
 	started := time.Now()
 	phase := "process startup"
+	var dispatchedAt time.Time
 	// Registered before cleanup so cancellation diagnostics also cover teardown.
 	defer func() {
 		if err == nil {
@@ -432,6 +433,13 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 				return err
 			}
 			c.threadID = threadID
+			p.analyticsBindNative(threadID, "")
+			if native.ID == "" {
+				zero := int64(0)
+				if err := p.setUsageBaseline(&SessionUsage{InputTokens: &zero, OutputTokens: &zero}); err != nil {
+					return err
+				}
+			}
 			p.setGraphNativeSession(threadID)
 			effort := p.effort
 			if effort == "" {
@@ -502,6 +510,10 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 			if p.effort != "" {
 				turnParams["effort"] = p.effort
 			}
+			dispatchedAt, err = p.analyticsDispatch()
+			if err != nil {
+				return err
+			}
 			if err := c.send(map[string]any{"id": phase, "method": "turn/start", "params": turnParams}); err != nil {
 				return err
 			}
@@ -509,6 +521,9 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 			c.turnID = str(object(result["turn"]), "id")
 			if !codexIdentifier(c.turnID) {
 				return errors.New("Codex returned an invalid native turn identifier.")
+			}
+			if err := p.analyticsStartAt(dispatchedAt); err != nil {
+				return err
 			}
 			phase, deadline = "", nil
 			startup.Stop()
@@ -754,6 +769,9 @@ func (c *codexInteractive) frame(frame map[string]any) error {
 		if str(nativeTurn, "id") != c.turnID {
 			return nil
 		}
+		if err := c.p.analyticsEnd(); err != nil {
+			return err
+		}
 		status, message := "completed", "Turn completed."
 		switch str(nativeTurn, "status") {
 		case "failed":
@@ -776,6 +794,8 @@ func (c *codexInteractive) frame(frame map[string]any) error {
 		return nil
 	}
 	if method == "thread/tokenUsage/updated" {
+		// Codex supplies no authoritative pre-resume total. First totals on a
+		// resumed thread establish a baseline and remain explicitly incomplete.
 		return c.p.setUsage(codexSessionUsage(object(params["tokenUsage"])))
 	}
 	if method == "error" {
@@ -1133,7 +1153,7 @@ func (c *codexInteractive) request(frame map[string]any) error {
 		if !ok || len(questions) == 0 || len(questions) > 12 {
 			return invalid()
 		}
-		req := QuestionRequest{SourceID: sourceID}
+		req := QuestionRequest{SourceID: sourceID, analyticsOrigin: analyticsHash(c.p.id, c.p.harness, str(params, "threadId"), "")}
 		for _, value := range questions {
 			question := object(value)
 			custom, validCustom := question["isOther"].(bool)
@@ -1169,7 +1189,7 @@ func (c *codexInteractive) request(frame map[string]any) error {
 		return nil
 	}
 
-	req := Permission{Harness: "codex", SourceID: sourceID, Details: params,
+	req := Permission{Harness: "codex", SourceID: sourceID, Details: params, analyticsOrigin: analyticsHash(c.p.id, c.p.harness, str(params, "threadId"), ""),
 		Decisions: []string{"once", "session", "always", "reject"}}
 	var scope map[string]any
 	positive := true

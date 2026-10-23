@@ -229,12 +229,13 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	a.mu.Lock()
 	reasoningStart := len(s.Events)
 	t.reasoningStart = &reasoningStart
+	reservationErr := a.reserveAnalyticsLocked(t, s)
 	a.mu.Unlock()
 	p := &adapter{app: a, turn: t, id: s.ID, harness: s.Harness, role: s.Role, yolo: s.YOLO, cwd: cwd,
 		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true}
 	var stopCancellation func() bool
-	var err error
-	if s.Role != "graph_node" {
+	err := reservationErr
+	if err == nil && s.Role != "graph_node" {
 		p.runtime, err = a.beginSessionRuntime(s.ID)
 		// Independent of the adapter's event loop and native abort response.
 		// A cancelled turn retires the entire conversation process container.
@@ -319,6 +320,7 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 			default:
 				err = errors.New("Unsupported harness.")
 			}
+			err = errors.Join(err, p.analyticsTerminated())
 			if p.runtime != nil {
 				bridge.unbind(p)
 			} else {
@@ -384,6 +386,7 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 func (p *adapter) finishTurnStateLocked(err error) error {
 	t := p.turn
 	return p.app.commitLocked(func(d *diskState) {
+		analyticsFinish(d, t, !p.processesDrained || t.stopErr != nil)
 		s := d.session(p.id)
 		s.Status, s.UpdatedAt = "idle", now()
 		s.Capabilities.Preparing = nil
@@ -481,6 +484,7 @@ func (p *adapter) finishTurnStateLocked(err error) error {
 }
 
 type adapter struct {
+	analyticsNative      string // Hashed native epoch, protected by app.mu.
 	openCodeLibraryEnv   []string
 	openCodeRootAgent    string
 	openCodeLibraryReady atomic.Bool

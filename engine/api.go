@@ -69,6 +69,7 @@ func (a *app) routes() http.Handler {
 	a.activityBoardRoutes(mux)
 	mux.HandleFunc("GET /api/health", a.health)
 	mux.HandleFunc("GET /api/state", a.getState)
+	mux.HandleFunc("GET /api/analytics", a.getAnalytics)
 	mux.HandleFunc("GET /api/transcription/settings", a.getTranscriptionSettings)
 	mux.HandleFunc("PATCH /api/transcription/settings", a.updateTranscriptionSettings)
 	mux.HandleFunc("POST /api/transcriptions", a.transcribe)

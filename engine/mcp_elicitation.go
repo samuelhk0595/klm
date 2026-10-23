@@ -69,7 +69,11 @@ func (p *adapter) mcpElicit(ctx context.Context, c MCPConnectionSnapshot, req *m
 	answer := make(chan *mcp.ElicitResult, 1)
 	// Reuse pending-question storage and graph-owner projection. Only the explicit
 	// elicitation endpoint can reply; native/general-agent question tools cannot.
-	reqQuestion := QuestionRequest{SourceID: source, Elicitation: question, Items: []QuestionItem{{ID: "elicitation", Text: params.Message, Options: []QuestionOption{{Label: "Accept"}, {Label: "Decline"}}}}}
+	origin := "unknown"
+	if p.harness == "pi" {
+		origin = ""
+	} // The Pi gateway has an exact serial root call.
+	reqQuestion := QuestionRequest{SourceID: source, analyticsOrigin: origin, Elicitation: question, Items: []QuestionItem{{ID: "elicitation", Text: params.Message, Options: []QuestionOption{{Label: "Accept"}, {Label: "Decline"}}}}}
 	err := p.requestQuestion(reqQuestion, func([][]string, bool) error { return errors.New("Use the MCP elicitation form.") })
 	if err != nil {
 		return cancelled, err
@@ -187,6 +191,7 @@ func (a *app) answerMCPElicitation(w http.ResponseWriter, r *http.Request) {
 	}
 	delete(t.questions, qid)
 	if err := a.commitLocked(func(d *diskState) {
+		analyticsWait(d, t, qid, false, true)
 		s := d.session(id)
 		s.Questions = slices.DeleteFunc(s.Questions, func(q QuestionRequest) bool { return q.ID == qid })
 		s.UpdatedAt = now()

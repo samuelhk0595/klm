@@ -207,20 +207,35 @@ and `GITHUB_WEBHOOKS_IMPLEMENTATION_PLAN.md`.
 
 ### KLM Agent
 
-The general agent is presented as **KLM Agent** in the client. Its view splits the
-available area between the existing chat and an X-inspired activity feed, initially
-one-third chat and two-thirds feed. The divider supports dragging and keyboard
-resizing, with a 360px minimum per pane and a locally remembered split. Double-click
-restores the default proportions. Hovering or focusing the divider reveals a
-centered swap button that exchanges the panels while retaining their widths and
-content. Panel order is also remembered locally.
+The general agent is presented as **KLM Agent** in the client. Its frontend now has
+left navigation with **Home**, then **Analytics**. Home retains the real activity
+feed in the center and Happening now on the right. Narrow layouts use horizontal
+navigation. The existing chat is a bottom-docked surface shared across Home and
+Analytics, initially minimized, with expand/restore, minimize and close controls.
+Closing and minimizing show the same bottom-docked reopen bar; neither stops execution or
+discards drafts. The dock reuses the existing conversation, composer, requests and
+Focus floating-window action rather than introducing another chat engine.
+
+Analytics retains the approved Overview, Topics and Graphs layout and now reads
+one engine-owned accounting snapshot through `/api/analytics`. Prospective durable
+execution/usage observations, retained ordinary-session creation inventory and
+graph facts supply project filters, local Monday weeks, elapsed-week comparison,
+calendar, rankings and tables. Current owner-session topic membership groups work;
+archived history is included and removed projects are hidden without deleting it.
+The general agent's own work is excluded from project totals. Missing history and
+unsupported native-child measurements remain unavailable/partial. Graph wall-clock
+is separate and never added to agent-hours. Native lifetime totals are not spend.
+Implementation evidence, adapter limits and pending originating review/manual
+runtime acceptance are recorded in `ANALYTICS_IMPLEMENTATION_PROGRESS.md`.
 The timeline displays real released GitHub deliveries across active projects, with
 project icons, GitHub provider, factual action/result, safe resource links, category
 and summary search, on-demand compact Details, and in-memory bookmarks. Feed settings
 starts with all 56 event families enabled; local preferences are scoped to browser
 origin and engine URL and affect display only. The push-ruleset bypass preference
 uses the documented request discriminator; its canonical header is still unconfirmed.
-No local fixtures or internal agent posts appear in the live timeline.
+No local fixtures or internal agent posts appear in the production timeline.
+Development Home and independent Focus feed widgets are also live-only; temporary
+visual sample posts were removed after layout approval. See `ANALYTICS_VISUAL_PROTOTYPE.md`.
 The KLM Agent can explicitly consult all available feed posts using its private
 `feed_read` tool, paginated newest first across nonremoved projects and independent
 of client-side category/event preferences. A post ID reads the same compact Details
@@ -263,20 +278,19 @@ between the KLM Agent list and the Focus widget. Newly appearing sessions withou
 a saved position precede the saved order, newest first; streaming does not reorder
 cards. Dropping a card does not open its chat. Show more expands a scrollable list with a persistent
 Show less control, including when the active list shrinks, and an empty state appears
-when none are active. Its column has a separate draggable divider and
-centered hover/focus swap button, retaining its width and side locally. It starts
-at 230px, with a 200px minimum and at least 320px left for the timeline; double-click
-resets the width. Timeline and sidebar scroll independently in the column layout.
-It moves above the feed in narrower split views, where this divider is hidden;
-compact windows switch between Chat and Activity. Happening now uses the existing
+when none are active. Its column has a separate draggable divider, retaining its width locally. On Home
+it stays to the right of the timeline. It starts at 230px, with a 200px minimum and
+at least 320px left for the timeline; double-click resets the width. Timeline and
+sidebar scroll independently in the column layout. It moves above the feed in
+narrower views, where this divider is hidden; chat remains available in its dock. Happening now uses the existing
 engine state/update stream. Activity polls while visible and refreshes on focus;
 refresh reloads its contiguous loaded window before replacing it, preserving the
 pagination boundary. Retention/deletion and removed projects limit availability;
 readers do not consume deliveries or extend retention. No automatic agent monitoring
 or event-triggered execution is included.
 
-Clicking a Happening now session opens its live chat as a shorter overlay above
-the KLM Agent composer, flush with the chat column's sides and bottom and rounded
+Clicking a Happening now session opens the chat dock with its live chat as a shorter
+overlay above the KLM Agent composer, flush with the dock's sides and bottom and rounded
 at its top corners. A translucent backdrop, light in light theme and dark in dark
 theme, covers the general conversation
 and its Chat header; the foreground overlay and composer remain undimmed. The
@@ -289,8 +303,8 @@ Clicking the translucent backdrop also closes the overlay and restores the gener
 Both chats remain subscribed while the overlay is open. Its header has Close and
 Open in project actions; the same project-navigation action appears on row hover
 or keyboard focus (always visible on touch). Navigation selects the owning project,
-expands the session's topic and opens that session's Chat tab. On compact screens,
-opening an overlay switches Activity to Chat. Archiving the overlaid session or its
+expands the session's topic and opens that session's Chat tab. On compact browser screens,
+opening an overlay opens the chat dock. Archiving the overlaid session or its
 topic, or removing its project, closes the overlay.
 
 The KLM logo at the top of Project Rail opens one persistent general-agent
@@ -729,15 +743,16 @@ The sheet closes through Close, backdrop tap or Escape. Desktop and browser Focu
 retain their existing options menu, YOLO label and composer graph selector.
 
 The mobile KLM Agent view omits the outer title header and its session-log button.
-The KLM Agent's Feed is the mobile home: each new WebView load opens it regardless
+The KLM Agent's Home feed is the mobile home: each new WebView load opens it regardless
 of the previously selected project or chat, retaining project/session selections
-for subsequent navigation.
+for subsequent navigation. Home and Analytics appear in horizontal navigation;
+KLM Agent chat is available through the bottom dock.
 Project Rail starts hidden on the mobile KLM Agent page. A **Show projects** icon
 inside the Feed search field toggles it without leaving the feed; returning from
 a project or opening the app starts with the rail hidden again.
-Its compact tabs are ordered **Feed**, then **KLM Agent**, replacing the previous
-**Chat** and **Activity** labels. Desktop and browser Focus keep their existing header
-and tab labels/order.
+Show projects is also available in the KLM Agent navigation, including on Analytics.
+The former Feed/KLM Agent tabs are replaced by Home/Analytics navigation and the
+shared minimizable chat dock.
 
 The mobile Feed omits the Activity header, project counter and refresh button.
 Feed settings is an icon button inside the search field. Pulling down at the top
@@ -748,7 +763,7 @@ Mobile Happening now displays every matching session in a vertical list, with no
 Show more/Show less controls or internal scrolling. The full list scrolls with the
 feed, preserving the existing session actions and ordering.
 
-On mobile, tapping a Happening now session keeps the Feed tab selected and opens
+On mobile, tapping a Happening now session keeps Home selected and opens
 that session in an edge-to-edge bottom sheet at 85% of the viewport height, with
 rounded top corners and a modal mask above it. The sheet owns its composer, draft,
 live history, queue, requests, Stop, model and graph controls; it does not retarget

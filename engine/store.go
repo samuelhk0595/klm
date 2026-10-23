@@ -93,6 +93,7 @@ type TranscriptionSettings struct {
 }
 
 type diskState struct {
+	Analytics   *AnalyticsState `json:"analytics,omitempty"`
 	tx          *stateTransaction
 	TopicSchema int `json:"topicSchema,omitempty"`
 

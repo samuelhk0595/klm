@@ -26,13 +26,14 @@ type QuestionItem struct {
 }
 
 type QuestionRequest struct {
-	Elicitation *MCPElicitation `json:"elicitation,omitempty"`
-	ID          string          `json:"id"`
-	Harness     string          `json:"harness"`
-	Items       []QuestionItem  `json:"items"`
-	CreatedAt   string          `json:"createdAt"`
-	Resolving   bool            `json:"resolving,omitempty"`
-	SourceID    string          `json:"-"`
+	analyticsOrigin string
+	Elicitation     *MCPElicitation `json:"elicitation,omitempty"`
+	ID              string          `json:"id"`
+	Harness         string          `json:"harness"`
+	Items           []QuestionItem  `json:"items"`
+	CreatedAt       string          `json:"createdAt"`
+	Resolving       bool            `json:"resolving,omitempty"`
+	SourceID        string          `json:"-"`
 }
 
 type pendingQuestion struct {
@@ -80,6 +81,7 @@ func (p *adapter) requestQuestion(req QuestionRequest, reply func([][]string, bo
 	}
 	req.ID, req.Harness, req.CreatedAt = newID(), p.harness, now()
 	if err := a.commitLocked(func(d *diskState) {
+		p.analyticsWaitStart(d, req.ID, req.analyticsOrigin)
 		s := d.session(p.id)
 		s.Questions = append(s.Questions, req)
 		s.UpdatedAt = now()
@@ -89,7 +91,13 @@ func (p *adapter) requestQuestion(req QuestionRequest, reply func([][]string, bo
 	if p.turn.questions == nil {
 		p.turn.questions = map[string]*pendingQuestion{}
 	}
-	p.turn.questions[req.ID] = &pendingQuestion{request: req, reply: reply}
+	accountedReply := func(answers [][]string, cancelled bool) error {
+		if err := reply(answers, cancelled); err != nil {
+			return err
+		}
+		return p.analyticsWaitEnd(req.ID)
+	}
+	p.turn.questions[req.ID] = &pendingQuestion{request: req, reply: accountedReply}
 	return nil
 }
 
@@ -103,6 +111,7 @@ func (p *adapter) dismissQuestion(sourceID string) error {
 		}
 		delete(p.turn.questions, id)
 		return a.commitLocked(func(d *diskState) {
+			analyticsWait(d, p.turn, id, false, true)
 			s := d.session(p.id)
 			s.Questions = slices.DeleteFunc(s.Questions, func(q QuestionRequest) bool { return q.ID == id })
 			s.UpdatedAt = now()

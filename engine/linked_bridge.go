@@ -604,6 +604,9 @@ func (b *linkedBridge) call(ctx context.Context, name string, raw json.RawMessag
 		err := a.commitLocked(func(d *diskState) {
 			d.Consultations = append(d.Consultations, c)
 			syncConsultation(d, d.consultation(c.ID))
+			if !reciprocal {
+				p.analyticsWaitStart(d, c.ID, p.analyticsNative)
+			}
 		})
 		if err != nil {
 			a.mu.Unlock()
@@ -638,13 +641,19 @@ func (b *linkedBridge) call(ctx context.Context, name string, raw json.RawMessag
 			// deadline branch could return completed without its answer and tell
 			// the requester to wait again.
 			if consultationTerminal(current.Status) && ctx.Err() == nil && p.turn.ctx.Err() == nil {
-				err := a.commitLocked(func(d *diskState) { c := d.consultation(c.ID); c.Delivery = "delivered"; syncConsultation(d, c) })
+				err := a.commitLocked(func(d *diskState) {
+					analyticsWait(d, p.turn, c.ID, false, true)
+					c := d.consultation(c.ID)
+					c.Delivery = "delivered"
+					syncConsultation(d, c)
+				})
 				result := linkedAskResult(*a.state.consultation(c.ID), reciprocal)
 				a.mu.Unlock()
 				return result, err
 			}
 			if yield {
 				err := a.commitLocked(func(d *diskState) {
+					analyticsWait(d, p.turn, c.ID, false, true)
 					c := d.consultation(c.ID)
 					if c.Delivery == "waiting" {
 						c.Delivery = "pending"

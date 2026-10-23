@@ -16,27 +16,31 @@ import (
 )
 
 type turn struct {
-	reasoningStart       *int                // Event boundary for this turn; protected by app.mu.
-	steerWake            chan struct{}       // protected by app.mu
-	steeringBatches      map[string][]string // Native request -> durable input IDs; protected by app.mu.
-	restartMessageID     string              // Send now continuation after confirmed shutdown; protected by app.mu.
-	graphNotificationID  string
-	prompt               string // complete submission; graphConversationHooks prepends internal instructions
-	consultationID       string
-	delivery             bool
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	done                 chan struct{}
-	stopErr              error // Written before done closes; read only after done.
-	approvals            map[string]*pendingApproval
-	questions            map[string]*pendingQuestion
-	nativeYOLO           bool // Captured native policy; protected by app.mu.
-	nativeYOLOConfigured bool
+	analyticsID           string
+	analyticsAnchor       time.Time           // Monotonic dispatch anchor; protected by app.mu.
+	analyticsEndCandidate time.Time           // Native idle observed before final reconciliation.
+	reasoningStart        *int                // Event boundary for this turn; protected by app.mu.
+	steerWake             chan struct{}       // protected by app.mu
+	steeringBatches       map[string][]string // Native request -> durable input IDs; protected by app.mu.
+	restartMessageID      string              // Send now continuation after confirmed shutdown; protected by app.mu.
+	graphNotificationID   string
+	prompt                string // complete submission; graphConversationHooks prepends internal instructions
+	consultationID        string
+	delivery              bool
+	ctx                   context.Context
+	cancel                context.CancelFunc
+	done                  chan struct{}
+	stopErr               error // Written before done closes; read only after done.
+	approvals             map[string]*pendingApproval
+	questions             map[string]*pendingQuestion
+	nativeYOLO            bool // Captured native policy; protected by app.mu.
+	nativeYOLOConfigured  bool
 }
 
 type app struct {
-	activityBoardBusy  map[string]bool // One scan or move per connection; guarded by mu.
-	activityBoardSlots chan struct{}
+	analyticsGraphClocks map[string]time.Time // Monotonic clocks for owned runs; guarded by mu.
+	activityBoardBusy    map[string]bool      // One scan or move per connection; guarded by mu.
+	activityBoardSlots   chan struct{}
 
 	libraryMu         sync.Mutex
 	oauthMu           sync.Mutex
@@ -118,7 +122,11 @@ func runEngine(dir string) error {
 		return err
 	}
 	recoveryRevision := state.GraphRevision
-	interrupted := interruptGraphState(&state, "Graph run interrupted by engine restart; execution was not replayed.")
+	if err := initializeAnalytics(&state); err != nil {
+		return err
+	}
+	analyticsRecovered := recoverAnalytics(&state)
+	interrupted := interruptGraphState(&state, "Graph run interrupted by engine restart; execution was not replayed.") || analyticsRecovered
 	interruptedConsultations := map[string]string{}
 	for i := range state.Consultations {
 		c := &state.Consultations[i]
@@ -166,7 +174,7 @@ func runEngine(dir string) error {
 			interrupted = true
 		}
 	}
-	if interrupted {
+	if interrupted || state.Analytics != nil {
 		if state.GraphRevision == recoveryRevision {
 			state.GraphRevision++
 		}
@@ -223,6 +231,8 @@ func runEngine(dir string) error {
 	go func() { defer a.wg.Done(); a.webhookWorker() }()
 	a.wg.Add(1)
 	go func() { defer a.wg.Done(); a.checkpointStreamJournal() }()
+	a.wg.Add(1)
+	go func() { defer a.wg.Done(); a.checkpointAnalytics() }()
 	server := &http.Server{Handler: a.routes(), ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout: 15 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10,
 		BaseContext: func(net.Listener) context.Context { return ctx }}

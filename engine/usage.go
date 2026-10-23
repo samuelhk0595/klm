@@ -67,17 +67,31 @@ func contextUsage(tokens, window *int64) *ContextUsage {
 
 // Replace authoritative snapshots instead of adding repeated stream updates.
 func (p *adapter) setUsage(usage *SessionUsage) error {
+	return p.setUsageObservation(usage, false, false)
+}
+
+func (p *adapter) setUsageBaseline(usage *SessionUsage) error {
+	return p.setUsageObservation(usage, true, false)
+}
+func (p *adapter) setUsageFinal(usage *SessionUsage) error {
+	return p.setUsageObservation(usage, false, true)
+}
+func (p *adapter) setUsageObservation(usage *SessionUsage, baseline, final bool) error {
 	if usage == nil {
 		return nil
 	}
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
 	s := p.app.state.session(p.id)
-	if s == nil || (!p.subagent && p.app.runs[p.id] != p.turn) || reflect.DeepEqual(s.Usage, usage) {
+	if s == nil || (!p.subagent && p.app.runs[p.id] != p.turn) {
 		return nil
 	}
 	if p.app.storageErr != nil {
 		return p.app.storageErr
+	}
+	mutation := p.analyticsUsageLocked(usage, baseline, final)
+	if mutation == nil && reflect.DeepEqual(s.Usage, usage) {
+		return nil
 	}
 	// Token telemetry is also part of the stream hot path. Persist only this
 	// snapshot rather than checkpointing every conversation for each usage tick.
@@ -89,14 +103,91 @@ func (p *adapter) setUsage(usage *SessionUsage) error {
 	if err := json.Unmarshal(encoded, &owned); err != nil {
 		return err
 	}
-	record := streamRecord{Revision: p.app.state.GraphRevision + 1, Session: p.id, Updated: now(), Usage: &owned}
+	record := streamRecord{Revision: p.app.state.GraphRevision + 1, Session: p.id, Updated: now(), Usage: &owned, Analytics: mutation}
+	// Validate a small private shell before writing the single atomic frame.
+	var next diskState
+	if mutation != nil {
+		a := p.app.state.Analytics
+		e := a.Executions[mutation.ExecutionID]
+		e.Usage = append([]AnalyticsUsageDelta(nil), e.Usage...)
+		e.Reasons = append([]string(nil), e.Reasons...)
+		next.Analytics = &AnalyticsState{Executions: map[string]AnalyticsExecution{mutation.ExecutionID: e}, Counters: map[string]AnalyticsCounter{}}
+		if err := next.applyAnalyticsUsage(mutation, p.id); err != nil {
+			return p.app.failStorageLocked(err)
+		}
+	}
 	if err := appendStreamRecord(p.app.dir, record); err != nil {
 		return p.app.failStorageLocked(err)
 	}
 	s.Usage, s.UpdatedAt = &owned, record.Updated
+	if mutation != nil {
+		p.app.state.Analytics.Executions[mutation.ExecutionID] = next.Analytics.Executions[mutation.ExecutionID]
+		p.app.state.Analytics.Counters[mutation.Key] = mutation.Counter
+	}
 	p.app.state.GraphRevision = record.Revision
 	p.app.notifySessionLocked(p.id)
 	return nil
+}
+
+func (p *adapter) analyticsUsageLocked(usage *SessionUsage, baseline, final bool) *analyticsUsageMutation {
+	a := p.app.state.Analytics
+	if a == nil || p.subagent || p.analyticsNative == "" {
+		return nil
+	}
+	e, ok := a.Executions[p.turn.analyticsID]
+	if !ok {
+		return nil
+	}
+	c := a.Counters[p.analyticsNative]
+	// A persisted high-water mark does not prove a new turn's starting total.
+	if c.ExecutionID != e.ID {
+		c.ExecutionID = e.ID
+		c.InputInvalid, c.OutputInvalid = false, false
+	}
+	m := &analyticsUsageMutation{ExecutionID: e.ID, Key: p.analyticsNative, Counter: c, Delta: AnalyticsUsageDelta{Sequence: e.Sequence + 1, At: now()}, InputBaseline: e.InputBaseline, OutputBaseline: e.OutputBaseline, InputFinal: e.InputFinal, OutputFinal: e.OutputFinal}
+	component := func(current *int64, previous **int64, ready *bool, invalid *bool, complete *bool) *int64 {
+		if current == nil {
+			if final {
+				*complete = false
+			}
+			return nil
+		}
+		if baseline {
+			if *previous != nil && *current < **previous {
+				m.Reason = "counter_decrease"
+			}
+			*previous, *ready, *invalid = current, true, false
+			return nil
+		}
+		if *invalid {
+			return nil
+		}
+		if !*ready || *previous == nil {
+			*previous, *ready = current, true
+			m.Reason = "usage_start_unobserved"
+			return nil
+		}
+		if *current < **previous {
+			*invalid = true
+			m.Reason = "counter_decrease"
+			return nil
+		}
+		delta := *current - **previous
+		*previous = current
+		if final {
+			*complete = true
+		}
+		if delta == 0 {
+			return nil
+		}
+		return &delta
+	}
+	m.Delta.Input = component(usage.InputTokens, &m.Counter.Input, &m.InputBaseline, &m.Counter.InputInvalid, &m.InputFinal)
+	m.Delta.Output = component(usage.OutputTokens, &m.Counter.Output, &m.OutputBaseline, &m.Counter.OutputInvalid, &m.OutputFinal)
+	if reflect.DeepEqual(c, m.Counter) && m.Delta.Input == nil && m.Delta.Output == nil && m.InputBaseline == e.InputBaseline && m.OutputBaseline == e.OutputBaseline && m.InputFinal == e.InputFinal && m.OutputFinal == e.OutputFinal && m.Reason == "" {
+		return nil
+	}
+	return m
 }
 
 func (p *adapter) clearContextUsage() error {

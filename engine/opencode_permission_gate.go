@@ -84,7 +84,8 @@ func (p *adapter) openCodePermissionGate(ctx context.Context, raw json.RawMessag
 	result := make(chan bool, 1)
 	encoded, _ := json.Marshal(call.Input)
 	req := Permission{SourceID: "preflight:" + key, Kind: call.Tool, Title: "Allow " + call.Tool,
-		Patterns: []string{string(encoded)}, Command: str(call.Input, "command"), Path: call.Cwd,
+		analyticsOrigin: analyticsHash(p.id, p.harness, call.SessionID, ""),
+		Patterns:        []string{string(encoded)}, Command: str(call.Input, "command"), Path: call.Cwd,
 		Details: map[string]any{"toolName": call.Tool, "input": call.Input, "cwd": call.Cwd}}
 	req.mcpTool = p.isOpenCodeMCPTool(call.Tool)
 	if call.Tool == "bash" {

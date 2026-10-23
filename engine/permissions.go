@@ -10,23 +10,24 @@ import (
 )
 
 type Permission struct {
-	mcpTool     bool           // Adapter-confirmed MCP identity; never inferred from tool arguments.
-	ID          string         `json:"id"`
-	Harness     string         `json:"harness"`
-	Kind        string         `json:"kind"`
-	Title       string         `json:"title"`
-	Description string         `json:"description"`
-	Patterns    []string       `json:"patterns"`
-	Details     map[string]any `json:"details,omitempty"`
-	Command     string         `json:"command,omitempty"`
-	Path        string         `json:"path,omitempty"`
-	ScopeLabel  string         `json:"scopeLabel,omitempty"`
-	Dangerous   bool           `json:"dangerous,omitempty"`
-	Decisions   []string       `json:"decisions"`
-	AllowLabel  string         `json:"allowLabel,omitempty"`
-	CreatedAt   string         `json:"createdAt"`
-	Resolving   bool           `json:"resolving,omitempty"`
-	SourceID    string         `json:"-"`
+	analyticsOrigin string         // Internal native origin, never projected as UI ownership.
+	mcpTool         bool           // Adapter-confirmed MCP identity; never inferred from tool arguments.
+	ID              string         `json:"id"`
+	Harness         string         `json:"harness"`
+	Kind            string         `json:"kind"`
+	Title           string         `json:"title"`
+	Description     string         `json:"description"`
+	Patterns        []string       `json:"patterns"`
+	Details         map[string]any `json:"details,omitempty"`
+	Command         string         `json:"command,omitempty"`
+	Path            string         `json:"path,omitempty"`
+	ScopeLabel      string         `json:"scopeLabel,omitempty"`
+	Dangerous       bool           `json:"dangerous,omitempty"`
+	Decisions       []string       `json:"decisions"`
+	AllowLabel      string         `json:"allowLabel,omitempty"`
+	CreatedAt       string         `json:"createdAt"`
+	Resolving       bool           `json:"resolving,omitempty"`
+	SourceID        string         `json:"-"`
 }
 
 type permissionGrant struct {
@@ -149,6 +150,7 @@ func (p *adapter) requestPermission(req Permission, scope map[string]any, reply 
 		return p.replyAutomaticPermission(req, facts.decision, "workspace policy", reply)
 	}
 	err := a.commitLocked(func(d *diskState) {
+		p.analyticsWaitStart(d, req.ID, req.analyticsOrigin)
 		s := d.session(p.id)
 		s.Permissions = append(s.Permissions, req)
 		s.UpdatedAt = now()
@@ -157,7 +159,13 @@ func (p *adapter) requestPermission(req Permission, scope map[string]any, reply 
 		if p.turn.approvals == nil {
 			p.turn.approvals = map[string]*pendingApproval{}
 		}
-		p.turn.approvals[req.ID] = &pendingApproval{request: req, key: key, reply: reply, ruleKey: ruleKey, ruleKind: ruleKind, ruleHarness: ruleHarness}
+		accountedReply := func(allow bool) error {
+			if err := reply(allow); err != nil {
+				return err
+			}
+			return p.analyticsWaitEnd(req.ID)
+		}
+		p.turn.approvals[req.ID] = &pendingApproval{request: req, key: key, reply: accountedReply, ruleKey: ruleKey, ruleKind: ruleKind, ruleHarness: ruleHarness}
 	}
 	a.mu.Unlock()
 	return err
@@ -173,6 +181,7 @@ func (p *adapter) dismissPermission(sourceID string) error {
 		}
 		delete(p.turn.approvals, id)
 		return a.commitLocked(func(d *diskState) {
+			analyticsWait(d, p.turn, id, false, true)
 			s := d.session(p.id)
 			s.Permissions = slices.DeleteFunc(s.Permissions, func(req Permission) bool { return req.ID == id })
 			s.UpdatedAt = now()
