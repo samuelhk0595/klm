@@ -1,5 +1,6 @@
 import type { AuthoringCatalog, GraphFile } from './features/graphs/files';
 import { resolveEngineURL } from './platform';
+import { clientFetch } from './clientAuth';
 import type { ConversationCapabilities } from './features/library/api';
 
 export const ENGINE_URL = resolveEngineURL();
@@ -211,10 +212,9 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, t
   const timeout = method === 'GET' ? AbortSignal.timeout(timeoutMs) : undefined;
   const requestSignal = signal && timeout ? AbortSignal.any([signal, timeout]) : signal ?? timeout;
   try {
-    response = await fetch(`${ENGINE_URL}${path}`, {
+    response = await clientFetch(path, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      credentials: 'omit',
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: requestSignal,
     });
@@ -246,9 +246,8 @@ export async function transcribeAudio(audio: Blob, filename: string, signal?: Ab
   form.append('file', audio, filename);
   let response: Response;
   try {
-    response = await fetch(`${ENGINE_URL}/api/transcriptions`, {
+    response = await clientFetch('/api/transcriptions', {
       method: 'POST',
-      credentials: 'omit',
       body: form,
       signal,
     });

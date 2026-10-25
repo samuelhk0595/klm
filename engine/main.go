@@ -38,6 +38,7 @@ type turn struct {
 }
 
 type app struct {
+	clientAuth           *clientAuth
 	analyticsGraphClocks map[string]time.Time // Monotonic clocks for owned runs; guarded by mu.
 	activityBoardBusy    map[string]bool      // One scan or move per connection; guarded by mu.
 	activityBoardSlots   chan struct{}
@@ -196,6 +197,10 @@ func runEngine(dir string) error {
 	a := &app{dir: dir, state: state, harnesses: harnesses, binaries: binaries,
 		runs: map[string]*turn{}, runtimes: map[string]*sessionRuntime{}, graphRuns: map[string]*graphExecution{}, listeners: map[string]map[chan struct{}]bool{},
 		historyJournal: map[string]*sessionJournal{}, journalBase: state.GraphRevision, picker: make(chan struct{}, 1), ctx: ctx}
+	a.clientAuth, err = newClientAuth(dir)
+	if err != nil {
+		return err
+	}
 	if a.state.TopicSchema == 0 {
 		if err := a.commitLocked(migrateTopics); err != nil {
 			return fmt.Errorf("cannot migrate topics: %w", err)

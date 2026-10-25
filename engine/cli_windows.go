@@ -66,13 +66,17 @@ func engineControl(dir, command string) error {
 		}
 		defer windows.CloseHandle(process)
 	}
-	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	if _, err := fmt.Fprintln(conn, command); err != nil {
 		return err
 	}
 	line, err := bufio.NewReader(io.LimitReader(conn, 1024)).ReadString('\n')
 	if err != nil {
 		return err
+	}
+	if command == "pair" && strings.HasPrefix(line, "pair ") {
+		fmt.Printf("Pairing code (one use, expires in 5 minutes):\n%s\n", strings.TrimSpace(strings.TrimPrefix(line, "pair ")))
+		return nil
 	}
 	if line != "ok\n" {
 		return errors.New(strings.TrimSpace(line))
@@ -117,6 +121,19 @@ func serveEngineControl(dir string, a *app, shutdown chan struct{}) (net.Listene
 					return
 				}
 				switch line {
+				case "pair\n":
+					code, err := a.clientAuth.issuePair()
+					if err != nil {
+						fmt.Fprintln(conn, "Cannot generate pairing code.")
+					} else {
+						fmt.Fprintln(conn, "pair "+code)
+					}
+				case "revoke-clients\n":
+					if err := a.clientAuth.revoke(""); err != nil {
+						fmt.Fprintln(conn, err.Error())
+					} else {
+						fmt.Fprintln(conn, "ok")
+					}
 				case "ready\n":
 					a.mu.Lock()
 					ready := !a.closing && a.storageErr == nil

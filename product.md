@@ -405,17 +405,25 @@ adds user PATH and starts the engine at login via HKCU Run. Data stays under
 `%APPDATA%/klm/engine`; uninstall preserves it. Stopping manually does not disable
 the next login start. There is no pre-login Windows service.
 
-The public HTTP API listens on `0.0.0.0:7331`. Network authentication and TLS are
-deferred by the approved personal-use contract; grants, sandbox and the private
-authenticated loopback bridge keep their existing boundaries. Commands, project
-files and native directory dialogs always belong to the engine computer.
+The public HTTP API listens on `0.0.0.0:7331` and requires individual paired-client
+credentials for all application reads, writes, downloads, uploads and streams.
+`klm pair` issues a one-use 256-bit code over the protected per-user local channel;
+it expires after five minutes. Credentials expire only after seven consecutive
+days without authenticated use, with no absolute lifetime. Settings → Connected
+devices revokes one/all devices and terminates their streams; `klm revoke-clients`
+provides protected local recovery. All paired clients have full engine access.
 
-The public API accepts any HTTP Host and any CORS origin, including tunnel/proxy
-domains, without an allowlist. This does not change the private authenticated
-loopback bridge. Frontend Settings accept an engine IP or domain, with optional
-HTTP(S) scheme and port. IPs without a port use 7331; explicit ports are preserved.
-Domains receive no added port. Without a scheme, IPs use HTTP and domains use
-HTTPS. A tunnel subdomain change only requires updating the frontend engine URL.
+Remote access requires HTTPS, with explicit trusted TLS-proxy configuration and
+an exact configured frontend-origin allowlist. The supplied same-site HTTPS
+frontend/engine use a host-only Secure HttpOnly Strict cookie. The native Windows
+desktop uses an engine-scoped credential in OS Credential Manager. Direct loopback
+HTTP remains authenticated; plaintext LAN credentials are rejected. Engine URL
+settings preserve explicit ports and add no port to domains. HTTPS LAN browser/
+mobile access requires same-site cookie-compatible frontend and engine hosts.
+Grants, sandbox and the private authenticated harness/Library bridges keep their
+existing separate boundaries. Commands, files and directory dialogs belong to the
+engine computer. Setup and pending human acceptance are recorded in
+`CLIENT_AUTH_IMPLEMENTATION_PROGRESS.md` and `engine/README.md`.
 
 The desktop fills its native window. Closing it hides to the tray; **Open** restores
 it and **Exit** ends only desktop/web. The client neither starts nor stops the
@@ -433,7 +441,8 @@ focused. Minimum usable dimensions apply, but there is no maximum size or
 viewport-based resizing limit; oversized windows remain draggable.
 Resizing is unavailable in the maximized layout, narrow mobile layout and
 Flutter-hosted WebView. The toggle is absent in the Flutter-hosted WebView. Another device
-uses `http://IP-OF-ENGINE-COMPUTER:7332`; API and SSE use that same host on 7331.
+uses configured same-site HTTPS frontend/engine hosts; the HTTP listeners on
+7332/7331 serve as TLS-proxy upstreams for remote access.
 Ports remain fixed; collisions are reported instead of selecting another port.
 
 In the browser's floating Focus layout, right-clicking the gradient opens a
@@ -597,7 +606,8 @@ HTTPS redirect reaching the dedicated public API callback; browser localhost is
 not substituted for the engine. The mobile web flow uses explicit same-tab
 navigation and a return-to-Library link. Providers' embedded-WebView policies and
 real desktop/mobile login still require human validation. The public personal-use
-API's existing network contract is unchanged.
+API requires paired-client access; the callback retains its independent OAuth
+state/transaction validation.
 
 Missing/offline MCP connections warn the model and user while retaining selection.
 Invalid selected skills, corrupted snapshots and isolation failures stop preparation.
@@ -626,13 +636,14 @@ Desktop and ordinary browser recording require `getUserMedia` and `MediaRecorder
 Browser security rules may deny microphone capture on insecure remote origins, so remote
 HTTP browser access is not promised to support recording. The Flutter-hosted mobile
 WebView instead uses native microphone permission and AAC/M4A recording, including on
-HTTP LAN hosts. Its separate audio bridge is restricted to the exact saved frontend
+HTTP LAN hosts for capture, while remote engine uploads require HTTPS pairing.
+Its separate audio bridge is restricted to the exact saved frontend
 origin and forwards bounded audio chunks to the existing engine transcription upload.
 Cancel discards audio or aborts transcription; backgrounding, navigation and disposal
 release capture and temporary files. Recordings are limited to ten minutes and 25 MiB.
 Transcripts append to the current draft and preserve references without sending. This
-requires an updated mobile app and frontend and does not change the existing personal-use
-network and authentication contract.
+requires an updated mobile app and frontend. Remote transcription uploads follow
+the paired-client HTTPS and CSRF contract described above.
 
 Permission prompts are supported for OpenCode, Pi, and Codex. Cards expose **Allow**,
 **Allow session**, and **Deny**, with a menu for **Allow in this project**, **Deny in

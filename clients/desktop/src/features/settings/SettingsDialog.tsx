@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { BookOpen, KeyRound, MessageSquare, Mic, Plus, Trash2, X } from 'lucide-react';
 import { LibraryPanel } from '../library/LibraryPanel';
+import { ConnectedDevices } from './ConnectedDevices';
 import { Button, IconButton } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import { ENGINE_URL, getTranscriptionSettings, updateTranscriptionSettings, type TranscriptionSettings } from '../../engine';
 import { configureEngineURL } from '../../platform';
 
-type SettingsSection = 'chat' | 'transcription' | 'library';
+type SettingsSection = 'chat' | 'transcription' | 'library' | 'devices';
 
 const emptyTranscription: TranscriptionSettings = {
   apiKeyConfigured: false,
@@ -88,9 +89,10 @@ export function SettingsDialog({ onClose, onDesignSystem, onGeneralAgent }: { on
         <button type="button" className={section === 'chat' ? 'is-active' : ''} aria-current={section === 'chat' ? 'page' : undefined} onClick={() => setSection('chat')}><MessageSquare />Chat</button>
         <button type="button" className={section === 'transcription' ? 'is-active' : ''} aria-current={section === 'transcription' ? 'page' : undefined} onClick={() => setSection('transcription')}><Mic />Transcription</button>
         <button type="button" className={section === 'library' ? 'is-active' : ''} aria-current={section === 'library' ? 'page' : undefined} onClick={() => setSection('library')}><BookOpen />Library</button>
+        <button type="button" className={section === 'devices' ? 'is-active' : ''} aria-current={section === 'devices' ? 'page' : undefined} onClick={() => setSection('devices')}><KeyRound />Connected devices</button>
       </nav>
       <div className="settings-panel">
-        {section === 'library' ? <LibraryPanel onGeneralAgent={onGeneralAgent} /> : section === 'chat' ? <section aria-labelledby="chat-settings-title">
+        {section === 'devices' ? <ConnectedDevices /> : section === 'library' ? <LibraryPanel onGeneralAgent={onGeneralAgent} /> : section === 'chat' ? <section aria-labelledby="chat-settings-title">
           <h3 id="chat-settings-title">Chat</h3>
           <form className="engine-settings-form settings-form" onSubmit={connectEngine}>
             <label htmlFor="engine-url">Engine URL</label>

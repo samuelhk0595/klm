@@ -26,8 +26,8 @@ func engineDataDir() (string, error) {
 }
 
 func dispatchCLI(args []string) error {
-	if len(args) != 1 || (args[0] != "start" && args[0] != "stop" && args[0] != "__worker") {
-		return errors.New("Usage: klm start | klm stop")
+	if len(args) != 1 || (args[0] != "start" && args[0] != "stop" && args[0] != "pair" && args[0] != "revoke-clients" && args[0] != "__worker") {
+		return errors.New("Usage: klm start | klm stop | klm pair | klm revoke-clients")
 	}
 	dir, err := engineDataDir()
 	if err != nil {
@@ -35,6 +35,9 @@ func dispatchCLI(args []string) error {
 	}
 	if args[0] == "__worker" {
 		return runEngine(dir)
+	}
+	if args[0] == "pair" || args[0] == "revoke-clients" {
+		return engineControl(dir, args[0])
 	}
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err

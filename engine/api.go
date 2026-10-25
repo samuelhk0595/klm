@@ -65,6 +65,13 @@ func loopbackHost(hostport string) bool {
 
 func (a *app) routes() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/auth/pair", a.redeemClient)
+	mux.HandleFunc("GET /api/auth/session", func(w http.ResponseWriter, r *http.Request) {
+		respond(w, 200, map[string]string{"clientId": clientIdentity(r)})
+	})
+	mux.HandleFunc("GET /api/auth/devices", a.connectedClients)
+	mux.HandleFunc("DELETE /api/auth/devices/{clientId}", a.revokeClient)
+	mux.HandleFunc("DELETE /api/auth/devices", a.revokeClient)
 	a.libraryRoutes(mux)
 	a.activityBoardRoutes(mux)
 	mux.HandleFunc("GET /api/health", a.health)
@@ -133,17 +140,9 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/sessions/{id}/questions/{questionID}/reply", a.answerQuestion)
 	mux.HandleFunc("POST /api/dialogs/directory", a.directory)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "Endpoint not found.") })
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		// Public clients may use any domain/IP, including reverse proxies and tunnels.
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		if r.Method == http.MethodOptions {
-			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "*")
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			_, pattern := mux.Handler(r)
 			// Signed ingress owns its raw-body/media/admission validation.
@@ -173,6 +172,10 @@ func (a *app) routes() http.Handler {
 		}
 		mux.ServeHTTP(w, r)
 	})
+	if a.clientAuth == nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fail(w, 503, "Client authentication is unavailable.") })
+	}
+	return a.clientAuth.protect(mux, handler)
 }
 
 func (a *app) health(w http.ResponseWriter, r *http.Request) {

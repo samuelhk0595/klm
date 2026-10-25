@@ -1,5 +1,103 @@
 # KLM Engine
 
+## Secure client pairing
+
+After upgrading, every browser, native desktop and mobile WebView must pair once.
+On the **engine computer**, run `klm pair`, then enter the code and a client name in
+the client's **Connect to engine** screen. Codes contain 256 random bits, expire in
+five minutes, are single-use, and are replaced by the next `klm pair`. They are held
+only as an in-memory hash; restarting invalidates outstanding codes. The command
+uses the same local per-user Windows named pipe as start/stop, never public HTTP.
+Development builds use their separate data/control channel as before.
+
+For browser development, use the same hostname for page and engine: the VS Code
+task uses `http://127.0.0.1:5173` with `http://127.0.0.1:17331`. Do not mix
+`localhost` and `127.0.0.1` with Strict cookies. A mismatched attempt may consume
+the code before cookie confirmation fails; correct the URLs before pairing again.
+
+To select an already-paired engine while disconnected, edit **Engine URL** and use
+**Connect**; changing engines reloads the client and selects that engine's existing
+credential. **Pair client** redeems a new code. A fixed `VITE_ENGINE_URL` must be
+updated in development configuration before selecting a different engine; the UI
+rejects that mismatch before redeeming a code or saving a selection.
+Resolution and selection use one canonical URL (hostname case/default ports,
+preserving base paths and explicit dev ports), including native credential keys.
+Bare IP input defaults to 7331; explicit HTTP(S) URLs honor standard default ports.
+Invalid legacy saved URLs fall back to the normal derived engine so the connection
+screen remains available for recovery.
+
+For the production deployment, configure the environment of the engine process:
+
+```text
+KLM_ALLOWED_ORIGINS=https://klm.codemob.com.br
+KLM_TRUSTED_TLS_PROXIES=127.0.0.1/32
+```
+
+The second value is an **example for a proxy connecting over IPv4 loopback**.
+Configure only the actual immediate TLS proxy IP/CIDRs (`::1/128` if appropriate).
+The proxy must preserve the external Host and overwrite `X-Forwarded-Proto` with
+one `https` value from its own verified TLS connection. Never forward a client-set
+value unchanged. Unconfigured peers and multi-valued headers are not trusted.
+Serve the frontend and proxy over HTTPS with valid certificates; the engine's own
+HTTP listener is the private upstream hop behind that proxy. Remote plaintext LAN
+credentials are rejected, including pairing codes. LAN browser/mobile use now
+requires an HTTPS frontend and engine, with a same-site cookie-compatible domain.
+Do not use an unrelated frontend site with Strict cookies.
+
+`KLM_ALLOWED_ORIGINS` accepts comma-separated exact origins (scheme, host, optional
+port; no paths/wildcards/`null`). Fixed native Tauri origins and local development/
+Focus origins on localhost/127.0.0.1 ports 5173, 7332 and 17332 are also allowed.
+Changing the engine's public host requires pairing to that host and changing the
+client URL. Changing the frontend host also requires updating the allowed origin.
+Use the supplied same-site pair `https://klm.codemob.com.br` and
+`https://klmengine.codemob.com.br` for production. The supplied frontend host resolves
+to that engine by default; `VITE_ENGINE_URL` remains a development override.
+
+All application APIs, including health/version, downloads, multipart transcription
+uploads and SSE, require a credential. Only `POST /api/auth/pair`, signed
+`POST /api/webhooks/github/{webhookId}`, and transaction/state-validated
+`GET /api/library/mcp/oauth/callback` are exempt; preflight does not execute an
+operation. Cookie mutations require an allowed exact Origin and `X-KLM-CSRF: 1`.
+Native/API callers use `Authorization: Bearer <credential>`; credentials never
+belong in URLs. Browser/native transports add the required headers centrally.
+
+Browsers and the HTTPS Flutter WebView use a host-only Secure HttpOnly
+`__Host-klm-client-7331` cookie, Path=/, SameSite=Strict (`17331` suffix in dev).
+Direct loopback HTTP uses a distinct HttpOnly Strict `klm-loopback-client-7331`
+cookie (also `17331` in dev), admitted only for a loopback
+peer and Host without forwarding headers; it still requires pairing. Native Tauri
+stores its bearer in Windows Credential Manager, separately per engine URL and
+dev/release application identifier. JavaScript holds that credential only in memory;
+the credential is not written to localStorage. Fetch-based SSE supplies native
+Authorization headers; browser fetch/SSE includes cookies. Engine switching reloads
+the application, so displayed state and credentials are not reused across engines.
+
+Expiration is **7 consecutive days without authenticated client requests only**,
+with no absolute lifetime. Each admitted request writes last use atomically to the
+small `client-auth.json` credential file before serving protected data. The file
+contains only SHA-256 credential hashes and device metadata, at most 128 active
+devices; it is independent of history/state transactions. This simple strategy
+does one bounded file sync/replacement per authenticated request, not per SSE
+event. Browser cookies renew on the same admitted requests; an open client sends
+an authenticated renewal every minute. Server stream output never renews use.
+Activity survives restart; failed persistence denies the request or pairing.
+Redemption is limited to 20 attempts per engine per minute and a 2 KiB JSON body.
+
+**Settings → Connected devices** lists names, last use and the current client;
+revoke one or all devices there. Revocation is durable and cancels existing streams
+without stopping engine work. A 401 returns the client to pairing and clears its
+mounted protected workspace. For local recovery independent of any client, run
+`klm revoke-clients` on the engine computer, then `klm pair`. Recovery also clears
+outstanding pairing codes. No public HTTP issuance or recovery route exists.
+
+Authentication endpoints: `POST /api/auth/pair` takes `{code,name}` and sets the
+cookie (native callers explicitly request credential return with `X-KLM-Native: 1`);
+`GET /api/auth/session` authenticates/renews; `GET /api/auth/devices` returns safe
+metadata; `DELETE /api/auth/devices/{clientId}` and `DELETE /api/auth/devices` revoke
+one/all. DELETE requests use JSON `{}` and the same mutation protections.
+See `../CLIENT_AUTH_IMPLEMENTATION_PROGRESS.md` for actual checks and manual
+browser/desktop/mobile acceptance still required.
+
 ## Tasks
 
 The global board uses `/api/activity-board/*`, independent of webhook ingress and
@@ -41,8 +139,8 @@ enumerated. Restart/Refresh loads missing iteration metadata in older caches;
 incomplete caches show a refresh notice but may still include a confirmed current
 sprint. No provider request is made per card.
 Enter tokens only in the client; they are write-only and protected at rest with
-Windows user-bound DPAPI. Existing public API networking/CORS is unchanged, so use
-a trusted local/network connection or appropriate HTTPS for credential setup.
+Windows user-bound DPAPI. Client pairing and HTTPS are required for remote
+credential setup; see Secure client pairing above.
 
 Providers own tasks. The engine stores global phases, complete ordered mappings,
 technical item snapshots and durable update receipts under `activityBoard*` fields.
@@ -78,7 +176,9 @@ go build -o klm.exe .
 .\klm.exe stop
 ```
 
-The public CLI has only `klm start` and `klm stop`. Start launches a detached worker,
+The public CLI includes `klm start`, `klm stop`, `klm pair` and `klm revoke-clients`.
+Pairing and recovery use the protected local channel described above.
+Start launches a detached worker,
 waits for readiness and returns; repeated start keeps the same engine. Closing the
 terminal does not stop it. Stop uses a per-user Windows named pipe, waits for the
 live pipe server's Windows process handle and data lock to be released after shutdown,
@@ -220,7 +320,7 @@ Use 17331 as the upstream port for development. Preserve the original body and
 `X-Hub-Signature-256`, `X-GitHub-Delivery`, `X-GitHub-Event` and Content-Type headers;
 do not parse/reserialize or compress the JSON. This mapping exposes no project,
 session or other administration route. HMAC protects ingress only, not the engine's
-existing unauthenticated personal-use administrative API. The private harness
+paired-client administrative API. The private harness
 bridge stays authenticated and loopback-only.
 
 #### Reception, storage and release
@@ -1719,17 +1819,15 @@ execution, a full suite, or an adversarial review.
 
 The public API binds `0.0.0.0:7331`, including LAN clients. It does not restrict
 HTTP Host: domains, IP addresses and reverse-proxy authorities are accepted.
-CORS sends `Access-Control-Allow-Origin: *`, including for opaque/null origins,
-and allows wildcard request headers without credentials. Requests without Origin
-are also accepted. CORS does not grant credentials and is not network authentication.
-JSON mutation limits remain intact. Tunnel subdomains can change without engine
-configuration; enter the new public engine URL in the frontend Settings.
-
-Network authentication and TLS are explicitly deferred in the approved personal-use
-delivery. The existing `loopbackHost` helper, private authenticated MCP bridge and
-owned harness endpoints retain their local boundary. Engine shutdown is available
-only through a named pipe whose ACL allows this Windows user and denies network
-logons. Grants, permissions and sandbox behavior remain unchanged.
+CORS permits exact configured origins with credentials, rejects opaque/null and
+unconfigured origins, and uses explicit methods/headers. Every application request
+requires client authentication even without Origin; cookie mutations additionally
+require Origin and CSRF validation. Remote clients require HTTPS through explicitly
+trusted TLS proxies. See Secure client pairing above for configuration and recovery.
+The existing `loopbackHost` helper, private authenticated MCP bridge and owned
+harness endpoints retain their local boundary. Engine shutdown, pairing-code
+issuance and local recovery use a named pipe whose ACL allows this Windows user
+and denies network logons. Grants, permissions and sandbox behavior remain unchanged.
 
 The engine never reads auth stores, prints environment values, or exposes binary
 paths/command lines through discovery. Harness-generated tool/message content
