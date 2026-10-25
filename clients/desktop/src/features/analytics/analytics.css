@@ -44,6 +44,9 @@
 .analytics-legend i { width: 15px; border-top: 2px solid var(--color-accent); }
 .analytics-legend .is-previous { border-top: 2px dashed var(--color-muted); opacity: .6; }
 .analytics-ranking { padding: 4px 18px; }
+.analytics-topic-scroll { overflow-y: auto; overscroll-behavior-y: contain; }
+.analytics-topic-table thead th { position: sticky; top: 0; z-index: 1; }
+.analytics-topic-table tfoot { position: sticky; bottom: 0; }
 .analytics-ranking > div { padding: 15px 0; }
 .analytics-ranking > div + div { border-top: 1px solid var(--color-divider); }
 .analytics-ranking > div > div:first-child { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: 11px; margin-bottom: 9px; }

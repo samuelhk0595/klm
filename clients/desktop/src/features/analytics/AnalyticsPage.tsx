@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Activity, ArrowDownRight, ArrowUpRight, ChevronLeft, ChevronRight, Clock3, GitBranch, Layers3, MessagesSquare } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
 import { Select } from '../../design-system/Select';
@@ -23,13 +23,37 @@ function Delta({ current, previous }: { current: Metric; previous?: Metric }) {
   const delta = (current.value - previous.value) / previous.value * 100;
   return <span className="analytics-delta">{delta >= 0 ? <ArrowUpRight /> : <ArrowDownRight />}{Math.abs(delta).toFixed(1)}% <span>vs. previous</span></span>;
 }
-function Ranking({ rows }: { rows: { key: string; name: string; detail?: string; metric: Metric; color?: string }[] }) {
+function TopicScrollArea({ children, className, label, visible }: { children: ReactNode; className: string; label: string; visible: boolean }) {
+  const root = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = root.current;
+    if (!visible || !element) return;
+    const rows = [...element.querySelectorAll<HTMLElement>('[data-analytics-topic-row]')];
+    const footer = element.querySelector('tfoot');
+    const measure = () => {
+      if (!element.clientWidth) return;
+      // Measure actual rows so wrapped names, font sizing and narrow layouts
+      // still show five topics rather than relying on a fixed pixel row height.
+      const height = rows.length > 5 ? Math.ceil(rows[4].getBoundingClientRect().bottom - element.getBoundingClientRect().top + element.scrollTop + parseFloat(getComputedStyle(element).paddingBottom) + (footer?.getBoundingClientRect().height ?? 0)) : null;
+      element.style.maxHeight = height === null ? '' : `${height}px`;
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    rows.slice(0, 5).forEach(row => observer.observe(row));
+    if (footer) observer.observe(footer);
+    return () => observer.disconnect();
+  }, [children, visible]);
+  return <div ref={root} className={`${className} analytics-topic-scroll`} tabIndex={0} role="region" aria-label={label}>{children}</div>;
+}
+function Ranking({ rows, topics = false, visible = true }: { rows: { key: string; name: string; detail?: string; metric: Metric; color?: string }[]; topics?: boolean; visible?: boolean }) {
   const total = rows.reduce((sum, row) => sum + (row.metric.value ?? 0), 0);
   const percentages = rows.every(row => row.metric.coverage === 'complete' && row.metric.value !== null);
-  return <div className="analytics-ranking">{rows.map(row => <div key={row.key}>
+  const content = <>{rows.map(row => <div key={row.key} data-analytics-topic-row={topics || undefined}>
     <div><span title={row.detail}>{row.name}</span><strong><Value metric={row.metric} format={hours} />{percentages && total > 0 && <small>{Math.round((row.metric.value ?? 0) / total * 100)}%</small>}</strong></div>
     <div className="analytics-track"><span style={{ width: `${total ? (row.metric.value ?? 0) / total * 100 : 0}%`, background: row.color }} /></div>
-  </div>)}{!rows.length && <p className="analytics-footnote">No recorded activity.</p>}</div>;
+  </div>)}{!rows.length && <p className="analytics-footnote">No recorded activity.</p>}</>;
+  return topics ? <TopicScrollArea className="analytics-ranking" label="Work by topic" visible={visible}>{content}</TopicScrollArea> : <div className="analytics-ranking">{content}</div>;
 }
 function WorkChart({ groups, metric, allTime }: { groups: SeriesBucket[]; metric: ChartMetric; allTime: boolean }) {
   const gradient = useId();
@@ -88,6 +112,12 @@ export function AnalyticsPage({ visible, projects }: { visible: boolean; project
   const selectWeek = (date: string) => setPeriod(weeks.find(week => week.startDate === date)?.current ? 'current' : date);
   const total = data?.summary;
   const before = data?.comparison?.summary;
+  const topicRows = [...(data?.topics ?? [])].sort((left, right) => {
+    const a = left.totals.workingMs.value, b = right.totals.workingMs.value;
+    if (a === null && b !== null) return 1;
+    if (b === null && a !== null) return -1;
+    return (b ?? 0) - (a ?? 0) || left.key.localeCompare(right.key);
+  });
   const maxDaily = Math.max(...(data?.weekdays.map(day => day.workingMs.value ?? 0) ?? []), 1);
   const scopeDetail = data ? `${data.timeZone} · ${data.period.start} – ${data.period.endExclusive}. Collection started ${data.collectionStartedAt}.` : timeZone;
   return <div className="analytics-page" role="region" aria-label="Analytics">
@@ -113,7 +143,7 @@ export function AnalyticsPage({ visible, projects }: { visible: boolean; project
         {tab === 'overview' && <>
           <div className="analytics-main-grid">
             <Panel title="Activity over time" detail={<Select label="Chart metric" value={metric} onChange={event => setMetric(event.target.value as ChartMetric)}><option value="workingMs">Agent-hours</option><option value="tokens">Tokens</option></Select>}><WorkChart key={`${period}:${project}:${metric}`} groups={data.series} metric={metric} allTime={allTime} /></Panel>
-            <Panel title="Work by topic" detail="Agent-hours"><Ranking rows={data.topics.map(topic => ({ key: topic.key, name: topic.name, detail: topic.projectName, metric: topic.totals.workingMs, color: `var(--topic-${topic.color})` }))} /></Panel>
+            <Panel title="Work by topic" detail="Agent-hours"><Ranking topics visible={visible} rows={topicRows.map(topic => ({ key: topic.key, name: topic.name, detail: topic.projectName, metric: topic.totals.workingMs, color: `var(--topic-${topic.color})` }))} /></Panel>
           </div>
           <div className="analytics-lower-grid">
             <Panel title={allTime ? 'Work by weekday' : 'Daily rhythm'} detail="Agent-hours"><div className="analytics-weekdays">{data.weekdays.map(day => <div key={day.weekday}><span>{day.future ? '—' : <Value metric={day.workingMs} format={hours} />}</span><div>{!day.future && day.workingMs.value !== null && day.workingMs.value > 0 && <i style={{ height: `${day.workingMs.value / maxDaily * 100}%` }} title={`${weekdays[day.weekday]}: ${metricText(day.workingMs, hours)}`} />}</div><strong>{weekdays[day.weekday]}</strong></div>)}</div></Panel>
@@ -126,7 +156,7 @@ export function AnalyticsPage({ visible, projects }: { visible: boolean; project
             return <button key={day.date} type="button" disabled={day.future} className={day.future ? 'is-future' : value === null ? 'is-unavailable' : undefined} aria-label={`${label}. View week.`} title={label} onClick={() => selectWeek(day.weekStart)} style={{ '--heat': day.future || value === null || value === 0 ? 'var(--color-subtle)' : `color-mix(in srgb, var(--color-accent) ${Math.min(95, 18 + value / 960000)}%, var(--color-surface))` } as CSSProperties} />;
           })}</div>)}</div></div><div className="analytics-calendar-footer"><span><Value metric={data.calendar.activeDays} /> active days</span><span>Less {[0, 1, 2, 3, 4].map(level => <i key={level} style={{ background: `color-mix(in srgb, var(--color-accent) ${level * 23}%, var(--color-subtle))` }} />)} More</span></div></Panel>
         </>}
-        {tab === 'topics' && <Panel title="Topics" detail="Current session membership"><div className="analytics-table-scroll"><table className="analytics-table"><thead><tr><th>Topic</th>{topicColumns.map(column => <th key={column.key}>{column.name}</th>)}</tr></thead><tbody>{data.topics.map(topic => <tr key={topic.key}><td><span className="analytics-topic-dot" style={{ background: `var(--topic-${topic.color})` }} /><strong>{topic.name}</strong><small>{topic.projectName}</small></td>{topicColumns.map(column => <td key={column.key}><Value metric={topic.totals[column.key]} format={column.format} /></td>)}</tr>)}</tbody><tfoot><tr><th>Total</th>{topicColumns.map(column => <td key={column.key}><Value metric={total[column.key]} format={column.format} /></td>)}</tr></tfoot></table></div></Panel>}
+        {tab === 'topics' && <Panel title="Topics" detail="Current session membership"><TopicScrollArea className="analytics-table-scroll analytics-topic-table" label="Topics" visible={visible}><table className="analytics-table"><thead><tr><th>Topic</th>{topicColumns.map(column => <th key={column.key}>{column.name}</th>)}</tr></thead><tbody>{topicRows.map(topic => <tr key={topic.key} data-analytics-topic-row><td><span className="analytics-topic-dot" style={{ background: `var(--topic-${topic.color})` }} /><strong>{topic.name}</strong><small>{topic.projectName}</small></td>{topicColumns.map(column => <td key={column.key}><Value metric={topic.totals[column.key]} format={column.format} /></td>)}</tr>)}</tbody><tfoot><tr><th>Total</th>{topicColumns.map(column => <td key={column.key}><Value metric={total[column.key]} format={column.format} /></td>)}</tr></tfoot></table></TopicScrollArea></Panel>}
         {tab === 'graphs' && <><Panel title="Graphs" detail={<><Value metric={total.graphsUsed} /> used</>}><div className="analytics-table-scroll"><table className="analytics-table"><thead><tr><th>Graph</th><th>Runs</th><th>Run hours</th><th title="Average observed in-period wall-clock per contributing timed run">Average run</th></tr></thead><tbody>{data.graphs.map(graph => <tr key={graph.key}><td><strong>{graph.name}</strong><small>{graph.projectName}</small></td><td><Value metric={graph.runs} /></td><td><Value metric={graph.wallMs} format={hours} /></td><td title={`${graph.timedRuns} contributing timed runs; in-period average`}><Value metric={graph.averageMs} format={hours} /></td></tr>)}</tbody><tfoot><tr><th>Total</th><td><Value metric={total.graphRuns} /></td><td><Value metric={total.graphWallMs} format={hours} /></td><td title={`${total.graphTimedRuns} contributing timed runs; in-period average`}><Value metric={total.graphAverageMs} format={hours} /></td></tr></tfoot></table></div></Panel><p className="analytics-footnote">Run hours measure wall-clock per run, not the sum of its agents.</p></>}
       </>}
     </div>

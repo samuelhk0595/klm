@@ -460,3 +460,19 @@ of Analytics TS/TSX/CSS found no remaining user-facing Partial text; the API's t
 `partial` enum remains. No UI/runtime probe or full suite was run. No engine lifecycle,
 session/agent/graph creation, commit or push occurred. Visual acceptance of this
 presentation change remains a manual check.
+
+## Topic list height and ordering adjustment
+
+- Overview's Work by topic ranking and the Topics table show up to five topic rows;
+  additional topics remain available through a bounded, keyboard-focusable vertical
+  scroll area. The limit uses measured row heights and updates on resize, so wrapped
+  names and font sizing do not rely on a fixed row-height estimate. The table keeps
+  its column header and aggregate total visible during scrolling.
+- Both surfaces use descending observed working milliseconds (agent-hours), with
+  unavailable values last and stable topic-key ties. The response data and aggregate
+  totals are not mutated or truncated. Other rankings retain their existing layout.
+- Changed `clients/desktop/src/features/analytics/AnalyticsPage.tsx`,
+  `clients/desktop/src/features/analytics/analytics.css` and this report. Preserved
+  the shared file's existing engine-timezone integration and unrelated tree changes.
+- Verification: `npx tsc --noEmit` from `clients/desktop` passed (exit 0). Manual UI
+  validation with more than five topics and resized layouts remains pending.
