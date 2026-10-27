@@ -30,6 +30,7 @@ func startInteractive(t *turn, b binary, args []string, cwd string, runtime *ses
 	ctx, cancel := context.WithCancel(parent)
 	cmd := exec.CommandContext(ctx, b.path, append(append([]string{}, b.args...), args...)...)
 	cmd.Dir = cwd
+	cmd.Env = skillExecutionEnv(cmd.Environ())
 	var owner *ownedProcess
 	var err error
 	if runtime == nil {

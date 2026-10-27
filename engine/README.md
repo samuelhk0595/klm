@@ -1457,6 +1457,17 @@ select them per conversation or agent. Installation does not activate a skill.
   Links/junctions, path collisions and nonregular files are rejected. All file bytes
   contribute to the revision. Captures use a bounded repeated read and atomic
   publication below `<data-dir>/capabilities/skills/<revision>/<slug>`.
+- Pi/Codex process startup and the OpenCode server set
+  `PYTHONDONTWRITEBYTECODE=1`, inherited by native tools/children, so ordinary
+  Python imports do not add bytecode to captured skill directories. Previously
+  affected snapshots recover during validation only when removing `.pyc`/`.pyo`
+  files reproduces the exact original revision. Those cache files are deleted,
+  not merely excluded from validation (Python can still load existing bytecode).
+  The snapshot is then reread and revalidated. Source changes, missing files,
+  unrelated additions and ambiguous packages with originally captured bytecode
+  still fail closed; recovery never substitutes the current Library source or
+  changes a frozen graph/automation revision. Explicit script writes or overriding
+  the inherited Python setting remain subject to the normal integrity checks.
 - Captured copies are retained conservatively; there is no automatic snapshot
   directory pruning in this delivery. Confirmed skill removals move the source to
   `<library-parent>/skill-library-trash/<operation-id>` after reference validation.
