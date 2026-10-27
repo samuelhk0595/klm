@@ -44,8 +44,16 @@ Top-level sessions are grouped by persistent, project-scoped **topics**, replaci
 visual session folders. A new independent project session starts without a topic
 unless the user explicitly creates it inside an existing topic.
 During its ordinary turn, as soon as the objective is understood, its main agent
-sets a short initial topic name through the private `session_topic_set` tool.
-Agent assignment is one-time: repeated calls return the current topic unchanged.
+assigns an initial topic through the private `session_topic_set` tool. Unassigned
+normal project conversations receive the project's nonarchived topic IDs, names,
+colors and active color-usage counts in their engine-provided turn context. The
+agent reuses an active topic only when the objective fits it very well, supplying
+`topicId` alone; otherwise it creates a topic with a short name and a palette color.
+New colors should preferably be unused among active topics, or least-used when all
+are represented; repetitions are allowed. Reuse never renames or recolors the topic.
+Older name-only calls default to a least-used active color. Archived topics do not
+appear in the options or contribute to usage, and cannot be reused. Agent assignment
+is one-time: repeated calls return the current topic unchanged.
 Only the user can edit its name/color or move a session to another existing active
 topic through UI. Equal names do not merge identities.
 The engine gives spawned sessions and further descendants the source main topic ID,

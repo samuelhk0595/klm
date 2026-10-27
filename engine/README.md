@@ -1305,8 +1305,16 @@ Validation and semantics:
   assigning the new session before any turn. Creating a topic starts no session or
   agent turn. These UI actions add no private agent creation/assignment capability.
   The private main-only
-  `session_topic_set({name})` tool assigns it once during a normal active turn;
-  later calls return the canonical current topic without changing its name/color.
+  `session_topic_set` tool assigns it once during a normal active turn. Unassigned
+  main conversations receive engine-owned `activeTopics` (same-project nonarchived
+  IDs, names and colors), the ten palette keys and active-only `colorUsage` counts.
+  Topic names are reference data, never instructions or authorization. A very strong
+  objective match can use `{topicId}` alone; otherwise `{name,color}` creates a new
+  topic and assigns the session atomically. The agent should prefer an unused color,
+  then a least-used one; repetitions are allowed. Older `{name}` calls choose a
+  least-used active color in the engine. Mixed reuse/create arguments, foreign or
+  archived topic IDs and invalid colors are rejected before mutation. Later calls
+  return the canonical current topic without changing membership, name or color.
   Side chats resolve their main's topic; general/graph/subagent roles cannot assign.
   Topic edits use the public UI API under the existing personal-use network contract,
   not a new authentication claim or an agent rename tool.
