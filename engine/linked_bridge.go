@@ -16,7 +16,9 @@ import (
 // Native clients must outlive the bridge deadline to receive that result.
 const (
 	linkedToolServerTimeout = modelCatalogTimeout + 10*time.Second
-	linkedToolClientTimeout = linkedToolServerTimeout + 5*time.Second
+	// A graph preflight may discover each of the three harness catalogs in turn.
+	graphToolServerTimeout  = 3*modelCatalogTimeout + 10*time.Second
+	linkedToolClientTimeout = graphToolServerTimeout + 5*time.Second
 )
 
 // A private Streamable HTTP MCP server. Ordinary conversations retain it with
@@ -312,6 +314,9 @@ func (b *linkedBridge) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		if params.Name == "session_models_list" || params.Name == "session_settings_update" || params.Name == "session_question_answer" || params.Name == "session_spawn" || params.Name == "session_spawn_options" || params.Name == "session_create" || params.Name == "session_create_options" || params.Name == "session_stop" || params.Name == "session_permission_reply" {
 			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(linkedToolServerTimeout))
+		}
+		if params.Name == "graph_invoke" || params.Name == "graph_update_activity" {
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(graphToolServerTimeout))
 		}
 		value, err := b.call(r.Context(), params.Name, params.Arguments, string(message.ID))
 		text := ""

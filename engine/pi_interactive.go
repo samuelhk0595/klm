@@ -369,6 +369,10 @@ reading:
 		case "extension_ui_request":
 			method, sourceID := str(raw, "method"), str(raw, "id")
 			if method == "notify" {
+				if str(raw, "message") == "klm.graph.abort.v1" && str(raw, "notifyType") == "info" && p.graphSealed() && p.choiceToolSettled {
+					p.piChoiceAbort = true
+					continue
+				}
 				if str(raw, "notifyType") == "error" {
 					if err := p.failure(raw); err != nil {
 						return err

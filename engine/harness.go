@@ -546,6 +546,7 @@ type adapter struct {
 	graph                *graphAdapterBinding
 	nativeSettled        bool
 	choiceToolSettled    bool
+	piChoiceAbort        bool
 	processesDrained     bool
 	processDrainFailed   bool
 	bridge               *linkedBridge
@@ -763,7 +764,13 @@ func (p *adapter) pi(raw map[string]any) error {
 		}
 		status := "completed"
 		stop := str(message, "stopReason")
-		if stop == "error" || stop == "aborted" {
+		// Pi's Responses transport can encode the owned post-Choice abort as an
+		// error, rather than stopReason=aborted. Only normalize that exact abort
+		// after the extension has acknowledged requesting it and the Choice tool
+		// has settled. Provider failures before/after reservation remain failures.
+		choiceAbort := p.graphSealed() && p.choiceToolSettled && (stop == "aborted" ||
+			p.piChoiceAbort && stop == "error" && str(message, "errorMessage") == "This operation was aborted")
+		if (stop == "error" || stop == "aborted") && !choiceAbort {
 			status = "error"
 		}
 		parts, _ := message["content"].([]any)
@@ -780,7 +787,7 @@ func (p *adapter) pi(raw map[string]any) error {
 				return err
 			}
 		}
-		if status == "error" && !(stop == "aborted" && p.graphSealed() && p.choiceToolSettled) {
+		if status == "error" {
 			return p.failure(map[string]any{"type": typ, "message": message["errorMessage"]})
 		}
 		return nil

@@ -133,7 +133,11 @@ export default function (pi: ExtensionAPI) {
   // At turn_end every tool result in this batch has entered native history.
   // Abort here, never from inside graph_submit_choice with a pending tool result.
   pi.on("turn_end", async (_event, ctx) => {
-    if (sealed) { ctx.abort(); return; }
+    if (sealed) {
+      ctx.ui.notify("klm.graph.abort.v1", "info");
+      ctx.abort();
+      return;
+    }
     if (linkedConfig.graphNode || ctx.signal?.aborted) return;
     // Pull one combined input at the native boundary, without mutating Pi's
     // global steeringMode setting or racing an idle RPC steer command.
