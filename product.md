@@ -493,6 +493,14 @@ days without authenticated use, with no absolute lifetime. Settings → Connecte
 devices revokes one/all devices and terminates their streams; `klm revoke-clients`
 provides protected local recovery. All paired clients have full engine access.
 
+Settings → Engine edits exact allowed frontend origins and trusted TLS-proxy
+CIDRs. Values are stored with engine data and apply after restart; environment
+variables remain the bootstrap fallback until the first saved UI configuration.
+The authenticated Restart engine action explicitly confirms interruption of all
+agents and graph runs in progress, then uses a detached helper and existing local
+stop/start control. Restart preserves paired-client credentials and normal engine
+recovery semantics; it does not automatically replay interrupted work.
+
 Remote access requires HTTPS, with explicit trusted TLS-proxy configuration and
 an exact configured frontend-origin allowlist. The supplied same-site HTTPS
 frontend/engine use a host-only Secure HttpOnly Strict cookie. The native Windows
@@ -507,7 +515,8 @@ engine computer. Setup and pending human acceptance are recorded in
 
 The desktop fills its native window. Closing it hides to the tray; **Open** restores
 it and **Exit** ends only desktop/web. The client neither starts nor stops the
-engine. Opening another desktop shortcut restores the same instance.
+engine automatically. An authenticated user can explicitly request restart from
+Engine settings. Opening another desktop shortcut restores the same instance.
 
 While Tauri is active, it serves the same built application on `0.0.0.0:7332`.
 The **Focus** header button, between **Session log** and **Side agent**, opens

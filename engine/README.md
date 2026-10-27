@@ -26,7 +26,8 @@ Bare IP input defaults to 7331; explicit HTTP(S) URLs honor standard default por
 Invalid legacy saved URLs fall back to the normal derived engine so the connection
 screen remains available for recovery.
 
-For the production deployment, configure the environment of the engine process:
+For initial production bootstrap, before saving Engine access settings in the UI,
+configure the environment of the engine process:
 
 ```text
 KLM_ALLOWED_ORIGINS=https://klm.codemob.com.br
@@ -97,6 +98,45 @@ metadata; `DELETE /api/auth/devices/{clientId}` and `DELETE /api/auth/devices` r
 one/all. DELETE requests use JSON `{}` and the same mutation protections.
 See `../CLIENT_AUTH_IMPLEMENTATION_PROGRESS.md` for actual checks and manual
 browser/desktop/mobile acceptance still required.
+
+## Engine access settings and restart
+
+**Settings → Engine** edits **Allowed frontend origins** and **Trusted TLS proxies
+(CIDR)**, one entry per line. It uses authenticated `GET/PATCH /api/settings/access`
+and the normal mutation Origin/CSRF checks. Validation is the same at save and
+startup: exact HTTPS origins (HTTP only for loopback), no wildcard/path, explicit
+IP CIDRs, at most 32 entries of each kind and a 16 KiB JSON request body.
+
+Save writes `%APPDATA%/klm/engine/engine-access.json` atomically (or the separate
+dev data directory). The existing process keeps its active policy; **Restart
+required** appears only when the saved values differ. On subsequent starts, this
+file takes precedence over `KLM_ALLOWED_ORIGINS` and `KLM_TRUSTED_TLS_PROXIES`,
+including intentionally empty lists. Until the file exists, environment variables
+remain the initial source. Built-in local app/dev/Focus origins remain available.
+For first setup while the public origin is blocked, use an already paired local
+browser or native client. Removing the settings file with the engine stopped
+restores environment-based bootstrap without deleting paired credentials.
+
+**Restart engine** requires a confirmation explicitly warning that all agents and
+graph runs in progress will be interrupted. Saving alone never restarts the engine;
+save changes before using Restart. `POST /api/engine/restart` requires an
+authenticated client, JSON `{confirmInterrupt:true}`, and normal cookie mutation
+protection. Duplicate restart requests and settings writes during handoff are
+rejected. This is not a public unauthenticated shutdown/control endpoint.
+
+The worker starts its own executable with the internal `__restart` mode. That
+detached helper uses the existing per-user local stop/start CLI path, waits for the
+old process/data lock to settle, then starts the replacement. Output goes to the
+existing engine log. The public CLI remains start/stop/pair/revoke-clients. The
+client waits for a non-restarting response for up to two minutes; an uncertain
+request/timeout asks the user to reload or reconnect instead of silently retrying
+the restart mutation. Normal shutdown/recovery semantics apply: interrupted work
+is not automatically replayed, and persisted pairing credentials survive.
+
+The operation restarts the current executable; a debugger does not automatically
+reattach to the detached replacement worker. Real installed/dev restart and
+browser/native/mobile reconnection still require manual validation. No live
+engine restart was performed as an implementation check.
 
 ## Project automations
 

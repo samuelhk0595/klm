@@ -26,7 +26,7 @@ func engineDataDir() (string, error) {
 }
 
 func dispatchCLI(args []string) error {
-	if len(args) != 1 || (args[0] != "start" && args[0] != "stop" && args[0] != "pair" && args[0] != "revoke-clients" && args[0] != "__worker") {
+	if len(args) != 1 || (args[0] != "start" && args[0] != "stop" && args[0] != "pair" && args[0] != "revoke-clients" && args[0] != "__worker" && args[0] != "__restart") {
 		return errors.New("Usage: klm start | klm stop | klm pair | klm revoke-clients")
 	}
 	dir, err := engineDataDir()
@@ -35,6 +35,14 @@ func dispatchCLI(args []string) error {
 	}
 	if args[0] == "__worker" {
 		return runEngine(dir)
+	}
+	if args[0] == "__restart" {
+		// Independent helper: stop waits for the old worker and its data lock to
+		// settle before start can admit the replacement. Both use local control.
+		if err := dispatchCLI([]string{"stop"}); err != nil {
+			return err
+		}
+		return dispatchCLI([]string{"start"})
 	}
 	if args[0] == "pair" || args[0] == "revoke-clients" {
 		return engineControl(dir, args[0])
@@ -98,6 +106,28 @@ func dispatchCLI(args []string) error {
 		}
 		time.Sleep(150 * time.Millisecond)
 	}
+}
+
+func spawnEngineRestart(dir string) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	output, err := os.OpenFile(filepath.Join(dir, "engine.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return err
+	}
+	defer output.Close()
+	cmd := exec.Command(exe, "__restart")
+	cmd.Dir = filepath.Dir(exe)
+	cmd.Stdout, cmd.Stderr = output, output
+	configureEngineWorker(cmd)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// Waiting here would deadlock: the helper waits for this worker to exit.
+	_ = cmd.Process.Release()
+	return nil
 }
 
 func stopEngine(dir string) error {

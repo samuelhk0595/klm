@@ -8,11 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +19,7 @@ import (
 )
 
 const clientIdleLifetime = 7 * 24 * time.Hour
+
 // Cookies are not port-scoped by browsers. Distinct names prevent dev/release
 // pairing from overwriting each other when both use the same loopback host.
 const clientCookie = "__Host-klm-client-" + apiPort
@@ -45,6 +44,8 @@ type clientAuth struct {
 	mu            sync.Mutex
 	dir           string
 	disk          clientAuthDisk
+	activeAccess  engineAccessSettings
+	savedAccess   engineAccessSettings
 	pairHash      string
 	pairUntil     time.Time
 	attemptWindow time.Time
@@ -59,26 +60,16 @@ func newClientAuth(dir string) (*clientAuth, error) {
 	for _, origin := range []string{"http://localhost:7332", "http://127.0.0.1:7332", "http://localhost:17332", "http://127.0.0.1:17332", "http://localhost:5173", "http://127.0.0.1:5173", "http://tauri.localhost", "https://tauri.localhost", "tauri://localhost"} {
 		s.origins[origin] = true
 	}
-	for _, origin := range strings.Split(os.Getenv("KLM_ALLOWED_ORIGINS"), ",") {
-		origin = strings.TrimSpace(origin)
-		if origin == "" {
-			continue
-		}
-		u, err := url.Parse(origin)
-		if err != nil || u.Host == "" || strings.Contains(u.Host, "*") || u.User != nil || origin != u.Scheme+"://"+u.Host || (u.Scheme != "https" && !(u.Scheme == "http" && loopbackHost(u.Host))) {
-			return nil, fmt.Errorf("invalid KLM_ALLOWED_ORIGINS origin: %q", origin)
-		}
+	settings, err := loadEngineAccessSettings(dir)
+	if err != nil {
+		return nil, err
+	}
+	s.activeAccess, s.savedAccess = settings, settings
+	for _, origin := range settings.AllowedOrigins {
 		s.origins[origin] = true
 	}
-	for _, value := range strings.Split(os.Getenv("KLM_TRUSTED_TLS_PROXIES"), ",") {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		prefix, err := netip.ParsePrefix(value)
-		if err != nil {
-			return nil, errors.New("KLM_TRUSTED_TLS_PROXIES must contain explicit IP CIDRs")
-		}
+	for _, value := range settings.TrustedTLSProxies {
+		prefix, _ := netip.ParsePrefix(value) // Validated before publishing the active policy.
 		s.proxies = append(s.proxies, prefix)
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "client-auth.json"))
@@ -111,11 +102,19 @@ func authHash(secret string) string {
 }
 
 func (s *clientAuth) saveLocked(next clientAuthDisk) error {
-	b, err := json.Marshal(next)
+	if err := writeClientAuthJSON(s.dir, "client-auth.json", next); err != nil {
+		return errors.New("cannot persist client authentication")
+	}
+	s.disk = next
+	return nil
+}
+
+func writeClientAuthJSON(dir, filename string, value any) error {
+	b, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(s.dir, ".client-auth-*")
+	f, err := os.CreateTemp(dir, ".client-auth-*")
 	if err != nil {
 		return errors.New("cannot persist client authentication")
 	}
@@ -132,12 +131,11 @@ func (s *clientAuth) saveLocked(next clientAuthDisk) error {
 		err = closeErr
 	}
 	if err == nil {
-		err = replaceFile(name, filepath.Join(s.dir, "client-auth.json"))
+		err = replaceFile(name, filepath.Join(dir, filename))
 	}
 	if err != nil {
 		return errors.New("cannot persist client authentication")
 	}
-	s.disk = next
 	return nil
 }
 

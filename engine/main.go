@@ -40,6 +40,8 @@ type turn struct {
 
 type app struct {
 	clientAuth           *clientAuth
+	restartEngine        func() error
+	restarting           bool                 // Protected by mu; prevents duplicate restarts and settings writes during handoff.
 	analyticsGraphClocks map[string]time.Time // Monotonic clocks for owned runs; guarded by mu.
 	activityBoardBusy    map[string]bool      // One scan or move per connection; guarded by mu.
 	activityBoardSlots   chan struct{}
@@ -231,6 +233,7 @@ func runEngine(dir string) error {
 	a.scheduleLinkedLocked()
 	a.mu.Unlock()
 	shutdown := make(chan struct{})
+	a.restartEngine = func() error { return spawnEngineRestart(dir) }
 	control, err := serveEngineControl(dir, a, shutdown)
 	if err != nil {
 		return err
