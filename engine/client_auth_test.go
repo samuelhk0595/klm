@@ -21,6 +21,7 @@ import (
 
 func authTestApp(t *testing.T) *app {
 	t.Helper()
+	t.Setenv("KLM_DEV_DISABLE_CLIENT_AUTH", "")
 	t.Setenv("KLM_ALLOWED_ORIGINS", "https://klm.codemob.com.br")
 	t.Setenv("KLM_TRUSTED_TLS_PROXIES", "127.0.0.1/32")
 	dir := t.TempDir()
@@ -33,6 +34,51 @@ func authTestApp(t *testing.T) *app {
 		t.Fatal(err)
 	}
 	return &app{dir: dir, clientAuth: s, state: d, ctx: context.Background()}
+}
+
+func TestClientAuthDevFlagOnlyWorksInDevBuild(t *testing.T) {
+	a := authTestApp(t)
+	t.Setenv("KLM_DEV_DISABLE_CLIENT_AUTH", "1")
+	var err error
+	a.clientAuth, err = newClientAuth(a.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.clientAuth.devOpenAccess != developmentBuild {
+		t.Fatal("debug flag escaped its build-tag gate")
+	}
+	calls := 0
+	a.restartEngine = func() error { calls++; return nil } // Never restart an actual process.
+	for _, test := range []struct {
+		method, path, body string
+		want               int
+	}{
+		{"GET", "/api/auth/session", "", 200},
+		{"GET", "/api/state", "", 200},
+		{"OPTIONS", "/api/state", "", 204},
+		{"POST", "/api/engine/restart", `{"confirmInterrupt":true}`, 202},
+	} {
+		r := authTestRequest(test.method, test.path, "")
+		r.Host = "192.168.1.20:17331"
+		r.RemoteAddr = "192.168.1.30:5555"
+		r.Header.Set("Origin", "http://192.168.1.30:7332")
+		r.Body = io.NopCloser(strings.NewReader(test.body))
+		w := httptest.NewRecorder()
+		a.routes().ServeHTTP(w, r)
+		want := test.want
+		if !developmentBuild {
+			want = 403
+		}
+		if w.Code != want {
+			t.Fatalf("%s %s: got %d, want %d", test.method, test.path, w.Code, want)
+		}
+		if developmentBuild && (w.Header().Get("Access-Control-Allow-Origin") != r.Header.Get("Origin") || w.Header().Get("Access-Control-Allow-Credentials") != "true") {
+			t.Fatal("open dev client cannot use credentialed browser transport")
+		}
+	}
+	if developmentBuild && calls != 1 || !developmentBuild && calls != 0 {
+		t.Fatal("wrong build admitted restart without authentication")
+	}
 }
 
 func authTestCredential(t *testing.T, s *clientAuth) (pairedClient, string) {

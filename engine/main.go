@@ -205,6 +205,9 @@ func runEngine(dir string) error {
 	if err != nil {
 		return err
 	}
+	if a.clientAuth.devOpenAccess {
+		log.Print("Development mode: public client security disabled by KLM_DEV_DISABLE_CLIENT_AUTH.")
+	}
 	if a.state.TopicSchema == 0 {
 		if err := a.commitLocked(migrateTopics); err != nil {
 			return fmt.Errorf("cannot migrate topics: %w", err)

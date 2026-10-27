@@ -2,6 +2,25 @@
 
 ## Secure client pairing
 
+### Debug-only open client access
+
+The VS Code **Engine: Debug (Go)** launch configuration sets
+`KLM_DEV_DISABLE_CLIENT_AUTH=1` together with `-tags=dev`. With both enabled, the
+public application API accepts clients without pairing, including remote HTTP/LAN
+requests and browser origins outside the normal allowlist. The existing connection
+screen opens the workspace through its session check without registering a client.
+Credentialed browser preflight remains supported; client auth, Origin restrictions,
+cookie CSRF and remote-HTTPS checks are skipped only for this explicit dev mode.
+
+Set the flag to `0` or remove it, then restart the debug process to test normal
+pairing/security. A dev build without the flag remains protected. Release builds
+ignore the flag even when it is present in their environment. The setting is not
+saved by the UI or credential store. Private harness/Library capabilities, signed
+webhook validation and OAuth callback state validation keep their own boundaries.
+The engine logs when open dev access is enabled.
+
+### Protected mode (default)
+
 After upgrading, every browser, native desktop and mobile WebView must pair once.
 On the **engine computer**, run `klm pair`, then enter the code and a client name in
 the client's **Connect to engine** screen. Codes contain 256 random bits, expire in

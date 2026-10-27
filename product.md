@@ -493,6 +493,13 @@ days without authenticated use, with no absolute lifetime. Settings → Connecte
 devices revokes one/all devices and terminates their streams; `klm revoke-clients`
 provides protected local recovery. All paired clients have full engine access.
 
+An explicit `KLM_DEV_DISABLE_CLIENT_AUTH=1` flag is available only in dev-tag builds
+and is enabled by the VS Code engine debug configuration. In this mode anyone
+reaching the dev application URL can access it without pairing; public client
+auth/origin/CSRF/HTTPS enforcement is bypassed. Dev builds remain protected without
+the flag, and release builds always ignore it. Separate private harness/Library
+capabilities and independently validated webhook/OAuth ingress are unaffected.
+
 Settings → Engine edits exact allowed frontend origins and trusted TLS-proxy
 CIDRs. Values are stored with engine data and apply after restart; environment
 variables remain the bootstrap fallback until the first saved UI configuration.

@@ -42,6 +42,7 @@ type clientAuthDisk struct {
 // never renews it. A failed write fails closed and leaves the previous state intact.
 type clientAuth struct {
 	mu            sync.Mutex
+	devOpenAccess bool // Only a dev-tag build can honor the explicit debug flag.
 	dir           string
 	disk          clientAuthDisk
 	activeAccess  engineAccessSettings
@@ -56,7 +57,8 @@ type clientAuth struct {
 }
 
 func newClientAuth(dir string) (*clientAuth, error) {
-	s := &clientAuth{dir: dir, origins: map[string]bool{}, requests: map[string]map[*http.Request]context.CancelFunc{}}
+	s := &clientAuth{dir: dir, origins: map[string]bool{}, requests: map[string]map[*http.Request]context.CancelFunc{},
+		devOpenAccess: developmentBuild && os.Getenv("KLM_DEV_DISABLE_CLIENT_AUTH") == "1"}
 	for _, origin := range []string{"http://localhost:7332", "http://127.0.0.1:7332", "http://localhost:17332", "http://127.0.0.1:17332", "http://localhost:5173", "http://127.0.0.1:5173", "http://tauri.localhost", "https://tauri.localhost", "tauri://localhost"} {
 		s.origins[origin] = true
 	}
@@ -435,7 +437,7 @@ func (s *clientAuth) protect(mux *http.ServeMux, next http.Handler) http.Handler
 		w.Header().Add("Vary", "Origin")
 		origin := r.Header.Get("Origin")
 		if origin != "" {
-			if !s.origins[origin] {
+			if !s.devOpenAccess && !s.origins[origin] {
 				fail(w, 403, "Origin is not allowed.")
 				return
 			}
@@ -443,13 +445,19 @@ func (s *clientAuth) protect(mux *http.ServeMux, next http.Handler) http.Handler
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 		}
 		if r.Method == "OPTIONS" {
-			if origin == "" {
+			if origin == "" && !s.devOpenAccess {
 				fail(w, 403, "Origin is required.")
 				return
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PATCH, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-KLM-CSRF, X-KLM-Native")
 			w.WriteHeader(204)
+			return
+		}
+		if s.devOpenAccess {
+			// Public client access only: private harness/Library capabilities and
+			// independently validated ingress above retain their own boundaries.
+			next.ServeHTTP(w, r)
 			return
 		}
 		if !s.transportAllowed(r) {
