@@ -1149,6 +1149,29 @@ before the draft's first Save. A layout alone is not a catalog graph. Saved grap
 can be reopened, edited, enabled/disabled and deleted. Agent references are preserved
 when agents are renamed; referenced agents cannot be deleted or disabled.
 
+The graph editor exposes cursor-following connection points around node borders.
+Dragging freezes the origin; dropping on a valid destination or within 50 CSS pixels
+of it creates fixed relative anchors. Fork retains its labeled branch-specific
+outgoing connectors and uses dynamic incoming points. Devices without hover retain
+a visible outgoing start point. Logical ports and existing connection limits remain
+independent of anchor IDs. Explicit Save commits topology and endpoint geometry
+together; position/viewport autosave preserves previously committed endpoints.
+Legacy graphs and run snapshots without endpoint metadata retain their original
+connectors. Read-only Graph views render saved geometry without editing handles.
+Connections in editor and read-only canvases use short animated dashes moving from
+source to destination, including the connection preview while dragging. Arrowheads
+remain visible. This indicates connection direction, not execution status;
+reduced-motion preferences keep the dashes static.
+Removing connections cleans unreferenced anchors, including implicit removals from
+node/branch deletion and terminal Choices. In the editor, hovering a connection
+reveals a Remove connection button; removal requires confirmation, including
+keyboard deletion. Dragging from an AI agent to an executable node automatically
+inserts a normal, uniquely named Choice at their midpoint and connects
+agent → Choice → destination, opening its configuration panel. Connecting to an
+existing Choice keeps the direct link. These edits still require explicit Save.
+TypeScript and Go dev compilation passed for dynamic handles; visual interaction,
+save/reload and touch behavior still await human validation.
+
 Authoring includes terminal Choice output, explicit Terminal output mapping and
 per-Fork-branch worktree isolation, enabled by default. Saving a draft is separate
 from the engine's execution preflight. `.klm/harness.toml` remains deferred.

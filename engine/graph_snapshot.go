@@ -174,8 +174,11 @@ func (a *app) captureGraphSnapshot(ctx context.Context, projectID, graphID strin
 	layout := GraphLayout{Positions: map[string]Point{}}
 	if data, err := readConfig(p, layoutFile(graphID)); err == nil {
 		var candidate GraphLayout
-		if json.Unmarshal(data, &candidate) == nil && validateLayout(candidate) == nil && candidate.Positions != nil {
-			layout = candidate
+		if json.Unmarshal(data, &candidate) == nil {
+			discardInvalidGraphHandles(&candidate)
+			if validateLayout(candidate) == nil && candidate.Positions != nil {
+				layout = candidate
+			}
 		}
 	}
 	snapshot.Graph = GraphRecord{ID: graphID, Revision: snapshot.Sources[graphFile(graphID)].Revision, Definition: compiled.Definition, Layout: layout}

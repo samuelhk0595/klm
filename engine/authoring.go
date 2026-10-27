@@ -100,9 +100,22 @@ type Viewport struct {
 	Y    float64 `json:"y"`
 	Zoom float64 `json:"zoom"`
 }
+type GraphHandle struct {
+	ID   string  `json:"id"`
+	Type string  `json:"type"`
+	Side string  `json:"side"`
+	Left float64 `json:"left"`
+	Top  float64 `json:"top"`
+}
+type GraphConnectionLayout struct {
+	SourceHandle string `json:"sourceHandle"`
+	TargetHandle string `json:"targetHandle"`
+}
 type GraphLayout struct {
-	Positions map[string]Point `json:"positions"`
-	Viewport  *Viewport        `json:"viewport,omitempty"`
+	Positions   map[string]Point                 `json:"positions"`
+	Viewport    *Viewport                        `json:"viewport,omitempty"`
+	Handles     map[string][]GraphHandle         `json:"handles,omitempty"`
+	Connections map[string]GraphConnectionLayout `json:"connections,omitempty"`
 }
 type GraphRecord struct {
 	ID         string          `json:"id"`
@@ -355,6 +368,7 @@ func loadAuthoring(p Project) (AuthoringCatalog, error) {
 					if le == nil {
 						le = json.Unmarshal(lb, &layout)
 						if le == nil {
+							discardInvalidGraphHandles(&layout)
 							le = validateLayout(layout)
 						}
 					}
@@ -723,8 +737,80 @@ func validateLayout(l GraphLayout) error {
 	if v := l.Viewport; v != nil && (!finite(v.X) || !finite(v.Y) || !finite(v.Zoom) || v.Zoom <= 0 || v.Zoom > 10) {
 		return errors.New("Invalid viewport.")
 	}
+	return validateGraphHandles(l)
+}
+
+func validateGraphHandles(l GraphLayout) error {
+	bad := func() error { return errors.New("Invalid graph connection layout.") }
+	transient := func(id string) bool { return id == "dyn-src" || id == "dyn-tgt" }
+	lookup := map[string]map[string]GraphHandle{}
+	for node, handles := range l.Handles {
+		if node == "" {
+			return bad()
+		}
+		lookup[node] = map[string]GraphHandle{}
+		for _, h := range handles {
+			if h.ID == "" || transient(h.ID) || (h.Type != "source" && h.Type != "target") || math.IsNaN(h.Left) || math.IsNaN(h.Top) || h.Left < 0 || h.Left > 100 || h.Top < 0 || h.Top > 100 {
+				return bad()
+			}
+			if _, exists := lookup[node][h.ID]; exists {
+				return bad()
+			}
+			switch h.Side {
+			case "left":
+				if h.Left != 0 {
+					return bad()
+				}
+			case "right":
+				if h.Left != 100 {
+					return bad()
+				}
+			case "top":
+				if h.Top != 0 {
+					return bad()
+				}
+			case "bottom":
+				if h.Top != 100 {
+					return bad()
+				}
+			default:
+				return bad()
+			}
+			lookup[node][h.ID] = h
+		}
+	}
+	for key, c := range l.Connections {
+		var logical []string
+		if json.Unmarshal([]byte(key), &logical) != nil || len(logical) != 3 || logical[0] == "" || logical[1] == "" || logical[2] == "" || c.SourceHandle == "" || c.TargetHandle == "" || transient(c.SourceHandle) || transient(c.TargetHandle) {
+			return bad()
+		}
+		if h, exists := lookup[logical[0]][c.SourceHandle]; exists {
+			if h.Type != "source" {
+				return bad()
+			}
+		} else if c.SourceHandle != logical[1] {
+			return bad()
+		}
+		if h, exists := lookup[logical[2]][c.TargetHandle]; exists {
+			if h.Type != "target" {
+				return bad()
+			}
+		} else if c.TargetHandle != "input" && c.TargetHandle != "sources" && c.TargetHandle != "branches" {
+			return bad()
+		}
+	}
 	return nil
 }
+
+// Geometry is optional presentation data: damaged metadata must not invalidate
+// executable topology or otherwise valid saved node positions on read.
+func discardInvalidGraphHandles(l *GraphLayout) {
+	if validateGraphHandles(*l) != nil {
+		l.Handles = nil
+		l.Connections = nil
+	}
+}
+
 func (a *app) createGraphDraft(w http.ResponseWriter, r *http.Request) {
 	p, ok := a.authoringProject(w, r)
 	if !ok {
@@ -771,6 +857,7 @@ func (a *app) saveGraph(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Definition GraphDefinition `json:"definition"`
 		Revision   string          `json:"revision"`
+		Layout     *GraphLayout    `json:"layout,omitempty"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -790,6 +877,12 @@ func (a *app) saveGraph(w http.ResponseWriter, r *http.Request) {
 	if err = validateGraph(body.Definition, c.Agents); err != nil {
 		fail(w, 400, err.Error())
 		return
+	}
+	if body.Layout != nil {
+		if err = validateLayout(*body.Layout); err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
 	}
 	// Check override compatibility using the same real catalogs as agent registration.
 	for _, n := range body.Definition.Nodes {
@@ -837,6 +930,13 @@ func (a *app) saveGraph(w http.ResponseWriter, r *http.Request) {
 	} else if err != nil {
 		fail(w, 500, err.Error())
 		return
+	}
+	if body.Layout != nil {
+		layout, err = json.MarshalIndent(body.Layout, "", "  ")
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
 	}
 	b, err := yaml.Marshal(body.Definition)
 	if err != nil {
@@ -952,12 +1052,23 @@ func (a *app) saveGraphLayout(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err.Error())
 		return
 	}
-	if _, err := readConfig(p, layoutFile(id)); err != nil {
-		if _, ge := readConfig(p, graphFile(id)); ge != nil {
-			fail(w, 404, "Graph or draft not found.")
+	// Position/viewport autosave cannot replace committed endpoint geometry.
+	// Only explicit graph Save commits topology and its geometry together.
+	var saved GraphLayout
+	if data, err := readConfig(p, layoutFile(id)); err == nil {
+		if err = json.Unmarshal(data, &saved); err != nil {
+			fail(w, 409, "Layout changed or is unreadable. Reload before saving.")
 			return
 		}
+		discardInvalidGraphHandles(&saved)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		fail(w, 500, err.Error())
+		return
+	} else if _, ge := readConfig(p, graphFile(id)); ge != nil {
+		fail(w, 404, "Graph or draft not found.")
+		return
 	}
+	l.Handles, l.Connections = saved.Handles, saved.Connections
 	b, _ := json.MarshalIndent(l, "", "  ")
 	if err := writeConfig(p, layoutFile(id), b); err != nil {
 		fail(w, 500, err.Error())
