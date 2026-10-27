@@ -314,6 +314,10 @@ func (p *adapter) analyticsWaitEnd(key string) error {
 	return p.app.commitLocked(func(d *diskState) { analyticsWait(d, p.turn, key, false, true) })
 }
 func (p *adapter) analyticsOwnRequest(origin string) bool {
+	// A child wait does not prove its parent is blocked.
+	if p.subagent {
+		return false
+	}
 	// OpenCode child requests are projected on the root UI before task discovery.
 	// Only an explicit matching native origin may subtract from the root clock.
 	if origin == "unknown" {

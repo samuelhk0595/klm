@@ -274,7 +274,10 @@ func loadState(dir string) (diskState, error) {
 				s.Role = sessionRoleSideAgent
 			}
 			parent := d.session(s.ParentID)
-			if parent == nil || parent.ParentID != "" || parent.GraphRunID != "" || s.GraphRunID != "" || parent.ProjectID != s.ProjectID || (s.Role != sessionRoleSideAgent && s.Role != sessionRoleSubagent) {
+			// Native workers may belong to a side conversation, but never to
+			// another worker or to an arbitrary deeper conversation hierarchy.
+			sideWorker := parent != nil && s.Role == sessionRoleSubagent && parent.Role == sessionRoleSideAgent && d.session(parent.ParentID) != nil && d.session(parent.ParentID).ParentID == ""
+			if parent == nil || parent.ParentID != "" && !sideWorker || parent.GraphRunID != "" || s.GraphRunID != "" || parent.ProjectID != s.ProjectID || (s.Role != sessionRoleSideAgent && s.Role != sessionRoleSubagent) {
 				return d, errors.New("invalid linked conversation in state.json")
 			}
 			if s.Role == sessionRoleSideAgent {

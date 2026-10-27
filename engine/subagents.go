@@ -28,7 +28,7 @@ func (p *adapter) ensureSubagent(nativeID, title, model, effort string) (*adapte
 	}
 	p.app.mu.Lock()
 	parent := p.app.state.session(p.id)
-	if parent == nil || parent.ParentID != "" || parent.GraphRunID != "" {
+	if parent == nil || parent.ParentID != "" && parent.Role != sessionRoleSideAgent || parent.Role == sessionRoleSubagent || parent.GraphRunID != "" {
 		p.app.mu.Unlock()
 		return nil, nil
 	}

@@ -687,8 +687,22 @@ The engine is the MCP client for stdio and Streamable HTTP. Harnesses receive on
 authenticated loopback gateways and the turn's allowed catalogs, never upstream
 credentials. Conversation-role tools (`klm_linked`) and external Library tools
 (`klm_library`) have different tokens/catalogs/dispatch scopes; the Library token
-cannot call privileged role/control methods. OpenCode native children receive only
-the external selection, not root conversation-role tools or the internal manager.
+cannot call privileged role/control methods. OpenCode native children and managed
+Pi native children receive only the external selection, not root conversation-role
+tools or the internal manager.
+
+Managed Pi loads the installed `pi-subagents` 0.70.0 through a version-gated private
+projection, without enabling unrelated extensions or changing global settings.
+Native foreground/background workers inherit the parent's resolved model, effort,
+live permission policy and captured external Library. They use hidden child history
+and route permissions/questions through the owning conversation. They are not
+independent top-level sessions. The engine keeps the complete turn bound through
+background result delivery, then refreshes that managed Pi profile before the next
+turn. Native workflows, schedules, external runners and model overrides are not
+exposed; graph-node Pi delegation remains disabled to preserve Choice sealing.
+Go compilation and a non-model extension/SDK-child load probe provide lightweight
+evidence, not runtime acceptance. Model execution, background delivery, Stop and
+restart checks remain pending in `PI_SUBAGENTS_IMPLEMENTATION_PROGRESS.md`.
 Tools, resources and form/HTTPS-URL elicitation are implemented;
 Prompts, Sampling, legacy HTTP+SSE and resource subscriptions are not enabled.
 Elicitation uses correlated pending questions with Accept/Decline/Cancel and is

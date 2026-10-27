@@ -99,6 +99,12 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 		return errors.New("Cannot resolve the engine data directory.")
 	}
 	proc, reused := (*interactiveProcess)(nil), false
+	var children *piChildChannel
+	defer func() {
+		if children != nil {
+			_ = children.server.Close()
+		}
+	}()
 	toolKey := p.runtimeToolKey()
 	if p.runtime != nil {
 		proc, reused = p.runtime.getInteractive("pi", p.model, p.effort, toolKey)
@@ -114,7 +120,24 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 		}
 		cleanup := func() { _ = os.RemoveAll(extensionDir) }
 		extensionPath := filepath.Join(extensionDir, "pi-permissions.ts")
-		bridgeConfig, _ := json.Marshal(map[string]any{"url": p.bridge.url, "token": p.bridge.token, "libraryUrl": p.bridge.libraryURL, "libraryToken": p.bridge.libraryToken, "graphNode": p.graphNode(), "tools": p.bridgeTools(), "toolTimeoutMs": linkedToolClientTimeout.Milliseconds()})
+		childExtension := ""
+		if !p.graphNode() && !p.subagent {
+			children, err = newPiChildChannel(p)
+			if err != nil {
+				cleanup()
+				return err
+			}
+			childExtension, err = p.preparePiSubagents(extensionDir, children, b)
+			if err != nil {
+				cleanup()
+				return err
+			}
+			if childExtension == "" {
+				_ = children.server.Close()
+				children = nil
+			}
+		}
+		bridgeConfig, _ := json.Marshal(map[string]any{"url": p.bridge.url, "token": p.bridge.token, "libraryUrl": p.bridge.libraryURL, "libraryToken": p.bridge.libraryToken, "graphNode": p.graphNode(), "nativeSubagents": children != nil, "nativeSubagentPath": childExtension, "tools": p.bridgeTools(), "toolTimeoutMs": linkedToolClientTimeout.Milliseconds()})
 		configPath := filepath.Join(extensionDir, "catalog.json")
 		if writeErr := os.WriteFile(configPath, bridgeConfig, 0600); writeErr != nil {
 			cleanup()
@@ -126,7 +149,11 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 			cleanup()
 			return errors.New("Cannot write the Pi permission extension.")
 		}
-		args := []string{"--mode", "rpc", "--offline", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--extension", extensionPath, "--session", native.Path}
+		args := []string{"--mode", "rpc", "--offline", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes"}
+		if childExtension != "" {
+			args = append(args, "--extension", childExtension)
+		}
+		args = append(args, "--extension", extensionPath, "--session", native.Path)
 		if p.capabilities != nil {
 			for _, skill := range p.capabilities.Skills {
 				args = append(args, "--skill", p.app.skillSnapshotPath(skill))
@@ -147,7 +174,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 			return err
 		}
 		if p.runtime != nil {
-			if err := p.runtime.retainInteractive(proc, "pi", p.model, p.effort, toolKey, false, cleanup); err != nil {
+			if err := p.runtime.retainInteractive(proc, "pi", p.model, p.effort, toolKey, children != nil, cleanup); err != nil {
 				closeRuntimeInteractive(&runtimeInteractive{process: proc, cleanup: cleanup})
 				return err
 			}
@@ -155,7 +182,11 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 			defer cleanup()
 		}
 	}
-	timer := time.NewTimer(20 * time.Second)
+	startupTimeout := 20 * time.Second
+	if children != nil {
+		startupTimeout = 60 * time.Second
+	}
+	timer := time.NewTimer(startupTimeout)
 	defer timer.Stop()
 	startup := timer.C
 	p.processesDrained = false
@@ -171,7 +202,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 			p.processesDrained = proc.Drained()
 		} else {
 			reusable := err == nil
-			if ctx.Err() != nil && !p.completed {
+			if ctx.Err() != nil && !p.completed && children == nil {
 				reusable = settlePiCancellation(proc)
 			}
 			// Never retain a native in-memory queue whose consumption is unknown.
@@ -220,6 +251,11 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 	var baselineDeadline <-chan time.Time
 	baselineDone := false
 	ready, stateReceived, prompted, capabilitiesReceived := reused, false, false, false
+	rootStarted := false
+	var childRequests <-chan *piChildRequest
+	if children != nil {
+		childRequests = children.requests
+	}
 reading:
 	for {
 		if err := ctx.Err(); err != nil {
@@ -260,6 +296,14 @@ reading:
 			continue
 		case <-startup:
 			return errors.New("Pi permission bridge startup timed out.")
+		case request := <-childRequests:
+			if !prompted {
+				return errors.New("Pi launched a child before turn admission.")
+			}
+			if err := children.handle(p, request); err != nil {
+				return err
+			}
+			continue
 		case raw, ok = <-proc.Frames:
 		case <-proc.Done:
 			// Preserve terminal events already buffered when the child exits.
@@ -357,6 +401,9 @@ reading:
 				if err := p.resolvedSelection(str(model, "provider")+"/"+str(model, "id"), str(data, "thinkingLevel")); err != nil {
 					return err
 				}
+				if children != nil {
+					children.model, children.effort = str(model, "provider")+"/"+str(model, "id"), str(data, "thinkingLevel")
+				}
 				_ = requestStats()
 				baselineTimer.Reset(2 * time.Second)
 				baselineDeadline = baselineTimer.C
@@ -378,6 +425,34 @@ reading:
 						return err
 					}
 					return errors.New("Pi extension reported an error.")
+				}
+				const childStatePrefix = "klm.subagents.state.v1:"
+				if children != nil && strings.HasPrefix(str(raw, "message"), childStatePrefix) {
+					var state struct {
+						Active  bool `json:"active"`
+						Settled bool `json:"settled"`
+					}
+					if json.Unmarshal([]byte(strings.TrimPrefix(str(raw, "message"), childStatePrefix)), &state) != nil {
+						return errors.New("Invalid Pi child liveness state.")
+					}
+					if prompted && rootStarted && state.Settled && !state.Active && !p.completed {
+						if err := children.settleUnconfirmed(p); err != nil {
+							return err
+						}
+						if err := p.analyticsEnd(); err != nil {
+							return err
+						}
+						if err := p.pi(map[string]any{"type": "agent_settled"}); err != nil {
+							return err
+						}
+						p.nativeSettled = true
+						if requestStats() != nil {
+							return nil
+						}
+						statsTimer.Reset(2 * time.Second)
+						statsDeadline = statsTimer.C
+					}
+					continue
 				}
 				if str(raw, "message") == "klm.permissions.ready.v1" && str(raw, "notifyType") == "info" {
 					ready = true
@@ -526,6 +601,10 @@ reading:
 				continue
 			}
 			if str(raw, "type") == "agent_start" {
+				rootStarted = true
+				p.completed, p.nativeSettled = false, false
+				statsTimer.Stop()
+				statsDeadline = nil
 				if err := p.analyticsStart(); err != nil {
 					return err
 				}
@@ -559,6 +638,14 @@ reading:
 					}
 					delete(pending, toolID)
 				}
+			}
+			if str(raw, "type") == "agent_settled" && children != nil {
+				// Keep consuming late background results under the same captured turn,
+				// without charging the child's background wait as parent model work.
+				if err := p.analyticsEnd(); err != nil {
+					return err
+				}
+				continue
 			}
 			if str(raw, "type") == "agent_settled" {
 				if err := p.analyticsEnd(); err != nil {
