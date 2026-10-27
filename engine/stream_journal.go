@@ -73,6 +73,9 @@ func replayStreamJournal(dir string, state *diskState) error {
 		return err
 	}
 	initializeActivityBoardRecords(state)
+	if err := validateAutomationRecords(state); err != nil {
+		return err
+	}
 	if err := validateTopicRecords(state); err != nil {
 		return err
 	}

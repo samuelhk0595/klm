@@ -15,7 +15,7 @@ function tokens(value: number, full = false) {
 // Session Status Bar: the compact row below the message input with skills, MCPs, quota, context, and token counts.
 export function SessionStatusBar({ session, side = false }: { session: Session; side?: boolean }) {
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const selection = selectionOf(session.capabilities?.desired);
+  const selection = selectionOf(session.automation?.status === 'running' && session.capabilities?.applied ? session.capabilities.applied.selection : session.capabilities?.desired);
   const pending = !session.capabilities?.applied || selectionKey(selection) !== selectionKey(session.capabilities.applied.selection);
   const managed = session.harness === 'pi' || session.harness === 'opencode' || session.harness === 'codex';
   const unavailable = !!session.capabilities?.applied?.diagnostics?.length;
@@ -35,6 +35,7 @@ export function SessionStatusBar({ session, side = false }: { session: Session; 
   ].filter(Boolean).join(' ');
 
   return <div className="session-status-bar" role="group" aria-label="Session Status Bar">
+    {session.automation && <span>Automation · {session.automation.status.replaceAll('_', ' ')}</span>}
     {!side && <><button type="button" className="session-library-trigger" aria-label="Session Library" onClick={() => setLibraryOpen(true)}>
       {managed ? `${selection.skills.length} skills · ${selection.mcpConnections.length} MCPs${pending ? ' · Pending' : ''}${unavailable ? ' · Unavailable' : ''}` : selection.skills.length || selection.mcpConnections.length ? 'Library · Selection unavailable' : 'Library · Native inventory unknown'}
     </button>

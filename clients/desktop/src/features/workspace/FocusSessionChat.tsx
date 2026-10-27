@@ -44,7 +44,7 @@ export function FocusSessionChat({ session, projectName, subagents, draft, pendi
   }
   const graphRequests = general ? [] : session.graph?.requests ?? [];
   const activeSubagent = subagents.find(child => child.id === activeSubagentId);
-  const graphControl = general ? undefined : <GraphPicker graphs={catalog?.graphs.map(graphListEntry) ?? []} value={selectedGraphId} selectedName={catalog?.graphs.find(graph => graph.id === selectedGraphId)?.definition.name ?? (graphRun?.graphId === selectedGraphId ? graphRun.snapshot.definition.name : undefined)} running={!!graphRun?.active && graphRun.graphId === selectedGraphId} disabled={selectingGraph || !session.graph} loading={loading} error={catalogError || catalog?.errors.join(' ')} onReload={() => void reload().catch(() => {})} onChange={onSelectGraph} />;
+  const graphControl = general ? undefined : <GraphPicker graphs={catalog?.graphs.map(graphListEntry) ?? []} value={selectedGraphId} selectedName={catalog?.graphs.find(graph => graph.id === selectedGraphId)?.definition.name ?? (graphRun?.graphId === selectedGraphId ? graphRun.snapshot.definition.name : undefined)} running={!!graphRun?.active && graphRun.graphId === selectedGraphId} disabled={session.automation?.status === 'running' || selectingGraph || !session.graph} loading={loading} error={catalogError || catalog?.errors.join(' ')} onReload={() => void reload().catch(() => {})} onChange={onSelectGraph} />;
   return <SessionNavigationProvider onOpenSession={onOpenSession}>
     <div className="focus-session-chat" hidden={!!activeSubagentId}>
     <ConversationHistory session={session} subagents={subagents} working={running || submissions.some(item => item.status === 'sending')} label={`${title}${IS_MOBILE_HOST ? '' : ' floating'} conversation`} onSnapshot={onSnapshot} onHistory={onHistory} onEventChange={onEventChange} onOpenSubagent={onOpenSubagent} empty={<div className="empty-chat"><h2>What would you like to work on?</h2></div>} />
@@ -66,7 +66,7 @@ export function FocusSessionChat({ session, projectName, subagents, draft, pendi
       <MessageQueue session={session} disabled={pending} onSnapshot={onSnapshot} onInterrupt={onInterrupt} />
       {general && generalControls}
       {harnessUnavailable && <p role="status" className="form-error">The selected harness is not installed.</p>}
-      <MessageComposer projectId={general ? undefined : session.projectId} placeholder={`Message ${title}`} draft={draft} onDraftChange={onDraftChange} onSend={onSend} onStop={onStop} running={running} disabled={pending || harnessUnavailable}
+      <MessageComposer steeringOnly={session.automation?.status === 'running'} projectId={general ? undefined : session.projectId} placeholder={`Message ${title}`} draft={draft} onDraftChange={onDraftChange} onSend={onSend} onStop={onStop} running={running} disabled={pending || harnessUnavailable}
         onTranscription={onTranscription}
         graphControl={IS_MOBILE_HOST ? undefined : graphControl}
         modelControl={<ModelPicker key={`${session.id}/${session.harness}`} session={session} disabled={pending || running} optionsDisabled={pending || disconnected} onSave={onModel} onSnapshot={onSnapshot} graphControl={IS_MOBILE_HOST ? graphControl : undefined} />} />

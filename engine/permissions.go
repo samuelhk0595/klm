@@ -125,7 +125,7 @@ func (p *adapter) requestPermission(req Permission, scope map[string]any, reply 
 	}
 	decision := ""
 	reason := "saved rule"
-	if s.YOLO {
+	if a.state.sessionYOLO(s) {
 		reason = "YOLO mode"
 		decision = "deny"
 		if slices.Contains(req.Decisions, "once") {

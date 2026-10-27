@@ -464,7 +464,7 @@ func (a *app) resolveRememberedPermissions() {
 				continue
 			}
 			decision, reason := rememberedPermission(a.state.Grants, s, pending.ruleHarness, pending.ruleKind, pending.ruleKey), "saved rule"
-			if s.YOLO {
+			if a.state.sessionYOLO(s) {
 				decision, reason = "allow", "YOLO mode"
 			}
 			if decision == "" || decision == "allow" && !slices.Contains(pending.request.Decisions, "once") {

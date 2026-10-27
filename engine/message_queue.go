@@ -354,7 +354,7 @@ func (a *app) scheduleMessagesLocked() {
 		return
 	}
 	for _, s := range a.state.Sessions {
-		if a.runs[s.ID] != nil || len(s.Queue) == 0 || a.state.conversationArchived(&s) {
+		if a.state.activeAutomation(s.ID) != nil || a.runs[s.ID] != nil || len(s.Queue) == 0 || a.state.conversationArchived(&s) {
 			continue
 		}
 		messages := steeringMessages(&s)
@@ -424,6 +424,9 @@ func (a *app) changeQueuedMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) changeQueuedMessageLocked(id, messageID string, remove, retryUncertain bool, origin *SpawnOrigin) (string, error) {
+	if !remove && a.state.activeAutomation(id) != nil {
+		return "", controlError(409, "Only steering is available during an automation run.")
+	}
 	s := a.state.session(id)
 	if s == nil {
 		return "", controlError(404, "Session not found.")

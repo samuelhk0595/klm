@@ -13,6 +13,9 @@ func (a *app) graphActivityReadyLocked(id string) bool {
 	if activity == nil || activity.Status != "ready" && activity.Status != "scheduled" {
 		return false
 	}
+	if !a.state.automationGraphAllowed(activity.ConversationID, activity.GraphID) {
+		return false
+	}
 	for _, dependency := range activity.Dependencies {
 		prerequisite := a.state.graphActivity(dependency)
 		if prerequisite == nil || prerequisite.Status != "succeeded" {
@@ -99,6 +102,9 @@ func (a *app) startReservedGraphActivity(ctx context.Context, id string) error {
 	activity := *saved
 	normalizeGraphWorkspaceDecision(&activity.Workspace)
 	decisionErr := validateGraphAuthorization(&a.state, activity.ConversationID, activity.Authorization)
+	if !a.state.automationGraphAllowed(activity.ConversationID, activity.GraphID) {
+		decisionErr = errors.New("Graph is not enabled for this automation run.")
+	}
 	if decisionErr == nil {
 		decisionErr = validateGraphWorkspaceDecision(&a.state, activity.ConversationID, activity.Workspace, graphActivityHasRun(&a.state, activity.ID))
 	}

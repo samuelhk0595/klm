@@ -107,6 +107,12 @@ func (a *app) archiveSessionLocked(id string, archived bool, folder *string, ori
 // Catalog discovery never holds app.mu; validate the complete resultant pair,
 // then recheck all inputs under the lock before a single durable mutation.
 func (a *app) changeSessionSettings(ctx context.Context, id string, model, effort *string, yolo *bool) error {
+	a.mu.Lock()
+	automated := a.state.activeAutomation(id) != nil
+	a.mu.Unlock()
+	if automated {
+		return controlError(409, "Automation run settings are read-only until the run ends.")
+	}
 	if model == nil && effort == nil && yolo == nil {
 		return controlError(400, "Supply at least one setting.")
 	}
@@ -189,6 +195,12 @@ func (a *app) changeSessionSettings(ctx context.Context, id string, model, effor
 }
 
 func (a *app) changeConversationGraph(ctx context.Context, id, graphID string) error {
+	a.mu.Lock()
+	automated := a.state.activeAutomation(id) != nil
+	a.mu.Unlock()
+	if automated {
+		return controlError(409, "Automation run settings are read-only until the run ends.")
+	}
 	if graphID != "" && !validAuthoringID(graphID) {
 		return controlError(400, "Invalid graph identifier.")
 	}

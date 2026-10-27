@@ -73,6 +73,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/auth/devices/{clientId}", a.revokeClient)
 	mux.HandleFunc("DELETE /api/auth/devices", a.revokeClient)
 	a.libraryRoutes(mux)
+	a.automationRoutes(mux)
 	a.activityBoardRoutes(mux)
 	mux.HandleFunc("GET /api/health", a.health)
 	mux.HandleFunc("GET /api/state", a.getState)
@@ -882,6 +883,13 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mode, status := body.Mode, "queued"
+	if a.state.activeAutomation(id) != nil {
+		if mode != "steer" {
+			a.mu.Unlock()
+			fail(w, 409, "Only steering is available during an automation run.")
+			return
+		}
+	}
 	if mode == "steer" {
 		status = "steering"
 	}
@@ -935,7 +943,29 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
+	var body struct {
+		AutomationRunID string `json:"automationRunId"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
 	a.mu.Lock()
+	if run := a.state.activeAutomation(id); run != nil {
+		if body.AutomationRunID != run.ID {
+			a.mu.Unlock()
+			fail(w, 409, "Confirm stopping this automation run first.")
+			return
+		}
+		if err := a.commitLocked(func(d *diskState) { d.automationRun(run.ID).StopRequested = true }); err != nil {
+			a.mu.Unlock()
+			fail(w, 503, err.Error())
+			return
+		}
+	} else if body.AutomationRunID != "" {
+		a.mu.Unlock()
+		fail(w, 409, "This automation run has already ended. Refresh the conversation before stopping it.")
+		return
+	}
 	t, err := a.stopSessionLocked(id, nil)
 	a.mu.Unlock()
 	if err == nil {
@@ -958,6 +988,9 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 
 // Caller holds app.mu. Cancellation precedes persistence, even on write failure.
 func (a *app) stopSessionLocked(id string, origin *SpawnOrigin) (*turn, error) {
+	if r := a.state.activeAutomation(id); r != nil && !r.StopRequested {
+		return nil, controlError(409, "Confirm stopping the automation run in its conversation first.")
+	}
 	if a.state.session(id) == nil {
 		return nil, controlError(404, "Session not found.")
 	}
@@ -984,6 +1017,31 @@ func (a *app) stopSessionLocked(id string, origin *SpawnOrigin) (*turn, error) {
 	}
 	if err := a.cancelLinkedLocked(id); err != nil {
 		return t, err
+	}
+	if t == nil && a.state.activeAutomation(id) != nil {
+		ctx, cancel := context.WithCancel(a.ctx)
+		cancel()
+		t = &turn{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+		a.runs[id] = t
+		runtime := a.runtimes[id]
+		runID := a.state.activeAutomation(id).ID
+		a.wg.Add(1)
+		go func(t *turn) {
+			defer a.wg.Done()
+			if runtime != nil {
+				t.stopErr = runtime.shutdown()
+			}
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			if t.stopErr == nil {
+				_ = a.commitLocked(func(d *diskState) {
+					finishAutomation(d, d.automationRun(runID), "interrupted_by_user", "Stopped by user.")
+				})
+			}
+			delete(a.runs, id)
+			close(t.done)
+			a.scheduleLinkedLocked()
+		}(t)
 	}
 	return t, nil
 }

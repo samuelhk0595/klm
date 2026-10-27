@@ -204,6 +204,11 @@ func (p *adapter) prepareCapabilities(s Session) error {
 		if snapshot == nil && !selectionEmpty(s.Capabilities.Desired) {
 			return errors.New("Graph has no captured capability snapshot.")
 		}
+	} else if s.Automation != nil && s.Automation.Status == "running" {
+		snapshot, err = p.automationSnapshot(s)
+		if err != nil {
+			return err
+		}
 	} else {
 		// Resolve outside the state lock, then reject an interleaved selection edit.
 		for attempt := 0; attempt < 2; attempt++ {
@@ -320,6 +325,10 @@ func (a *app) conversationCapabilities(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	s = a.state.session(r.PathValue("id"))
+	if a.state.activeAutomation(s.ID) != nil {
+		fail(w, 409, "Automation run settings are read-only until the run ends.")
+		return
+	}
 	if len(a.state.LibraryDeletions) > 0 {
 		fail(w, 409, "A library deletion needs recovery before editing selections.")
 		return

@@ -32,7 +32,7 @@ export function SessionOptions({ session, disabled, onSnapshot, graphControl }: 
     return () => { set.delete(listener); if (!set.size) listeners.delete(key); };
   }, [key]);
   const { value: preview, saving, error } = useSyncExternalStore(subscribe, () => intents.get(key) ?? idleIntent);
-  const locked = disabled || saving;
+  const locked = disabled || saving || session.automation?.status === 'running';
   const yolo = preview ?? !!session.yolo;
   async function save(yolo: boolean) {
     if (intents.get(key)?.saving || locked) return;

@@ -60,7 +60,7 @@ func (p *adapter) spawnSession(ctx context.Context, args spawnArgs) (any, error)
 		a.mu.Unlock()
 		return nil, spawnProblem("turn", "turn_inactive", "The spawning turn is no longer active.", "Do not retry uncertain native delivery automatically.")
 	}
-	from := a.state.session(p.id)
+	from := a.state.automationSessionView(a.state.session(p.id))
 	if args.SourceUserEventID != "" {
 		if existing, err := a.existingSpawnLocked(from, args); err != nil {
 			a.mu.Unlock()
@@ -92,7 +92,7 @@ func (p *adapter) spawnSession(ctx context.Context, args spawnArgs) (any, error)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	from = a.state.session(p.id)
+	from = a.state.automationSessionView(a.state.session(p.id))
 	project := a.state.project(selection.ProjectID)
 	if ctx.Err() == nil && p.activeToolLocked() && args.SourceUserEventID != "" {
 		if existing, err := a.existingSpawnLocked(from, args); err != nil {
@@ -125,7 +125,7 @@ func (p *adapter) spawnOptionsForProject(ctx context.Context, projectID, harness
 	defer stop()
 	a := p.app
 	a.mu.Lock()
-	from := a.state.session(p.id)
+	from := a.state.automationSessionView(a.state.session(p.id))
 	if !p.activeToolLocked() || !spawnSender(from, spawnArgs{ProjectID: projectID}) {
 		a.mu.Unlock()
 		return nil, spawnProblem("turn", "turn_inactive", "Session spawn options are unavailable to this turn.", "Use these tools only from a normal main/side conversation.")

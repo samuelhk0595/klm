@@ -125,7 +125,7 @@ as favorites.
 ### Project Settings and GitHub Webhooks
 
 The **Project settings** button in the sessions sidebar opens a modal with
-**General**, **Webhooks** and **Tasks** sections. General edits the project's name and icon,
+**General**, **Webhooks**, **Tasks** and **Automations** sections. General edits the project's name and icon,
 shows its fixed directory and provides confirmed project removal. Project creation
 and the rail's Edit/Remove menu retain their existing entry points. Webhooks belong
 to this project modal, not global Settings.
@@ -204,6 +204,72 @@ payload and retained release/deduplication after restart. UI, real GitHub recept
 pending recovery, retention and full lifecycle still await human validation. Setup,
 API contracts and the manual acceptance route are documented in `engine/README.md`
 and `GITHUB_WEBHOOKS_IMPLEMENTATION_PLAN.md`.
+
+### Project Automations
+
+Project settings → Automations manages versioned project-owned webhook or scheduled
+tasks. Session mode can create a new normal top-level session per run, create one
+session on the first run and reuse it, or use an existing normal session in the
+same project. Legacy automations retain new-per-run mode. Creation applies the
+saved title, harness/model/effort, YOLO, Library selection and topic in the registered
+project directory; new topics are created atomically on Save. Reused sessions keep
+their identity, history, native continuation and preferences. Normal reuse captures
+the session's current settings at admission; active runs freeze these options and
+their Library snapshot. The graph allowlist remains automation-owned. Reusable
+destinations serialize, including between automations, and wait for chat, queued
+messages, graph or consultation work to finish. They never restore archived content
+or silently create a replacement. A reusable destination is fixed once linked.
+
+Initial and follow-up prompts are separate. A run that creates a session sends only
+the initial prompt; a run in an existing/linked session sends only its follow-up,
+including the first run when an existing session was chosen. Prior objectives or
+classifications in the conversation do not classify the current run.
+
+The initial webhook trigger is GitHub `pull_request/opened`, scoped by the receiving
+project rather than repository. The editor discovers and inserts PR number,
+organization login (empty when absent), and repository name references. Raw payloads
+are not passed to automation agents. Scheduled prompts reject webhook references;
+switching activation preserves the text and requires removing those references.
+Trigger data and automatic prompts are never
+human graph/session authorization. Webhook parallelism is optional; serial webhooks
+and all schedules use a separate durable FIFO with one active run per automation.
+
+Schedules use the global engine IANA time zone (initially America/Sao_Paulo), editable in Settings.
+Once accepts an explicit date and local time and fires automatically only once.
+Its durable consumed marker prevents reactivation or a time-zone change from firing
+it again; changing the actual schedule can explicitly schedule another occurrence.
+Daily, every N calendar days, selected weekly weekdays and monthly days use the next
+valid selected local time, today if it has not passed. A selected weekday means its
+next occurrence, not the following calendar day. Monthly dates absent from a month
+and nonexistent DST times are skipped; repeated wall times occur once. Run now is
+available only for schedules, including paused ones, and does not move recurrence.
+Pause blocks new automatic triggers; already accepted triggers proceed. Deletion
+cancels pending triggers and retains active runs and their normal sessions. History
+contains session-title links only, without run dates/status, and refresh retains
+the loaded page window.
+
+Active automation composers accept steering at model boundaries. Send now and
+configuration edits are blocked. Questions and permissions remain answerable.
+Confirmed Stop cancels the model, records interruption by the user after confirmed
+shutdown, and returns the session to normal chat. Two turn-bound main-agent tools
+record satisfied/unsatisfied objectives; native completion alone is not success.
+One automatic classification reminder is allowed; a second unclassified completion
+becomes an execution failure. Tools are absent from children, side/general chats
+and completed runs. Graph allowlists do not replace existing authorization gates.
+
+Startup preserves interrupted sessions, marks their runs as execution failures and
+records missed schedule intervals. KLM Agent receives a durable recovery request
+when its harness is configured and it is free; otherwise the request remains
+pending. Internal recovery notices do not lock the initial harness choice, including
+across restart; accepting the first real input still locks it durably. Missed
+intervals retain the saved calendar/time zone and enumerate individual scheduled
+times and stable occurrence IDs in bounded pages. Recovery requires a real later
+human reply and admits one new run per explicitly selected occurrence or
+interrupted run, using saved configuration and session mode. Reusable destinations
+receive follow-ups in the same session; new-per-run creates new sessions. Decisions
+and their idempotent receipts persist per selected set; nothing automatically replays downtime.
+Uncertain notification delivery is not retried automatically. Details and manual
+acceptance remain tracked in `AUTOMATIONS_IMPLEMENTATION_PROGRESS.md`.
 
 ### KLM Agent
 

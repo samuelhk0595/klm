@@ -346,6 +346,12 @@ func (b *linkedBridge) call(ctx context.Context, name string, raw json.RawMessag
 	if name == "session_topic_set" {
 		return p.setSessionTopic(raw)
 	}
+	if name == "automation_succeed" || name == "automation_fail" {
+		return p.callAutomationTool(name, raw)
+	}
+	if name == "automation_recovery_read" || name == "automation_recovery_resolve" {
+		return p.callAutomationRecovery(name, raw)
+	}
 	if name == "session_spawn_options" {
 		var args struct {
 			Harness string `json:"harness"`

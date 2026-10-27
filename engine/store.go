@@ -40,6 +40,7 @@ type Event struct {
 }
 
 type Session struct {
+	Automation      *AutomationSession       `json:"automation,omitempty"`
 	Capabilities    ConversationCapabilities `json:"capabilities"`
 	Queue           []QueuedMessage          `json:"queue"`
 	Role            string                   `json:"role,omitempty"`
@@ -93,9 +94,14 @@ type TranscriptionSettings struct {
 }
 
 type diskState struct {
-	Analytics   *AnalyticsState `json:"analytics,omitempty"`
-	tx          *stateTransaction
-	TopicSchema int `json:"topicSchema,omitempty"`
+	EngineSettings       EngineSettings       `json:"engineSettings"`
+	Automations          []Automation         `json:"automations,omitempty"`
+	AutomationTriggers   []AutomationTrigger  `json:"automationTriggers,omitempty"`
+	AutomationRuns       []AutomationRun      `json:"automationRuns,omitempty"`
+	AutomationRecoveries []AutomationRecovery `json:"automationRecoveries,omitempty"`
+	Analytics            *AnalyticsState      `json:"analytics,omitempty"`
+	tx                   *stateTransaction
+	TopicSchema          int `json:"topicSchema,omitempty"`
 
 	ActivityBoardConfig      activityBoardConfig                `json:"activityBoardConfig,omitempty"`
 	ActivityBoardConnections map[string]activityBoardConnection `json:"activityBoardConnections,omitempty"`
@@ -251,17 +257,7 @@ func loadState(dir string) (diskState, error) {
 			if generalCount > 1 || s.ProjectID != "" || s.ParentID != "" || s.GraphRunID != "" || s.Archived || !filepath.IsAbs(s.ExecutionCWD) {
 				return d, errors.New("invalid general conversation in state.json")
 			}
-			// Conservatively retain the lock for any accepted input, including an
-			// input removed from the queue before execution or failed native turns.
-			if len(s.Events) > 0 || len(s.Queue) > 0 {
-				s.HarnessLocked = true
-			}
-			for key := range d.AcceptedMessages {
-				if strings.HasPrefix(key, s.ID+"/") {
-					s.HarnessLocked = true
-					break
-				}
-			}
+			d.normalizeGeneralHarnessLock(s)
 		}
 		if s.ID == "" || ids[s.ID] || !engineOwned && d.project(s.ProjectID) == nil || s.Events == nil ||
 			(s.Status != "idle" && s.Status != "running" && s.Status != "error") {
@@ -312,6 +308,9 @@ func loadState(dir string) (diskState, error) {
 	if err := validateSessionSpawns(&d); err != nil {
 		return d, err
 	}
+	if err := validateAutomationRecords(&d); err != nil {
+		return d, err
+	}
 	if err := validateWebhookRecords(&d); err != nil {
 		return d, err
 	}
@@ -334,6 +333,9 @@ func loadState(dir string) (diskState, error) {
 }
 
 func saveState(dir string, d *diskState) error {
+	if err := validateAutomationRecords(d); err != nil {
+		return err
+	}
 	if err := validateTopicRecords(d); err != nil {
 		return err
 	}

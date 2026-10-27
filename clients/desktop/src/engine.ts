@@ -46,6 +46,7 @@ export type SessionUsage = {
 export type QueuedMessage = { id: string; text: string; mode: "queue" | "steer" | "interrupt"; status: "queued" | "steering" | "sending" | "accepted" | "interrupting" | "paused" | "uncertain"; error?: string; origin?: { sessionId: string; title: string; kind?: 'instruction' | 'question_answer' } };
 
 export type Session = {
+  automation?: { runId: string; automationId: string; status: 'running' | 'succeeded' | 'failed' | 'execution_failed' | 'interrupted_by_user' };
   capabilities?: ConversationCapabilities;
   queue?: QueuedMessage[] | null;
   role?: 'side_agent' | 'subagent' | 'graph_node' | 'general_agent';

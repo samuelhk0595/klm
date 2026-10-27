@@ -227,12 +227,18 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	defer a.wg.Done()
 	defer t.cancel()
 	a.mu.Lock()
+	if current := a.state.session(s.ID); current != nil {
+		s = *a.state.automationSessionView(current)
+	}
 	reasoningStart := len(s.Events)
 	t.reasoningStart = &reasoningStart
 	reservationErr := a.reserveAnalyticsLocked(t, s)
 	a.mu.Unlock()
 	p := &adapter{app: a, turn: t, id: s.ID, harness: s.Harness, role: s.Role, yolo: s.YOLO, cwd: cwd,
 		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true}
+	if s.Automation != nil && s.Automation.Status == "running" && s.Role == "" && s.ParentID == "" && s.GraphRunID == "" {
+		p.automationRunID = s.Automation.RunID
+	}
 	var stopCancellation func() bool
 	err := reservationErr
 	if err == nil && s.Role != "graph_node" {
@@ -293,6 +299,9 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	}
 	if err == nil {
 		if catalog, catalogErr := a.catalog(t.ctx, s, cwd, false); catalogErr == nil {
+			if s.Automation != nil && s.Automation.Status == "running" {
+				err = validateSpawnModel(s, "", catalog)
+			}
 			if p.model == "" {
 				p.model = catalog.DefaultModel
 			}
@@ -304,8 +313,29 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 					p.effort = catalog.DefaultEffort
 				}
 			}
+			if p.automationRunID != "" && err == nil {
+				a.mu.Lock()
+				run := a.state.activeAutomation(s.ID)
+				if run == nil || run.ID != p.automationRunID || a.runs[s.ID] != t {
+					err = errors.New("Automation ownership changed during model preparation.")
+				} else if !run.SettingsResolved {
+					err = a.commitLocked(func(d *diskState) {
+						r := d.automationRun(p.automationRunID)
+						r.Snapshot.Model, r.Snapshot.Effort, r.SettingsResolved = p.model, p.effort, true
+					})
+				} else {
+					p.model, p.effort = run.Snapshot.Model, run.Snapshot.Effort
+				}
+				a.mu.Unlock()
+			}
+		} else if p.automationRunID != "" {
+			err = catalogErr
 		}
-		bridge, bridgeErr := p.startLinkedBridge()
+		var bridge *linkedBridge
+		bridgeErr := err
+		if bridgeErr == nil {
+			bridge, bridgeErr = p.startLinkedBridge()
+		}
 		if bridgeErr != nil {
 			err = bridgeErr
 		} else {
@@ -480,10 +510,23 @@ func (p *adapter) finishTurnStateLocked(err error) error {
 				}
 			}
 		}
+		p.settleAutomation(d, err)
+		for i := range d.AutomationRecoveries {
+			for _, id := range t.automationRecoveryIDs {
+				if d.AutomationRecoveries[i].ID == id {
+					status := "delivered"
+					if err != nil || p.failed || !p.completed || t.ctx.Err() != nil {
+						status = "uncertain"
+					}
+					d.AutomationRecoveries[i].Delivery = status
+				}
+			}
+		}
 	})
 }
 
 type adapter struct {
+	automationRunID      string // Immutable owning run for this complete engine turn.
 	analyticsNative      string // Hashed native epoch, protected by app.mu.
 	openCodeLibraryEnv   []string
 	openCodeRootAgent    string

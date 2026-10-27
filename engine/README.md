@@ -98,6 +98,71 @@ one/all. DELETE requests use JSON `{}` and the same mutation protections.
 See `../CLIENT_AUTH_IMPLEMENTATION_PROGRESS.md` for actual checks and manual
 browser/desktop/mobile acceptance still required.
 
+## Project automations
+
+**Project settings → Automations** creates project-owned PR-opened webhook or alarm
+tasks. The editor captures harness/model/effort, YOLO, enabled graphs, Library and
+an existing or newly saved topic. Every admitted trigger starts a new ordinary
+run in the project's registered directory. `sessionMode` supports `new_per_run`
+(default for legacy records), `reuse_created` (links the first created session), or
+`existing` with a normal same-project `sessionId`. Reusable modes serialize and
+preserve session identity/history/native continuation. The worker waits for the
+target's turns, message queue and graph/consultation work; it does not clear them.
+Once linked, a reusable destination is fixed. History exposes `{runId, sessionId,
+title}`, keeping one session-link entry per run even when destinations repeat.
+
+`prompt` is initial input only for runs that create sessions. `followUpPrompt` is
+required in reusable modes and is the only task input for runs in an existing
+session. A normal reused run captures the target's current harness/model/effort,
+YOLO/Library/topic; creation settings from the editor are not destination overrides.
+The run freezes effective settings and Library capabilities, without rewriting and
+restoring durable session preferences. The graph allowlist stays automation-owned.
+
+The CRUD collection is `/api/projects/{id}/automations`; item PATCH/DELETE require
+the expected revision. Creation includes a stable `automation.operationId`, and
+`POST /{automationId}/run-now` includes `revision` and `operationId`. Run now is
+schedule-only, works while paused, and never moves the saved next occurrence.
+`schedule.recurrence="once"` uses `date` (`YYYY-MM-DD`) and `time` (`HH:mm`) in the
+engine time zone. Admission clears its next occurrence and durably records the
+one-time receipt. Pause/reactivate or changing the time zone cannot rearm a consumed
+one-time schedule; changing the schedule explicitly clears that receipt.
+`GET /{automationId}/runs?offset=0` returns session links in pages of 50. Schedule
+preview uses `POST /api/projects/{id}/automations/preview` with the schedule object.
+`GET/PATCH /api/settings/engine` exposes revisioned `timeZone` (IANA, initially America/Sao_Paulo).
+The same zone drives scheduling and Analytics; persisted instants remain UTC.
+
+Only newly released project-local `github/pull_request/opened` events after the
+automation's creation/reactivation receipt boundary can enqueue it. References are
+`{{pr.number}}`, `{{organization.name}}` and `{{repository.name}}`; no repository
+binding or raw payload is supplied. A durable FIFO is independent of chat messages.
+Parallel runs are webhook-only; schedules always serialize. Pausing rejects new
+automatic triggers while accepted triggers proceed; deletion cancels pending
+triggers and preserves sessions and active snapshots.
+
+During a run, chat input is steering-only. Stop requires the exact `automationRunId`
+after the UI's confirmation. Outcome tools exist only for that run's main turn and
+are finalized after settlement. Normal completion without classification gets one
+reminder, then an execution failure. Questions, permissions, graph authorization
+and managed profile gates retain their existing contracts.
+
+Interrupted runs and missed downtime intervals generate durable KLM Agent recovery
+entries. The singleton consults the user when its harness is configured and it is
+free. General-only `automation_recovery_read` and `automation_recovery_resolve`
+require a real human decision after the notice; recover admits one new run per
+selected interrupted run or individual missed scheduled occurrence. Recovery reads
+list groups (`offset`/`limit`), then enumerate a group's occurrence IDs and saved
+times (`recoveryId`, `after`/`nextAfter`, up to 50 per page). Resolution takes an
+explicit `occurrenceIds` set (1–50), action, real later human message reference and
+stable operation ID; each recovered occurrence enters the normal durable queue.
+Recovery respects the saved session mode and uses follow-up input for an existing
+destination; it never replaces a reusable session or rewrites its preferences.
+Intervals store the original calendar and time zone rather than collapsing multiple
+missed times into one catch-up. Internal notices do not count as first harness use.
+History API rows expose only `sessionId` and current session `title`. Scheduled
+prompts cannot contain webhook placeholders. No automatic backfill or uncertain
+notification retry occurs. See `../AUTOMATIONS_IMPLEMENTATION_PROGRESS.md` for
+implementation assumptions and the pending manual acceptance route.
+
 ## Tasks
 
 The global board uses `/api/activity-board/*`, independent of webhook ingress and

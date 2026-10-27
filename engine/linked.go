@@ -109,7 +109,7 @@ func (a *app) sideConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mu.Lock()
-	main := a.state.session(r.PathValue("id"))
+	main := a.state.automationSessionView(a.state.session(r.PathValue("id")))
 	if main == nil || main.Role == sessionRoleGeneralAgent || main.ParentID != "" || a.state.project(main.ProjectID) == nil || a.state.project(main.ProjectID).Removed {
 		a.mu.Unlock()
 		fail(w, 404, "Main conversation not found.")
@@ -166,7 +166,11 @@ func (a *app) sideHarness(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "Conversation not found.")
 		return
 	}
-	if s.HarnessLocked || len(s.Events) > 0 || len(s.Queue) > 0 || a.runs[s.ID] != nil {
+	inputAccepted := len(s.Events) > 0 || len(s.Queue) > 0
+	if s.Role == sessionRoleGeneralAgent {
+		inputAccepted = a.state.generalHarnessInputAccepted(s)
+	}
+	if s.HarnessLocked || inputAccepted || a.runs[s.ID] != nil {
 		a.mu.Unlock()
 		fail(w, 409, "Harness can only change before the first turn.")
 		return

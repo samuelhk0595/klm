@@ -14,6 +14,7 @@ func (a *app) getAnalytics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mu.Lock()
+	q.location, _ = time.LoadLocation(a.state.engineZone())
 	if a.storageErr != nil || a.state.Analytics == nil {
 		a.mu.Unlock()
 		fail(w, 503, "Analytics storage is unavailable.")

@@ -15,6 +15,7 @@ const (
 )
 
 type SessionSummary struct {
+	Automation           *AutomationSession       `json:"automation,omitempty"`
 	Capabilities         ConversationCapabilities `json:"capabilities"`
 	Queue                []QueuedMessage          `json:"queue"`
 	Role                 string                   `json:"role,omitempty"`
@@ -90,6 +91,7 @@ type sessionJournal struct {
 
 func sessionSummary(view *Session) SessionSummary {
 	return SessionSummary{
+		Automation:   view.Automation,
 		TopicID:      view.TopicID,
 		Capabilities: view.Capabilities,
 		Queue:        view.Queue,

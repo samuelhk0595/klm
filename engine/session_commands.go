@@ -111,6 +111,9 @@ func (a *app) sendSessionLocked(from *Session, args sendArgs) (any, error) {
 		}
 	}
 	q := QueuedMessage{ID: newID(), Text: args.Instruction, Status: status, Mode: "queue", Origin: &SpawnOrigin{SessionID: from.ID, Title: from.Title, Kind: "instruction", SourceUserEventID: args.SourceUserEventID}}
+	if a.state.activeAutomation(to.ID) != nil {
+		q.Mode, q.Status = "steer", "steering"
+	}
 	receipt := SessionCommand{From: from.ID, Request: args, MessageID: q.ID, CreatedAt: now()}
 	if err := a.commitLocked(func(d *diskState) {
 		s := d.session(args.SessionID)
@@ -126,5 +129,6 @@ func (a *app) sendSessionLocked(from *Session, args sendArgs) (any, error) {
 		return nil, err
 	}
 	a.scheduleMessagesLocked()
+	a.wakeSteeringLocked(to.ID)
 	return a.commandReceiptLocked(receipt), nil
 }

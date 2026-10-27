@@ -105,6 +105,12 @@ func (a *app) graphCatalog(conversationID string) (any, error) {
 		return nil, errors.New("Conversation is unavailable.")
 	}
 	p := *a.state.project(s.ProjectID)
+	var allowed []string
+	limited := false
+	if run := a.state.activeAutomation(conversationID); run != nil {
+		allowed = append([]string{}, run.Snapshot.Graphs...)
+		limited = true
+	}
 	a.mu.Unlock()
 	a.authoringMu.Lock()
 	catalog, err := loadAuthoring(p)
@@ -118,6 +124,9 @@ func (a *app) graphCatalog(conversationID string) (any, error) {
 	}
 	graphs := []map[string]any{}
 	for _, g := range catalog.Graphs {
+		if limited && !slicesContainsString(allowed, g.ID) {
+			continue
+		}
 		entry := map[string]any{"id": g.ID, "name": g.Definition.Name, "description": g.Definition.Description, "enabled": g.Definition.Enabled, "revision": g.Revision}
 		if node, ok := g.Definition.Nodes[g.Definition.InitialNode]; ok {
 			initial := map[string]any{"id": g.Definition.InitialNode, "type": node.Type, "name": node.Name, "description": ""}
@@ -347,6 +356,10 @@ func (a *app) invokeGraphActivity(ctx context.Context, owner string, raw json.Ra
 		a.mu.Unlock()
 		return nil, err
 	}
+	if !a.state.automationGraphAllowed(owner, args.GraphID) {
+		a.mu.Unlock()
+		return nil, errors.New("Graph is not enabled for this automation run.")
+	}
 	if err := validateGraphWorkspaceDecision(&a.state, owner, args.Workspace, false); err != nil {
 		a.mu.Unlock()
 		return nil, err
@@ -487,6 +500,9 @@ func (a *app) updateGraphActivity(owner string, raw json.RawMessage) (any, error
 		}
 		switch args.Action {
 		case "retry":
+			if !d.automationGraphAllowed(owner, activity.GraphID) {
+				return errors.New("Graph is not enabled for this automation run.")
+			}
 			if !validLinkedText(args.Correction, 16<<10) || !validLinkedText(args.Task, 128<<10) {
 				return errors.New("Retry requires correction (concrete corrective action) and task (self-contained instructions).")
 			}

@@ -22,7 +22,7 @@ export function MessageQueue({ session, disabled, onSnapshot, onInterrupt }: { s
     {session.queue?.map(message => <div className="message-queue-item" key={message.id}>
       <div className="message-queue-content"><small>{message.origin ? `${message.origin.kind === 'instruction' ? 'Instruction' : 'Initial prompt'} from ${message.origin.title} (${message.origin.sessionId}) · ` : ''}{labels[message.status]}</small><p>{message.text}</p>{message.error && <small className="form-error">{message.error}</small>}</div>
       <div className="message-queue-actions">
-        {message.status !== 'sending' && message.status !== 'interrupting' && <Button size="sm" disabled={disabled || !!pending} onClick={() => void update(message.id, true)}>Send now</Button>}
+        {session.automation?.status !== 'running' && message.status !== 'sending' && message.status !== 'interrupting' && <Button size="sm" disabled={disabled || !!pending} onClick={() => void update(message.id, true)}>Send now</Button>}
         <IconButton label="Remove queued message" disabled={disabled || !!pending || message.status === 'sending' || message.status === 'accepted' || message.status === 'interrupting'} onClick={() => void update(message.id, false)}><X /></IconButton>
       </div>
     </div>)}

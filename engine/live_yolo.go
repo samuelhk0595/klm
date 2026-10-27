@@ -10,7 +10,7 @@ func (p *adapter) captureNativeYOLO() bool {
 	defer p.app.mu.Unlock()
 	value := p.yolo
 	if s := p.app.state.session(p.id); s != nil {
-		value = s.YOLO
+		value = p.app.state.sessionYOLO(s)
 	}
 	p.turn.nativeYOLO, p.turn.nativeYOLOConfigured = value, true
 	return value
@@ -19,6 +19,10 @@ func (p *adapter) captureNativeYOLO() bool {
 func (a *app) changeSessionYOLO(ctx context.Context, id string, enabled bool) error {
 	a.mu.Lock()
 	s := a.state.session(id)
+	if a.state.activeAutomation(id) != nil {
+		a.mu.Unlock()
+		return controlError(409, "Automation run settings are read-only until the run ends.")
+	}
 	if err := ctx.Err(); err != nil {
 		a.mu.Unlock()
 		return err

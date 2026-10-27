@@ -16,6 +16,7 @@ import (
 )
 
 type turn struct {
+	automationRecoveryIDs []string
 	analyticsID           string
 	analyticsAnchor       time.Time           // Monotonic dispatch anchor; protected by app.mu.
 	analyticsEndCandidate time.Time           // Native idle observed before final reconciliation.
@@ -127,7 +128,8 @@ func runEngine(dir string) error {
 		return err
 	}
 	analyticsRecovered := recoverAnalytics(&state)
-	interrupted := interruptGraphState(&state, "Graph run interrupted by engine restart; execution was not replayed.") || analyticsRecovered
+	automationsRecovered := recoverAutomations(&state)
+	interrupted := interruptGraphState(&state, "Graph run interrupted by engine restart; execution was not replayed.") || analyticsRecovered || automationsRecovered
 	interruptedConsultations := map[string]string{}
 	for i := range state.Consultations {
 		c := &state.Consultations[i]
@@ -207,6 +209,11 @@ func runEngine(dir string) error {
 		}
 	}
 	a.indexMessageIDsLocked()
+	if len(a.state.AutomationRecoveries) > 0 {
+		if _, err := a.ensureGeneralSession(); err != nil {
+			return err
+		}
+	}
 	a.webhookWake = make(chan struct{}, 1)
 	a.webhookIngress = make(chan struct{}, 2)
 	a.indexWebhooksLocked()
@@ -234,6 +241,8 @@ func runEngine(dir string) error {
 	}
 	a.wg.Add(1)
 	go func() { defer a.wg.Done(); a.webhookWorker() }()
+	a.wg.Add(1)
+	go func() { defer a.wg.Done(); a.automationWorker() }()
 	a.wg.Add(1)
 	go func() { defer a.wg.Done(); a.checkpointStreamJournal() }()
 	a.wg.Add(1)

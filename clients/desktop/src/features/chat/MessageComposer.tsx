@@ -21,11 +21,12 @@ function recordingFilename(type: string) {
   return 'recording.webm';
 }
 
-export function MessageComposer({ onSend, onTranscription, draft, onDraftChange, projectId, disabled = false, running = false, onStop, modelControl, graphControl, placeholder = 'Message the agent' }: {
+export function MessageComposer({ onSend, onTranscription, draft, onDraftChange, projectId, disabled = false, running = false, steeringOnly = false, onStop, modelControl, graphControl, placeholder = 'Message the agent' }: {
   onSend: (draft: ComposerDraft, mode?: SendMode) => boolean | void; draft: ComposerDraft; onDraftChange: (draft: ComposerDraft) => void;
   onTranscription?: (text: string) => void;
   projectId?: string;
   disabled?: boolean; running?: boolean; onStop?: () => void;
+  steeringOnly?: boolean;
   modelControl?: ReactNode;
   graphControl?: ReactNode;
   placeholder?: string;
@@ -267,6 +268,6 @@ export function MessageComposer({ onSend, onTranscription, draft, onDraftChange,
       } else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(); }
     }} />
     {error && <p role="alert" className="form-error composer-error">{error}</p>}
-    <div className="composer-controls">{graphControl && <div className="composer-graph-control">{graphControl}</div>}<div className="composer-model-controls">{modelControl}{running && text.trim() && <Button size="sm" disabled={disabled} onClick={() => void send('interrupt')}>Send now</Button>}{running && onStop && <IconButton label="Stop response" variant="outline" onClick={onStop}><Square /></IconButton>}{onTranscription && <IconButton label={audioState === 'recording' ? 'Stop recording' : audioState === 'starting' ? 'Requesting microphone access' : audioState === 'transcribing' ? 'Transcribing audio' : 'Record audio'} aria-pressed={audioState === 'recording'} variant={audioState === 'recording' ? 'danger-soft' : 'ghost'} disabled={(disabled && audioState === 'idle') || audioState === 'starting' || audioState === 'transcribing'} className={`audio-record-button ${audioState === 'recording' ? 'is-recording' : ''}`} onClick={() => void toggleRecording()}>{audioState === 'recording' ? <Square /> : audioState !== 'idle' ? <LoaderCircle className="audio-spinner" /> : <Mic />}</IconButton>}{IS_MOBILE_HOST && audioState !== 'idle' && <IconButton label="Cancel audio" onClick={() => cancelMobileRecording()}><X /></IconButton>}{IS_MOBILE_HOST ? <span className={`mobile-send-slot ${mobileSendVisible ? 'is-visible' : ''}`} inert={!mobileSendVisible} aria-hidden={!mobileSendVisible}><span className="mobile-send-slide">{sendButton}</span></span> : sendButton}</div></div>
+    <div className="composer-controls">{graphControl && <div className="composer-graph-control">{graphControl}</div>}<div className="composer-model-controls">{modelControl}{!steeringOnly && running && text.trim() && <Button size="sm" disabled={disabled} onClick={() => void send('interrupt')}>Send now</Button>}{running && onStop && <IconButton label="Stop response" variant="outline" onClick={onStop}><Square /></IconButton>}{onTranscription && <IconButton label={audioState === 'recording' ? 'Stop recording' : audioState === 'starting' ? 'Requesting microphone access' : audioState === 'transcribing' ? 'Transcribing audio' : 'Record audio'} aria-pressed={audioState === 'recording'} variant={audioState === 'recording' ? 'danger-soft' : 'ghost'} disabled={(disabled && audioState === 'idle') || audioState === 'starting' || audioState === 'transcribing'} className={`audio-record-button ${audioState === 'recording' ? 'is-recording' : ''}`} onClick={() => void toggleRecording()}>{audioState === 'recording' ? <Square /> : audioState !== 'idle' ? <LoaderCircle className="audio-spinner" /> : <Mic />}</IconButton>}{IS_MOBILE_HOST && audioState !== 'idle' && <IconButton label="Cancel audio" onClick={() => cancelMobileRecording()}><X /></IconButton>}{IS_MOBILE_HOST ? <span className={`mobile-send-slot ${mobileSendVisible ? 'is-visible' : ''}`} inert={!mobileSendVisible} aria-hidden={!mobileSendVisible}><span className="mobile-send-slide">{sendButton}</span></span> : sendButton}</div></div>
   </form>;
 }

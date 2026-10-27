@@ -88,6 +88,7 @@ func (a *app) releasePendingWebhooks() {
 				emitted := maxWebhookTimestamp(e.ReceivedAt, at)
 				d.WebhookReleaseSequence++
 				d.WebhookReleases[p.EventID] = WebhookRelease{EventID: p.EventID, ReleaseSequence: d.WebhookReleaseSequence, EmittedAt: emitted}
+				automationWebhook(d, e)
 				delete(d.WebhookPending, p.EventID)
 			}
 			return nil

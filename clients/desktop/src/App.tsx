@@ -39,6 +39,7 @@ import { DesignSystem } from './DesignSystem';
 import { ProjectRail } from './features/projects/ProjectRail';
 import { ProjectDialog } from './features/projects/ProjectDialog';
 import { ProjectSettingsDialog, type ProjectSettingsSection } from './features/projects/ProjectSettingsDialog';
+import { StopAutomationDialog } from './features/automations/StopAutomationDialog';
 import { useActivityBoard } from './features/activity-board/useActivityBoard';
 import { SettingsDialog } from './features/settings/SettingsDialog';
 import { BackgroundPicker } from './features/settings/BackgroundPicker';
@@ -305,6 +306,7 @@ export function App() {
   const openingSide = useRef(new Set<string>());
   const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>({});
   const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(window.location.search).get('klm-library') === '1');
+  const [automationStop, setAutomationStop] = useState<{ resolve: (confirmed: boolean) => void }>();
   const shell = useRef<HTMLDivElement>(null);
   const readMainGeometry = useCallback(() => {
     const element = shell.current;
@@ -553,6 +555,13 @@ export function App() {
   }
   async function updateSession(target: Session, action: 'messages' | 'stop' | 'harness', body: (ComposerDraft & { sources?: SourceReference[]; mode?: SendMode }) | { harness: Harness['id'] } | Record<string, never>) {
     const id = target.id;
+    let stopBody: { automationRunId: string } | undefined;
+    if (action === 'stop' && target.automation?.status === 'running') {
+      if (automationStop) return false;
+      const confirmed = await new Promise<boolean>(resolve => setAutomationStop({ resolve }));
+      if (!confirmed) return false;
+      stopBody = { automationRunId: target.automation.runId };
+    }
     if (action === 'harness' && target.role === 'general_agent' && generalHarnessBlocked(target)) return false;
     if (action === 'stop') interruptSubmissions(id);
     if (action !== 'stop' && pending.current.has(id)) return false;
@@ -560,7 +569,7 @@ export function App() {
     if (action !== 'stop') setPendingSessions(current => ({ ...current, [id]: true }));
     setSessionErrors(current => ({ ...current, [id]: '' }));
     try {
-      const next = await request<SessionResponse>(`/api/sessions/${encodeURIComponent(id)}/${action}`, action === 'harness' ? 'PATCH' : 'POST', body);
+      const next = await request<SessionResponse>(`/api/sessions/${encodeURIComponent(id)}/${action}`, action === 'harness' ? 'PATCH' : 'POST', stopBody ?? body);
       setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [next], action === 'messages' ? 'mutation' : false) }));
       return true;
     } catch (error) {
@@ -640,6 +649,7 @@ export function App() {
     submissionTails.current.set(target.id, task);
   }
   function sendMessage(target: Session, draft: ComposerDraft, sources: SourceReference[], mode: SendMode = 'steer') {
+    if (target.automation?.status === 'running') mode = 'steer';
     if (target.role === 'general_agent' && pending.current.has(target.id)) return false;
     const message: LocalSubmission = { id: clientMessageId(), draft, sources, mode, status: 'sending' };
     setLocalMessages(current => ({ ...current, [target.id]: [...(current[target.id] ?? []), message] }));
@@ -872,7 +882,7 @@ export function App() {
     } catch (error) { return errorMessage(error); }
   }
 
-  const composerGraphControl = session && !generalConversation ? <GraphPicker key={session.id} graphs={catalogGraphs} value={selectedGraphId} selectedName={catalogSelectedGraph?.definition.name ?? selectedGraph?.definition.name} running={graphRunInProgress} disabled={!!selectingGraphs[session.id] || !session.graph} loading={catalogLoading} error={catalogError || catalog?.errors.join(' ')} onReload={() => void reloadCatalog().catch(() => {})} onChange={graphId => void chooseGraph(session.id, graphId)} /> : undefined;
+  const composerGraphControl = session && !generalConversation ? <GraphPicker key={session.id} graphs={catalogGraphs} value={selectedGraphId} selectedName={catalogSelectedGraph?.definition.name ?? selectedGraph?.definition.name} running={graphRunInProgress} disabled={session.automation?.status === 'running' || !!selectingGraphs[session.id] || !session.graph} loading={catalogLoading} error={catalogError || catalog?.errors.join(' ')} onReload={() => void reloadCatalog().catch(() => {})} onChange={graphId => void chooseGraph(session.id, graphId)} /> : undefined;
   const tabItems: { value: SessionTab; label: string; onClose?: () => void; closeLabel?: string }[] = [{ value: 'chat', label: 'Chat' }];
   if (selectedGraphId) tabItems.push({ value: 'graph', label: 'Graph' });
   for (const id of openSubagentIds) {
@@ -978,7 +988,7 @@ export function App() {
           {generalConversation && <GeneralHarnessPicker session={session} harnesses={harnesses} disabled={!!pendingSessions[session.id] || generalHarnessBlocked(session) || !!connectionError} onChange={harness => void updateSession(session, 'harness', { harness })} />}
           {generalView && !harnesses.some(harness => harness.id === session.harness && harness.available) && <p role="status" className="form-error">The selected harness is not installed.</p>}
           {!generalView && projectSessionArchived && <div className="archived-conversation-actions"><span>{currentTopic?.archived ? 'Topic archived' : 'Session archived'}</span><Button size="sm" onClick={async () => { if (currentTopic?.archived && project) { const failure = await patchTopic(project.id, currentTopic, { archived: false }); setSessionErrors(current => ({ ...current, [session.id]: failure ?? '' })); } else void patchSession(session, { archived: false }); }}>{currentTopic?.archived ? 'Restore topic' : 'Restore session'}</Button></div>}
-          <MessageComposer key={session.id} placeholder={overlaySession ? `Message ${session.title}` : undefined} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} onTranscription={text => setDrafts(current => {
+          <MessageComposer key={session.id} steeringOnly={session.automation?.status === 'running'} placeholder={overlaySession ? `Message ${session.title}` : undefined} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} onTranscription={text => setDrafts(current => {
             const draft = current[session.id] ?? { text: '', mentions: [] };
             const separator = !draft.text || draft.text.endsWith('\n\n') ? '' : draft.text.endsWith('\n') ? '\n' : '\n\n';
             return { ...current, [session.id]: { ...draft, text: `${draft.text}${separator}${text.trim()}` } };
@@ -1000,7 +1010,8 @@ export function App() {
     {!IS_DESKTOP && !IS_MOBILE_HOST && !focusMaximized && <FocusWindowResizeHandles onResizeEnd={saveMainGeometry} />}
     {addingProject !== null && <ProjectDialog initialFolder={addingProject} onSave={addProject} onClose={() => { navigation.current += 1; setAddingProject(null); }} />}
     {editingProject && <ProjectDialog key={`edit-project:${editingProject.id}`} initialFolder={editingProject.folder} project={editingProject} onSave={input => editProject(editingProject.id, input)} onClose={() => setEditingProject(null)} />}
-    {settingsProject && <ProjectSettingsDialog key={`${settingsProject.id}:${projectSettingsSection}`} project={settingsProject} initialSection={projectSettingsSection} tasks={tasksBoard} onSave={editProject} onRemove={removeProject} onClose={() => setProjectSettingsId('')} />}
+    {settingsProject && <ProjectSettingsDialog key={`${settingsProject.id}:${projectSettingsSection}`} project={settingsProject} sessions={engine.sessions} initialSection={projectSettingsSection} tasks={tasksBoard} onSave={editProject} onRemove={removeProject} onOpenSession={id => { const target = engine.sessions.find(s => s.id === id); if (target) { setProjectSettingsId(''); openSessionInProject(target); } }} onClose={() => setProjectSettingsId('')} />}
+    {automationStop && <StopAutomationDialog onDecision={confirmed => { const resolve = automationStop.resolve; setAutomationStop(undefined); resolve(confirmed); }} />}
     {creatingSession && createProject && <CreateSessionDialog project={createProject} harnesses={harnesses} topicId={creatingSession.topicId} onCreate={createSession} onClose={() => { navigation.current += 1; setCreatingSession(null); }} />}
     {creatingTopicProjectId && <TopicDialog key={`new-topic:${creatingTopicProjectId}`} onSave={input => createTopic(creatingTopicProjectId, input)} onClose={() => setCreatingTopicProjectId('')} />}
     {editingTopic && <TopicDialog key={editingTopic.topic.id} topic={editingTopic.topic} onSave={input => patchTopic(editingTopic.projectId, editingTopic.topic, input)} onClose={() => setEditingTopic(null)} />}

@@ -7,6 +7,7 @@ import { useAnalytics } from './useAnalytics';
 import { compact, coverageTitle, dateLabel, hours, metricText, weekdays } from './format';
 import type { Metric, SeriesBucket, Totals } from './analyticsApi';
 import './analytics.css';
+import { DEFAULT_ENGINE_TIME_ZONE, getEngineSettings } from '../automations/api';
 
 type Tab = 'overview' | 'topics' | 'graphs';
 type ChartMetric = 'workingMs' | 'tokens';
@@ -102,7 +103,8 @@ export function AnalyticsPage({ visible, projects }: { visible: boolean; project
   const [compare, setCompare] = useState(true);
   const [project, setProject] = useState('all');
   const [metric, setMetric] = useState<ChartMetric>('workingMs');
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const [timeZone, setTimeZone] = useState(DEFAULT_ENGINE_TIME_ZONE);
+  useEffect(() => { const load = () => { void getEngineSettings().then(value => setTimeZone(value.timeZone)).catch(() => {}); }; load(); window.addEventListener('engine-time-zone-changed', load); return () => window.removeEventListener('engine-time-zone-changed', load); }, []);
   useEffect(() => { if (project !== 'all' && !projects.some(item => item.id === project)) setProject('all'); }, [project, projects]);
   const feed = useAnalytics(visible, { period, compare, project, timeZone });
   const data = feed.data;

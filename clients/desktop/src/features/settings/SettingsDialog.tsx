@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { BookOpen, KeyRound, MessageSquare, Mic, Plus, Trash2, X } from 'lucide-react';
 import { LibraryPanel } from '../library/LibraryPanel';
+import { EngineTimeSettings } from '../automations/EngineTimeSettings';
 import { ConnectedDevices } from './ConnectedDevices';
 import { Button, IconButton } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
@@ -101,6 +102,7 @@ export function SettingsDialog({ onClose, onDesignSystem, onGeneralAgent }: { on
             <div className="dialog-actions"><Button variant="primary" type="submit">Connect</Button></div>
           </form>
           <div className="settings-design-system"><span>Interface components and tokens</span><Button onClick={onDesignSystem}>Open design system</Button></div>
+          <EngineTimeSettings />
         </section> : <section aria-labelledby="transcription-settings-title">
           <div className="settings-panel-title"><div><h3 id="transcription-settings-title">Transcription</h3>{settings.apiKeyConfigured && !removeAPIKey && <span className="settings-configured"><KeyRound />API key configured</span>}</div>{loading && <span className="muted">Loading...</span>}</div>
           <form className="settings-form transcription-settings-form" onSubmit={saveTranscription}>
