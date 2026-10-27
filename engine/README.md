@@ -1499,10 +1499,12 @@ native inheritance is validated; engine sessions/graph nodes remain independent.
 OpenCode/Codex rebuild their managed process at complete engine-turn boundaries,
 resuming the same native ID and directory. Successful ordinary OpenCode and Codex
 turns keep their session runtime active until the existing 40-minute idle timeout
-(while no workload remains), or the next turn. Before that next turn captures its
-selection, the old process container and gateways are closed; the old managed
-profile is never reused. This preserves the active LED and Happening now entry
-between turns. Stop during an active turn shuts down its runtime; Stop while already
+(while no workload remains). Before the next turn captures its selection, only
+the old harness/profile and gateways are closed; the session process container and
+its workload survive. The old managed profile and gateway credentials are never
+reused. Existing workload is recorded before marking the new harness infrastructure,
+so a carried browser/server still prevents idle expiry. This preserves the active
+LED and Happening now entry between turns. Stop during an active turn shuts down its runtime; Stop while already
 idle only pauses queued input. Failed/cancelled turns and graph nodes retain their
 shutdown paths. OpenCode retains its idle server. Codex requests EOF and waits for
 native shutdown to persist the transcript, then releases that app-server transport

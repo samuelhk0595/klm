@@ -250,10 +250,19 @@ func (o *ownedProcess) Drained() bool {
 	return o.group.drained
 }
 
-func (g *runtimeProcessGroup) BeginTurn() {
+func (g *runtimeProcessGroup) BeginTurn() error {
 	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed {
+		return errors.New("Owned harness runtime closed before the next turn.")
+	}
+	active, err := g.activeProcessesLocked()
+	if err != nil {
+		return err
+	}
+	g.updateWorkloadLocked(active)
 	g.turnActive = true
-	g.mu.Unlock()
+	return nil
 }
 
 func (g *runtimeProcessGroup) EndTurn() {
@@ -303,16 +312,7 @@ func (g *runtimeProcessGroup) MarkInfrastructure() {
 	}
 }
 
-func (g *runtimeProcessGroup) HasWorkload() bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.closed || g.turnActive {
-		return false
-	}
-	active, err := g.activeProcessesLocked()
-	if err != nil {
-		return true
-	}
+func (g *runtimeProcessGroup) updateWorkloadLocked(active map[uintptr]bool) {
 	for pid := range g.infrastructure {
 		if !active[pid] {
 			delete(g.infrastructure, pid)
@@ -328,6 +328,19 @@ func (g *runtimeProcessGroup) HasWorkload() bool {
 			g.workload[pid] = true
 		}
 	}
+}
+
+func (g *runtimeProcessGroup) HasWorkload() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed || g.turnActive {
+		return false
+	}
+	active, err := g.activeProcessesLocked()
+	if err != nil {
+		return true
+	}
+	g.updateWorkloadLocked(active)
 	return len(g.workload) > 0
 }
 

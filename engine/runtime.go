@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os/exec"
 	"sync"
 	"time"
@@ -71,22 +72,37 @@ func (a *app) beginSessionRuntime(id string) (*sessionRuntime, error) {
 
 func (r *sessionRuntime) beginTurn() (bool, error) {
 	r.mu.Lock()
-	if r.closed || r.refreshBeforeTurn {
+	if r.closed {
 		r.mu.Unlock()
-		// Close the old process, Job and gateways before capturing or exposing a
-		// new turn's selection, including an idle shutdown already in progress.
-		// Shutdown errors must prevent the replacement.
 		return false, r.shutdown()
 	}
-	defer r.mu.Unlock()
+	if r.group != nil {
+		// Capture carried workload before the new harness can be classified as
+		// infrastructure, even if the idle watcher has not run between turns.
+		if err := r.group.BeginTurn(); err != nil {
+			r.mu.Unlock()
+			return false, err
+		}
+	}
 	if r.cancel != nil {
 		r.cancel()
 		r.cancel = nil
 	}
 	r.turnActive = true
-	if r.group != nil {
-		r.group.BeginTurn()
+	if r.refreshBeforeTurn {
+		// Rotate only turn-scoped transports/profiles. The session Job also owns
+		// user workloads (browsers, servers, etc.) and must survive this boundary.
+		resources := runtimeShutdown{bridge: r.bridge, interactive: r.interactive, openCode: r.openCode}
+		_ = closeRuntimeResources(resources)
+		if resources.openCode != nil && resources.openCode.Alive() {
+			r.mu.Unlock()
+			return false, errors.Join(errors.New("Could not retire the previous OpenCode server."), r.shutdown())
+		}
+		r.bridge, r.interactive, r.openCode = nil, nil, nil
+		r.openCodeKey = ""
+		r.refreshBeforeTurn = false
 	}
+	r.mu.Unlock()
 	return true, nil
 }
 
@@ -102,8 +118,12 @@ func (r *sessionRuntime) prepare(cmd *exec.Cmd) (*ownedProcess, error) {
 			r.mu.Unlock()
 			return nil, err
 		}
+		if err := group.BeginTurn(); err != nil {
+			_ = group.Close()
+			r.mu.Unlock()
+			return nil, err
+		}
 		r.group = group
-		r.group.BeginTurn()
 	}
 	group := r.group
 	r.mu.Unlock()

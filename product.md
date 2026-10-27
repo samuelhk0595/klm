@@ -673,10 +673,12 @@ same native history; Codex waits for EOF shutdown before retiring it so the nati
 transcript can flush. Successful ordinary OpenCode and Codex turns retain their
 session runtime, keeping the session active and visible in Happening now. OpenCode
 retains its idle server; Codex releases its exited app-server but retains the owned
-process container and unbound gateway. That managed runtime is retired before the
-next turn captures its selection; Stop during an active turn and the existing
-40-minute idle timeout also retire it. Graph nodes retain their immediate shutdown
-rules. Changing selection during execution still waits for the next
+process container and unbound gateway. Before the next turn captures its selection,
+only the managed harness/profile and gateways are retired. The session process
+container and its workloads (including browsers and development servers) survive
+ordinary turn boundaries. Stop during an active turn and the existing 40-minute
+timeout with no remaining workload retire the runtime. Graph nodes retain their
+immediate shutdown rules. Changing selection during execution still waits for the next
 complete turn. Other versions/configuration variants fail preparation explicitly.
 The mandatory general-agent installation guidance remains independent of external
 selection and is delivered as engine-owned role context on all three harnesses.

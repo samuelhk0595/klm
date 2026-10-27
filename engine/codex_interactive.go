@@ -97,8 +97,8 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 	defer func() {
 		if p.runtime != nil && p.capabilities != nil {
 			// Native EOF/flush is separate from session disposal. After success,
-			// retain the owned container and unbound gateway until the next turn
-			// or idle expiry, including any owned background workload.
+			// retain the owned container and background workload across turns.
+			// Only turn-scoped transports/gateways rotate before the next turn.
 			if err != nil || p.failed || !p.completed || p.turn.ctx.Err() != nil || p.processDrainFailed {
 				shutdownErr := p.runtime.shutdown()
 				p.processesDrained = shutdownErr == nil && !p.processDrainFailed

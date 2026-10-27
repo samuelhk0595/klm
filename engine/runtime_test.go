@@ -25,6 +25,12 @@ func TestOpenCodeRuntimeTurnBoundary(t *testing.T) {
 				t.Fatal(err)
 			}
 			first.group = group
+			p := &adapter{app: a, turn: &turn{ctx: ctx}}
+			bridge, err := first.linkedBridge(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bridge.unbind(p)
 			// Exercise runtime ownership without starting a harness. Its process
 			// lifecycle is covered separately by the owned-process tests.
 			if err := first.retainOpenCode(nil, "captured-profile", perTurn); err != nil {
@@ -38,12 +44,19 @@ func TestOpenCodeRuntimeTurnBoundary(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if second != first || !second.active() || second.group != group || group.closed {
+				t.Fatal("next turn replaced the session's process container")
+			}
+			nextBridge, err := second.linkedBridge(p)
+			if err != nil {
+				t.Fatal(err)
+			}
 			if perTurn {
-				if second == first || first.active() || !group.closed {
-					t.Fatal("new managed turn reused its previous process container")
+				if nextBridge == bridge || nextBridge.token == bridge.token || nextBridge.libraryToken == bridge.libraryToken || second.openCodeKey != "" {
+					t.Fatal("managed turn reused its old profile or gateway credentials")
 				}
-			} else if second != first || !second.active() {
-				t.Fatal("reusable runtime was unnecessarily replaced")
+			} else if nextBridge != bridge {
+				t.Fatal("reusable gateway was unnecessarily replaced")
 			}
 			if err := second.shutdown(); err != nil {
 				t.Fatal(err)

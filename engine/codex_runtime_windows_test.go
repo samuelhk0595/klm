@@ -50,7 +50,7 @@ func TestCodexRuntimeRetainedAfterNativeEOF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next == r || !group.closed || !group.drained || r.active() {
-		t.Fatal("next turn did not retire the old managed runtime")
+	if next != r || group.closed || !r.active() || r.interactive != nil || r.refreshBeforeTurn {
+		t.Fatal("next turn did not preserve the container while retiring the native profile")
 	}
 }
