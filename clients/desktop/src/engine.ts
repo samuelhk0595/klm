@@ -239,6 +239,7 @@ export async function pickDirectory(signal?: AbortSignal): Promise<string | null
   return result.path;
 }
 
+export const getEngineVersion = () => request<{ version: string }>('/api/version');
 export const getTranscriptionSettings = () => request<TranscriptionSettings>('/api/transcription/settings');
 export const updateTranscriptionSettings = (settings: TranscriptionSettingsUpdate) => request<TranscriptionSettings>('/api/transcription/settings', 'PATCH', settings);
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { BookOpen, KeyRound, MessageSquare, Mic, Plus, Server, Trash2, X } from 'lucide-react';
+import { BookOpen, Info, KeyRound, MessageSquare, Mic, Plus, Server, Trash2, X } from 'lucide-react';
 import { LibraryPanel } from '../library/LibraryPanel';
+import { AboutSettings } from './AboutSettings';
 import { ConnectedDevices } from './ConnectedDevices';
 import { EngineAccessSettings } from './EngineAccessSettings';
 import { EngineTimeSettings } from '../automations/EngineTimeSettings';
@@ -9,7 +10,7 @@ import { Input } from '../../design-system/Input';
 import { ENGINE_URL, getTranscriptionSettings, updateTranscriptionSettings, type TranscriptionSettings } from '../../engine';
 import { configureEngineURL } from '../../platform';
 
-type SettingsSection = 'chat' | 'transcription' | 'library' | 'devices' | 'engine';
+type SettingsSection = 'chat' | 'transcription' | 'library' | 'devices' | 'about' | 'engine';
 
 const emptyTranscription: TranscriptionSettings = {
   apiKeyConfigured: false,
@@ -92,10 +93,11 @@ export function SettingsDialog({ onClose, onDesignSystem, onGeneralAgent }: { on
         <button type="button" className={section === 'engine' ? 'is-active' : ''} aria-current={section === 'engine' ? 'page' : undefined} onClick={() => setSection('engine')}><Server />Engine</button>
         <button type="button" className={section === 'transcription' ? 'is-active' : ''} aria-current={section === 'transcription' ? 'page' : undefined} onClick={() => setSection('transcription')}><Mic />Transcription</button>
         <button type="button" className={section === 'library' ? 'is-active' : ''} aria-current={section === 'library' ? 'page' : undefined} onClick={() => setSection('library')}><BookOpen />Library</button>
+        <button type="button" className={section === 'about' ? 'is-active' : ''} aria-current={section === 'about' ? 'page' : undefined} onClick={() => setSection('about')}><Info />About</button>
         <button type="button" className={section === 'devices' ? 'is-active' : ''} aria-current={section === 'devices' ? 'page' : undefined} onClick={() => setSection('devices')}><KeyRound />Connected devices</button>
       </nav>
       <div className="settings-panel">
-        {section === 'engine' ? <EngineAccessSettings /> : section === 'devices' ? <ConnectedDevices /> : section === 'library' ? <LibraryPanel onGeneralAgent={onGeneralAgent} /> : section === 'chat' ? <section aria-labelledby="chat-settings-title">
+        {section === 'engine' ? <EngineAccessSettings /> : section === 'devices' ? <ConnectedDevices /> : section === 'about' ? <AboutSettings /> : section === 'library' ? <LibraryPanel onGeneralAgent={onGeneralAgent} /> : section === 'chat' ? <section aria-labelledby="chat-settings-title">
           <h3 id="chat-settings-title">Chat</h3>
           <form className="engine-settings-form settings-form" onSubmit={connectEngine}>
             <label htmlFor="engine-url">Engine URL</label>

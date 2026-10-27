@@ -25,7 +25,7 @@ if (-not (Test-Path -LiteralPath $root)) { throw 'Repository root not found.' }
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 $output = Join-Path $dist 'engine'
 New-Item -ItemType Directory -Path $output -Force | Out-Null
-& go -C (Join-Path $root 'engine') build -trimpath -o (Join-Path $output 'klm.exe') .
+& go -C (Join-Path $root 'engine') build -trimpath -ldflags "-X main.engineVersion=$Version" -o (Join-Path $output 'klm.exe') .
 if ($LASTEXITCODE -ne 0) { throw 'Engine build failed.' }
 Copy-Item -LiteralPath (Join-Path $root 'engine\prompts') -Destination $output -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $root 'engine\skills') -Destination $output -Recurse -Force

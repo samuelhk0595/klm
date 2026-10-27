@@ -345,6 +345,7 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 | Method | Path | Body / response |
 | --- | --- | --- |
 | GET | `/api/health` | `{status:"ok",version:2,runningSessions:number,activeGraphRuns:number}`; 503 on persistence failure |
+| GET | `/api/version` | `{version:string}`; running engine release version, or `development` for unversioned local builds |
 | GET | `/api/state` | `{projects:Project[],sessions:Session[],harnesses:Harness[]}` |
 | POST | `/api/projects` | `{name,folder,icon}` -> 201 Project |
 | PATCH | `/api/projects/{id}` | `{name?,icon?}` -> 200 Project |
