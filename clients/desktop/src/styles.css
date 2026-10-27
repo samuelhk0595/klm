@@ -37,6 +37,10 @@ body { background-color: var(--color-canvas); background-image: var(--gradient-c
 .topic-color-green { --topic-color: var(--topic-green); }
 .topic-color-amber { --topic-color: var(--topic-amber); }
 .topic-color-rose { --topic-color: var(--topic-rose); }
+.topic-color-cyan { --topic-color: var(--topic-cyan); }
+.topic-color-teal { --topic-color: var(--topic-teal); }
+.topic-color-orange { --topic-color: var(--topic-orange); }
+.topic-color-red { --topic-color: var(--topic-red); }
 .topic-group { position: relative; margin: 8px 0; border: 1px solid transparent; border-left: 5px solid var(--topic-color, var(--color-border)); border-radius: var(--radius-sm); }
 .topic-group.is-dragging { opacity: .45; }
 .topic-group.topic-drop-inside { outline: 2px solid var(--color-accent); outline-offset: 1px; }

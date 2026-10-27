@@ -50,7 +50,7 @@ func (d *diskState) topicArchived(s *Session) bool {
 
 func validTopicColor(color string) bool {
 	switch color {
-	case "neutral", "blue", "purple", "green", "amber", "rose":
+	case "neutral", "blue", "purple", "green", "amber", "rose", "cyan", "teal", "orange", "red":
 		return true
 	}
 	return false
@@ -178,8 +178,9 @@ func (p *adapter) setSessionTopic(raw json.RawMessage) (any, error) {
 
 func (a *app) createTopic(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name  string `json:"name"`
-		Color string `json:"color"`
+		Name      string `json:"name"`
+		Color     string `json:"color"`
+		SessionID string `json:"sessionId"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -204,14 +205,37 @@ func (a *app) createTopic(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "Project not found.")
 		return
 	}
+	if body.SessionID != "" {
+		s := a.state.session(body.SessionID)
+		if s == nil || s.ProjectID != projectID {
+			fail(w, 404, "Session not found in this project.")
+			return
+		}
+		if err := validateSessionTopicChange(&a.state, s); err != nil {
+			failSessionControl(w, err)
+			return
+		}
+	}
 	topic := Topic{ID: newID(), Name: name, Color: body.Color, CreatedAt: now()}
 	order := append([]string{topic.ID}, orderedTopicIDs(&a.state, p)...)
 	if err := a.commitLocked(func(d *diskState) {
 		project := d.project(projectID)
 		project.Topics = append(project.Topics, topic)
 		project.TopicOrder = order
+		if body.SessionID != "" {
+			s := d.session(body.SessionID)
+			s.TopicID = topic.ID
+			s.UpdatedAt = now()
+		}
 	}); err != nil {
 		fail(w, 503, err.Error())
+		return
+	}
+	if body.SessionID != "" {
+		respond(w, 201, struct {
+			Project
+			Session *SessionUpdate `json:"session"`
+		}{*a.state.project(projectID), a.currentSessionUpdateLocked(body.SessionID)})
 		return
 	}
 	respond(w, 201, *a.state.project(projectID))
@@ -323,7 +347,7 @@ func orderedTopicIDs(d *diskState, p *Project) []string {
 	return ids
 }
 
-func validateSessionTopicMove(d *diskState, s *Session, topicID string) error {
+func validateSessionTopicChange(d *diskState, s *Session) error {
 	if s == nil || s.Role != "" || s.ParentID != "" || s.GraphRunID != "" {
 		return controlError(400, "Only normal top-level sessions can change topic.")
 	}
@@ -334,7 +358,14 @@ func validateSessionTopicMove(d *diskState, s *Session, topicID string) error {
 	if d.conversationArchived(s) {
 		return controlError(409, "Restore the session and its topic before moving it.")
 	}
-	target := p.topic(topicID)
+	return nil
+}
+
+func validateSessionTopicMove(d *diskState, s *Session, topicID string) error {
+	if err := validateSessionTopicChange(d, s); err != nil {
+		return err
+	}
+	target := d.project(s.ProjectID).topic(topicID)
 	if target == nil || target.Archived {
 		return controlError(400, "Choose an existing active topic in the same project.")
 	}

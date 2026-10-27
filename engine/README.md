@@ -291,7 +291,7 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 | PATCH | `/api/projects/{id}` | `{name?,icon?}` -> 200 Project |
 | DELETE | `/api/projects/{id}` | `{removed:true}`; hides the project, preserving its files and saved history; 409 while a session is running |
 | PATCH | `/api/projects/{id}/topics/{topicId}` | `{name?,color?,archived?,position?:{beforeId:string}}` -> 200 canonical Project; empty beforeId places an active topic last |
-| POST | `/api/projects/{id}/topics` | `{name,color?}` -> 201 canonical Project; creates an empty topic first in the saved order, color defaults to neutral |
+| POST | `/api/projects/{id}/topics` | `{name,color?,sessionId?}` -> 201 canonical Project; creates a topic first in the saved order, color defaults to neutral. Optional same-project active normal `sessionId` assigns the chat atomically and adds `session:SessionUpdate` to the response. Without it, creates an empty topic. |
 | POST / PATCH | `/api/projects/{id}/folders` | 410; visual folders were replaced by persistent topics |
 | GET | `/api/projects/{id}/paths?q=...` | `{paths:[{path,kind:"file"\|"directory"}],partial:boolean}`; project-relative paths |
 | POST | `/api/sessions` | `{projectId,title,harness,model?,topicId?}` -> 201 SessionUpdate; omitted topicId starts unassigned, explicit topicId must be an active topic in that project; legacy workspace accepts only empty/Ungrouped |
@@ -942,7 +942,7 @@ type Project = {
   icon: string
   folders: string[]
   archivedFolders: string[]
-  topics: { id: string; name: string; color: 'neutral' | 'blue' | 'purple' | 'green' | 'amber' | 'rose'; createdAt: string; archived?: boolean }[]
+  topics: { id: string; name: string; color: 'neutral' | 'blue' | 'purple' | 'green' | 'amber' | 'rose' | 'cyan' | 'teal' | 'orange' | 'red'; createdAt: string; archived?: boolean }[]
   topicOrder?: string[] // persisted manual order; new unpositioned topics appear first
 }
 
@@ -1287,7 +1287,8 @@ Validation and semantics:
 - Project and topic names are trimmed, 1-60 Unicode characters, with no control
   characters. Topics have stable project-scoped IDs; equal names never merge.
   New projects start with no topics or default folders. Topic colors are predefined
-  keys, initially neutral; they are not free RGB values or filesystem directories.
+  keys (neutral, blue, cyan, teal, green, purple, rose, red, orange, amber), initially
+  neutral; they are not free RGB values or filesystem directories.
 - Project `folder` must be an existing absolute directory, checked again before
   every execution. Processes always use that directory as their working directory.
 - `icon` may be empty. Otherwise it must be a `data:image/png;base64,` URL, at most

@@ -79,7 +79,16 @@ function orderSessionSnapshot(current: Session[], incoming: EngineSnapshot['sess
   return [...incoming.flatMap(session => byId.get(session.id) ?? []), ...merged.filter(session => !incomingIds.has(session.id))];
 }
 
-type WorkspaceNavigation = { activeProjectId: string; selectedSessions: Record<string, string>; openSideSessions: string[]; collapsedTopics: Record<string, string[]>; collapsedArchivedProjects: string[]; generalOpen?: boolean };
+type TopicCollapseState = Record<string, boolean>;
+type WorkspaceNavigation = { activeProjectId: string; selectedSessions: Record<string, string>; openSideSessions: string[]; collapsedTopics: Record<string, TopicCollapseState | string[]>; collapsedArchivedProjects: string[]; generalOpen?: boolean };
+
+function topicCollapseState(navigation: WorkspaceNavigation, project: Pick<Project, 'id' | 'topics'>): TopicCollapseState {
+  const saved = navigation.collapsedTopics[project.id];
+  if (!Array.isArray(saved)) return saved ?? {};
+  // Legacy lists implicitly expanded every group not listed as collapsed.
+  const keys = ['', ...(project.topics ?? []).map(topic => topic.id)];
+  return Object.fromEntries(keys.flatMap(id => [id, `archived:${id}`]).map(key => [key, saved.includes(key)]));
+}
 const navigationStorageKey = `klm.workspace-navigation.v1:${ENGINE_URL}`;
 
 function readWorkspaceNavigation(): WorkspaceNavigation {
@@ -95,7 +104,11 @@ function readWorkspaceNavigation(): WorkspaceNavigation {
         ? Object.fromEntries(Object.entries(value.selectedSessions).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {},
       openSideSessions: Array.isArray(value.openSideSessions) ? [...new Set(value.openSideSessions.filter((id): id is string => typeof id === 'string'))] : [],
       collapsedTopics: value.collapsedTopics && typeof value.collapsedTopics === 'object' && !Array.isArray(value.collapsedTopics)
-        ? Object.fromEntries(Object.entries(value.collapsedTopics).flatMap(([id, topics]) => Array.isArray(topics) ? [[id, [...new Set(topics.filter((topic): topic is string => typeof topic === 'string'))]]] : [])) : {},
+        ? Object.fromEntries(Object.entries(value.collapsedTopics).flatMap(([id, topics]) => {
+          if (Array.isArray(topics)) return [[id, topics.filter((topic): topic is string => typeof topic === 'string')]] as [string, TopicCollapseState | string[]][];
+          if (topics && typeof topics === 'object') return [[id, Object.fromEntries(Object.entries(topics).filter(([, collapsed]) => typeof collapsed === 'boolean'))]] as [string, TopicCollapseState | string[]][];
+          return [];
+        })) : {},
       collapsedArchivedProjects: Array.isArray(value.collapsedArchivedProjects) ? [...new Set(value.collapsedArchivedProjects.filter((id): id is string => typeof id === 'string'))] : [],
     };
   } catch { return fallback; }
@@ -211,7 +224,17 @@ export function App() {
   const chatView = view === 'chat' || generalView;
   const [generalError, setGeneralError] = useState('');
   const [generalRetry, setGeneralRetry] = useState(0);
-  const { activeProjectId, selectedSessions, openSideSessions, collapsedTopics, collapsedArchivedProjects } = workspaceNavigation;
+  const { activeProjectId, selectedSessions, openSideSessions, collapsedArchivedProjects } = workspaceNavigation;
+  useEffect(() => {
+    if (!loaded) return;
+    setWorkspaceNavigation(current => {
+      const legacyProjects = projects.filter(project => Array.isArray(current.collapsedTopics[project.id]));
+      if (!legacyProjects.length) return current;
+      const collapsedTopics = { ...current.collapsedTopics };
+      for (const project of legacyProjects) collapsedTopics[project.id] = topicCollapseState(current, project);
+      return { ...current, collapsedTopics };
+    });
+  }, [loaded, projects]);
   const [addingProject, setAddingProject] = useState<string | null>(null);
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [projectSettingsId, setProjectSettingsId] = useState('');
@@ -222,6 +245,11 @@ export function App() {
   const [renamingSession, setRenamingSession] = useState<Session | null>(null);
   const [editingTopic, setEditingTopic] = useState<{ projectId: string; topic: Topic } | null>(null);
   const [creatingTopicProjectId, setCreatingTopicProjectId] = useState('');
+  const [choosingTopicSessionId, setChoosingTopicSessionId] = useState('');
+  const choosingTopicSession = sessions.find(item => item.id === choosingTopicSessionId && !item.role && !item.parentId);
+  const choosingTopicProject = projects.find(item => item.id === choosingTopicSession?.projectId);
+  const canChooseTopic = !!choosingTopicSession && !!choosingTopicProject && !choosingTopicSession.archived && !topicArchived(choosingTopicProject, choosingTopicSession);
+  useEffect(() => { if (choosingTopicSessionId && !canChooseTopic) setChoosingTopicSessionId(''); }, [choosingTopicSessionId, canChooseTopic]);
   const project = projects.find(item => item.id === activeProjectId) ?? projects[0];
   const projectSessions = sessions.filter(item => item.projectId === project?.id && !item.parentId && item.role !== 'graph_node');
   const visibleProjectSessions = projectSessions.filter(item => !item.archived && !topicArchived(project, item)).sort(newestSessionFirst);
@@ -766,7 +794,7 @@ export function App() {
     setWorkspaceNavigation(current => ({
       ...current, activeProjectId: owner.id,
       selectedSessions: { ...current.selectedSessions, [owner.id]: target.id },
-      collapsedTopics: { ...current.collapsedTopics, [owner.id]: (current.collapsedTopics[owner.id] ?? []).filter(topic => topic !== topicKey(target)) },
+      collapsedTopics: { ...current.collapsedTopics, [owner.id]: { ...topicCollapseState(current, owner), [topicKey(target)]: false } },
     }));
     setSessionTabs(current => ({ ...current, [target.id]: 'chat' }));
     setOverlaySessionId(''); setSidebarOpen(false); setView('chat');
@@ -858,20 +886,36 @@ export function App() {
       const created = 'summary' in next ? next.summary : next;
       setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [next]) }));
       if (navigation.current === selection) {
-        setWorkspaceNavigation(current => ({ ...current, activeProjectId: created.projectId, selectedSessions: { ...current.selectedSessions, [created.projectId]: created.id }, collapsedTopics: { ...current.collapsedTopics, [created.projectId]: (current.collapsedTopics[created.projectId] ?? []).filter(id => id !== (created.topicId ?? '')) } }));
+        setWorkspaceNavigation(current => ({ ...current, activeProjectId: created.projectId, selectedSessions: { ...current.selectedSessions, [created.projectId]: created.id }, collapsedTopics: { ...current.collapsedTopics, [created.projectId]: { ...topicCollapseState(current, projects.find(project => project.id === created.projectId) ?? { id: created.projectId, topics: [] }), [created.topicId ?? '']: false } } }));
         setMobileNavigationOpen(false);
         setView('chat');
       }
       return null;
     } catch (error) { return errorMessage(error); }
   }
-  async function createTopic(projectId: string, input: Pick<Topic, 'name' | 'color'>): Promise<string | null> {
+  async function chooseSessionTopic(target: Session, topicId: string): Promise<string | null> {
+    const failure = await patchSession(target, { topicId });
+    const owner = projects.find(item => item.id === target.projectId);
+    if (!failure && owner) setWorkspaceNavigation(current => ({ ...current, collapsedTopics: { ...current.collapsedTopics, [owner.id]: { ...topicCollapseState(current, owner), [topicId]: false } } }));
+    return failure;
+  }
+  async function createTopic(projectId: string, input: Pick<Topic, 'name' | 'color'>, target?: Session): Promise<string | null> {
+    if (target && pending.current.has(target.id)) return 'Another session update is still in progress.';
+    if (target) { pending.current.add(target.id); setPendingSessions(current => ({ ...current, [target.id]: true })); }
     try {
-      const next = await request<Project>(`/api/projects/${encodeURIComponent(projectId)}/topics`, 'POST', input);
+      const { session: assignedSession, ...next } = await request<Project & { session?: SessionResponse }>(`/api/projects/${encodeURIComponent(projectId)}/topics`, 'POST', { ...input, ...(target ? { sessionId: target.id } : {}) });
       projectRevision.current += 1;
-      setEngine(current => ({ ...current, projects: current.projects.map(item => item.id === projectId ? next : item) }));
+      setEngine(current => ({ ...current, projects: current.projects.map(item => item.id === projectId ? next : item), sessions: assignedSession ? mergeSessions(current.sessions, [assignedSession]) : current.sessions }));
+      if (assignedSession) {
+        const assigned = 'summary' in assignedSession ? assignedSession.summary : assignedSession;
+        if (assigned.topicId) {
+          const topicId = assigned.topicId;
+          setWorkspaceNavigation(current => ({ ...current, collapsedTopics: { ...current.collapsedTopics, [projectId]: { ...topicCollapseState(current, next), [topicId]: false } } }));
+        }
+      }
       return null;
     } catch (error) { return errorMessage(error); }
+    finally { if (target) { pending.current.delete(target.id); setPendingSessions(current => ({ ...current, [target.id]: false })); } }
   }
   async function patchTopic(projectId: string, topic: Topic, input: Partial<Pick<Topic, 'name' | 'color' | 'archived'>> & { position?: { beforeId: string } }): Promise<string | null> {
     try {
@@ -932,8 +976,8 @@ export function App() {
   >
     <ProjectRail projects={projects} sessions={sessions} activeId={boardView ? boardProjectId : generalView ? '' : project?.id ?? ''} generalActive={generalView} onGeneralAgent={() => { navigation.current += 1; setOverlaySessionId(''); setSidebarOpen(false); setMobileProjectRailOpen(false); setView('general'); }} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onReorder={reorderProject} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />
     {!generalView && sidebarOpen && <button className="panel-backdrop" aria-label="Close side panel" onClick={() => setSidebarOpen(false)} />}
-    {!generalView && !boardView && project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} collapsed={collapsedTopics[project.id] ?? []} archivedCollapsed={collapsedArchivedProjects.includes(project.id)}
-      onCollapsedChange={topics => setWorkspaceNavigation(current => ({ ...current, collapsedTopics: { ...current.collapsedTopics, [project.id]: typeof topics === 'function' ? topics(current.collapsedTopics[project.id] ?? []) : topics } }))}
+    {!generalView && !boardView && project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} collapsed={topicCollapseState(workspaceNavigation, project)} archivedCollapsed={collapsedArchivedProjects.includes(project.id)}
+      onCollapsedChange={topics => setWorkspaceNavigation(current => ({ ...current, collapsedTopics: { ...current.collapsedTopics, [project.id]: typeof topics === 'function' ? topics(topicCollapseState(current, project)) : topics } }))}
       onArchivedCollapsedChange={collapsed => setWorkspaceNavigation(current => ({ ...current, collapsedArchivedProjects: collapsed ? [...new Set([...current.collapsedArchivedProjects, project.id])] : current.collapsedArchivedProjects.filter(id => id !== project.id) }))}
       onNew={newSession} onRename={setRenamingSession} onEditTopic={topic => setEditingTopic({ projectId: project.id, topic })}
       onCreateTopic={() => setCreatingTopicProjectId(project.id)}
@@ -955,7 +999,7 @@ export function App() {
       {connectionError && <div role="alert" className="storage-error">{connectionError} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}
       {boardView && <Suspense fallback={<p role="status">Loading tasks…</p>}><ActivityBoardPage projects={projects} projectId={boardProjectId} visible={!focusMinimized || !focusEnabled} board={tasksBoard} onProjectChange={setBoardProjectId} onBack={() => setView(boardOrigin.current)} onConnections={id => { const target = projects.find(p => p.id === id); if (target) openProjectSettings(target, 'tasks'); }} /></Suspense>}
       <KlmAgentWorkspace enabled={generalView} visible={!focusMinimized || !focusEnabled} projects={projects} sessions={sessions} projectRailOpen={mobileProjectRailOpen} onToggleProjectRail={IS_MOBILE_HOST ? () => setMobileProjectRailOpen(current => !current) : undefined} overlaySessionId={IS_MOBILE_HOST ? mobileChats.at(-1)?.session.id : overlaySession?.id} onOpenOverlay={openSessionOverlay} onCloseOverlay={() => setOverlaySessionId('')} onOpenProject={openSessionInProject} onOpenFloatingChat={focusEnabled ? () => void openGeneralFloatingWindow() : undefined} openingFloatingChat={openingGeneralWindow} onOpenBoard={() => openBoard()}>
-      {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav<SessionTab> value={view === 'design' ? 'chat' : activeTab} onChange={tab => { setView('chat'); setSessionTabs(current => ({ ...current, [activeId]: tab })); }} items={view === 'chat' ? tabItems : [{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <>{focusEnabled && !projectSessionArchived && <IconButton className="session-open-floating" label="Open session in floating window and minimize main window" onClick={() => { openFloatingSession(session); setFocusMinimized(true); }}><PanelsTopLeft /></IconButton>}{currentTopic && <button className={`topic-tag topic-color-${currentTopic.color}`} title={`Edit topic: ${currentTopic.name}`} disabled={!!connectionError} onClick={() => setEditingTopic({ projectId: project.id, topic: currentTopic })}>{currentTopic.name}</button>}</>}</div>}
+      {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav<SessionTab> value={view === 'design' ? 'chat' : activeTab} onChange={tab => { setView('chat'); setSessionTabs(current => ({ ...current, [activeId]: tab })); }} items={view === 'chat' ? tabItems : [{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <>{focusEnabled && !projectSessionArchived && <IconButton className="session-open-floating" label="Open session in floating window and minimize main window" onClick={() => { openFloatingSession(session); setFocusMinimized(true); }}><PanelsTopLeft /></IconButton>}<button className={`topic-tag topic-color-${currentTopic?.color ?? 'neutral'}`} title={projectSessionArchived ? `Edit topic: ${currentTopic?.name ?? 'Ungrouped'}` : 'Change topic'} aria-haspopup="dialog" disabled={!!connectionError || projectSessionArchived && !currentTopic} onClick={() => { if (projectSessionArchived && currentTopic) setEditingTopic({ projectId: project.id, topic: currentTopic }); else setChoosingTopicSessionId(session.id); }}>{currentTopic?.name ?? 'Choose topic'}</button></>}</div>}
       {boardView ? null : view === 'design' ? <DesignSystem /> : (view === 'agents' || view === 'graphs') && project ? <ProjectAuthoring key={`${project.id}:${view}:${agentsVisit}:${graphsVisit}`} projectId={project.id} area={view} /> : !loaded ? <div className="empty-chat"><h2>{connectionError ? 'Engine disconnected' : 'Connecting to engine...'}</h2></div> : generalView && !session ? <div className="empty-chat"><h2>{generalError || 'Opening KLM Agent...'}</h2>{generalError && <Button onClick={() => setGeneralRetry(current => current + 1)}>Retry</Button>}</div> : !generalView && !project ? <div className="empty-chat"><h2>Add a project</h2><Button onClick={() => void openProjectPicker()}>Add project</Button></div> : !session ? <div className="empty-chat"><h2>Create a session</h2><Button onClick={() => newSession()} disabled={!!connectionError}>Create session</Button></div> : <>
         <SessionOverlay session={overlaySession} project={overlayProject} onClose={() => setOverlaySessionId('')} onOpenProject={openSessionInProject}
           background={overlaySession && generalSession ? <ConversationHistory session={generalSession} working={generalSession.status === 'running'} label="KLM Agent background conversation" onSnapshot={receiveSession} onHistory={receiveHistory} /> : null}>
@@ -1013,6 +1057,10 @@ export function App() {
     {settingsProject && <ProjectSettingsDialog key={`${settingsProject.id}:${projectSettingsSection}`} project={settingsProject} sessions={engine.sessions} initialSection={projectSettingsSection} tasks={tasksBoard} onSave={editProject} onRemove={removeProject} onOpenSession={id => { const target = engine.sessions.find(s => s.id === id); if (target) { setProjectSettingsId(''); openSessionInProject(target); } }} onClose={() => setProjectSettingsId('')} />}
     {automationStop && <StopAutomationDialog onDecision={confirmed => { const resolve = automationStop.resolve; setAutomationStop(undefined); resolve(confirmed); }} />}
     {creatingSession && createProject && <CreateSessionDialog project={createProject} harnesses={harnesses} topicId={creatingSession.topicId} onCreate={createSession} onClose={() => { navigation.current += 1; setCreatingSession(null); }} />}
+    {canChooseTopic && choosingTopicSession && choosingTopicProject && <TopicDialog key={`choose-topic:${choosingTopicSession.id}`} topic={sessionTopic(choosingTopicProject, choosingTopicSession)} selection={{ topics: choosingTopicProject.topics ?? [], onSelect: id => chooseSessionTopic(choosingTopicSession, id), onCreate: input => createTopic(choosingTopicProject.id, input, choosingTopicSession) }} onSave={input => {
+      const topic = sessionTopic(choosingTopicProject, choosingTopicSession);
+      return topic ? patchTopic(choosingTopicProject.id, topic, input) : Promise.resolve('Topic is unavailable. Close and try again.');
+    }} onClose={() => setChoosingTopicSessionId('')} />}
     {creatingTopicProjectId && <TopicDialog key={`new-topic:${creatingTopicProjectId}`} onSave={input => createTopic(creatingTopicProjectId, input)} onClose={() => setCreatingTopicProjectId('')} />}
     {editingTopic && <TopicDialog key={editingTopic.topic.id} topic={editingTopic.topic} onSave={input => patchTopic(editingTopic.projectId, editingTopic.topic, input)} onClose={() => setEditingTopic(null)} />}
   </div>

@@ -1,6 +1,6 @@
 import type { Project, Session, Topic } from '../../engine';
 
-export const topicColors: Topic['color'][] = ['neutral', 'blue', 'purple', 'green', 'amber', 'rose'];
+export const topicColors: Topic['color'][] = ['neutral', 'blue', 'cyan', 'teal', 'green', 'purple', 'rose', 'red', 'orange', 'amber'];
 export const topicKey = (session: Session) => session.topicId ?? '';
 export const sessionTopic = (project: Project | undefined, session: Session | undefined) => project?.topics?.find(topic => topic.id === session?.topicId);
 export const topicArchived = (project: Project | undefined, session: Session | undefined) => !!sessionTopic(project, session)?.archived;

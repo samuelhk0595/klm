@@ -16,7 +16,7 @@ export type Project = {
   archivedFolders: string[];
 };
 
-export type Topic = { id: string; name: string; color: 'neutral' | 'blue' | 'purple' | 'green' | 'amber' | 'rose'; createdAt: string; archived?: boolean };
+export type Topic = { id: string; name: string; color: 'neutral' | 'blue' | 'purple' | 'green' | 'amber' | 'rose' | 'cyan' | 'teal' | 'orange' | 'red'; createdAt: string; archived?: boolean };
 
 export type Harness = {
   id: 'pi' | 'opencode' | 'codex';

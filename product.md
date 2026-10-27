@@ -61,8 +61,9 @@ ties. Users can drag a topic's header above/below another topic to save a manual
 project-wide order. Once positioned, topics retain that order even when members
 move; new unpositioned topics appear ahead of it. Messages and runtime disposal
 do not reorder them. Collapse is local per
-browser/WebView, engine, project and topic ID; old folder-name collapse preferences
-are not applied to the new topic namespace. Search includes topic names and titles
+browser/WebView, engine, project and topic ID. Groups without a saved preference
+start collapsed; existing saved expanded/collapsed choices are preserved. Old folder-name
+collapse preferences are not applied to the new topic namespace. Search includes topic names and titles
 and temporarily expands matches without overwriting collapse preferences.
 
 Desktop and browser session rows also display a recency subtitle below the title,
@@ -80,8 +81,13 @@ supports Left/Right, Home and End. Narrow navigation and the Flutter-hosted mobi
 layout retain their existing presentation without a resize handle. Temporary window
 constraints do not replace the saved preferred width.
 
-The chat navigation's topic tag opens a shared name/color editor. Colors use a small
-theme-aware palette (Neutral, Blue, Purple, Green, Amber, Rose), initially Neutral.
+The chat navigation's topic tag opens a searchable topic picker for that chat's
+project, with its current topic indicated. Users can apply an existing active topic,
+edit the current topic, or create a new topic and move the chat into it atomically.
+Ungrouped chats expose Choose topic in the same location. Archived chats/topics
+retain the name/color editor and must be restored before moving. The shared dialog
+uses a labeled ten-color palette (Neutral, Blue, Cyan, Teal, Green, Purple, Rose,
+Red, Orange, Amber), initially Neutral; colors adapt to light and dark themes.
 The Add topic icon, immediately left of Search sessions, opens the same name/color
 dialog in creation mode. It creates a persistent empty topic at the top of the list
 without creating, assigning or starting any session. An expanded active topic with
