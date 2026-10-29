@@ -50,6 +50,9 @@ func dispatchCLI(args []string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
+	if err := validateEngineDataDir(dir); err != nil {
+		return err
+	}
 	// Serialize start/stop without persisting a PID or interfering with the worker lock.
 	deadline := time.Now().Add(60 * time.Second)
 	var lock *os.File
@@ -76,7 +79,7 @@ func dispatchCLI(args []string) error {
 		return err
 	}
 	logPath := filepath.Join(dir, "engine.log")
-	output, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	output, err := openEngineLog(dir)
 	if err != nil {
 		return err
 	}
@@ -116,7 +119,7 @@ func spawnEngineRestart(dir string) error {
 	if err != nil {
 		return err
 	}
-	output, err := os.OpenFile(filepath.Join(dir, "engine.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	output, err := openEngineLog(dir)
 	if err != nil {
 		return err
 	}

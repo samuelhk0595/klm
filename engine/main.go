@@ -95,6 +95,12 @@ func main() {
 }
 
 func runEngine(dir string) error {
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	if err := validateEngineDataDir(dir); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Join(dir, "sessions"), 0700); err != nil {
 		return errors.New("cannot create engine data directory")
 	}
@@ -104,7 +110,11 @@ func runEngine(dir string) error {
 	}
 	defer lock.Close()
 	// Reserve the fixed port before loading/recovering state or starting work.
-	listener, err := net.Listen("tcp", "0.0.0.0:"+apiPort)
+	address, err := publicAPIListenAddress()
+	if err != nil {
+		return err
+	}
+	listener, err := net.Listen("tcp", address)
 	if err != nil {
 		return fmt.Errorf("cannot listen on port %s; it may be in use by another program: %w", apiPort, err)
 	}

@@ -154,6 +154,11 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/permission-rules/{ruleID}", a.deletePermissionRule)
 	mux.HandleFunc("POST /api/sessions/{id}/questions/{questionID}/reply", a.answerQuestion)
 	mux.HandleFunc("POST /api/dialogs/directory", a.directory)
+	mux.HandleFunc("GET /api/filesystem/roots", a.filesystemRoots)
+	mux.HandleFunc("GET /api/filesystem/directories", a.filesystemDirectories)
+	mux.HandleFunc("POST /api/filesystem/directories", a.createFilesystemDirectory)
+	mux.HandleFunc("PATCH /api/filesystem/directories", a.renameFilesystemDirectory)
+	mux.HandleFunc("DELETE /api/filesystem/directories", a.deleteFilesystemDirectory)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "Endpoint not found.") })
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")

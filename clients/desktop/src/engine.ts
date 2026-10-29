@@ -297,6 +297,15 @@ export async function pickDirectory(signal?: AbortSignal): Promise<string | null
   return result.path;
 }
 
+export type FilesystemDirectory = { name: string; path: string };
+export type FilesystemRoots = { roots: FilesystemDirectory[]; home: string | null; nativePicker: boolean };
+export type FilesystemListing = { path: string; parent: string | null; directories: FilesystemDirectory[]; incomplete: boolean; skipped: number };
+export const getFilesystemRoots = (signal?: AbortSignal) => request<FilesystemRoots>('/api/filesystem/roots', 'GET', undefined, 15000, signal);
+export const getFilesystemDirectories = (path: string, signal?: AbortSignal) => request<FilesystemListing>(`/api/filesystem/directories?path=${encodeURIComponent(path)}`, 'GET', undefined, 15000, signal);
+export const createFilesystemDirectory = (parent: string, name: string, signal?: AbortSignal) => request<FilesystemDirectory>('/api/filesystem/directories', 'POST', { parent, name }, 15000, signal);
+export const renameFilesystemDirectory = (parent: string, name: string, newName: string, signal?: AbortSignal) => request<FilesystemDirectory>('/api/filesystem/directories', 'PATCH', { parent, name, newName }, 15000, signal);
+export const deleteFilesystemDirectory = (parent: string, name: string, confirmation: string, signal?: AbortSignal) => request<{ path: string }>('/api/filesystem/directories', 'DELETE', { parent, name, confirmation }, 15000, signal);
+
 export const getEngineVersion = () => request<{ version: string }>('/api/version');
 export const getTranscriptionSettings = () => request<TranscriptionSettings>('/api/transcription/settings');
 export const updateTranscriptionSettings = (settings: TranscriptionSettingsUpdate) => request<TranscriptionSettings>('/api/transcription/settings', 'PATCH', settings);

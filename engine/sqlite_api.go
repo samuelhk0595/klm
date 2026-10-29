@@ -632,6 +632,8 @@ func sqlRouteAvailable(pattern string) bool {
 		return true
 	case "GET /api/sessions/{id}/graph", "PATCH /api/sessions/{id}/graph", "GET /api/sessions/{id}/graph/runs/{runId}/nodes/{nodeId}/activity", "GET /api/graph-runs/{runID}", "GET /api/sessions/{id}/graph/content":
 		return true
+	case "GET /api/filesystem/roots", "GET /api/filesystem/directories", "POST /api/filesystem/directories", "PATCH /api/filesystem/directories", "DELETE /api/filesystem/directories":
+		return true
 	case "GET /api/projects/{id}/automations", "GET /api/projects/{id}/automations/{automationId}", "POST /api/projects/{id}/automations", "PATCH /api/projects/{id}/automations/{automationId}", "DELETE /api/projects/{id}/automations/{automationId}", "GET /api/projects/{id}/automations/{automationId}/runs", "POST /api/projects/{id}/automations/{automationId}/run-now", "POST /api/projects/{id}/automations/preview", "GET /api/settings/engine", "PATCH /api/settings/engine":
 		return true
 	case "GET /api/sessions/{id}/capabilities", "PATCH /api/sessions/{id}/capabilities":

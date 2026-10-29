@@ -509,7 +509,12 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 | POST | `/api/sessions/{id}/stop` | 200 Session after cancellation completes; idle sessions are unchanged |
 | POST | `/api/sessions/{id}/permissions/{permissionID}` | `{decision:"once"\|"session"\|"always"\|"reject"}` -> Session |
 | POST | `/api/sessions/{id}/questions/{questionID}/reply` | `{answers:string[][]}` or `{cancelled:true}` -> Session |
-| POST | `/api/dialogs/directory` | `{path:string\|null}` |
+| POST | `/api/dialogs/directory` | `{path:string\|null}`; explicit native picker on the engine, when advertised |
+| GET | `/api/filesystem/roots` | `{roots:[{name,path}],home:string\|null,nativePicker:boolean}` |
+| GET | `/api/filesystem/directories?path=...` | `{path,parent:string\|null,directories:[{name,path}],incomplete:boolean,skipped:number}`; URL-encoded absolute engine path |
+| POST | `/api/filesystem/directories` | `{parent,name}` -> 201 `{name,path}`; creates one new child directory under an existing absolute parent |
+| PATCH | `/api/filesystem/directories` | `{parent,name,newName}` -> 200 `{name,path}`; renames one child without replacing an existing entry |
+| DELETE | `/api/filesystem/directories` | `{parent,name,confirmation:name}` -> 200 `{path}`; removes one empty child directory only |
 
 Adding the same directory again restores a removed project's identity, topics,
 and session history with the name and icon chosen in the add dialog.
@@ -518,6 +523,100 @@ Session-returning mutations in this table use the contract-3 detail envelope
 `{session,revision,eventCount,more}`, including creation, message admission,
 settings, Stop and pending-request replies. Historical `SessionUpdate` names do
 not imply an embedded transcript. Follow the appropriate page/content endpoint.
+
+### Engine directory browser
+
+Add project → **Browse directories** opens the in-app engine filesystem browser on
+all clients. Manual absolute-path registration remains available; edit mode never
+changes the registered directory. Single click selects a directory; double click
+or Enter opens it. When available, `...` is always the first row and opens the
+engine-reported parent; it is not filtered or sorted with children. **Select
+directory** fills the registration form without registering a project or starting
+work. No separate selected-folder text is shown.
+
+These authenticated, no-store read APIs use the existing paired-client, origin/TLS
+and SQLite storage-contract gates. Roots lists Windows logical drives without
+probing them, or Unix `/`, plus the engine user's existing home shortcut when
+available. UNC share paths can be entered manually; shares are not discovered.
+`nativePicker` advertises the engine's Windows implementation, not the presence of
+an interactive desktop. Only **Native picker on engine** invokes it; failure or
+cancellation does not prevent in-app/manual navigation.
+
+Listings follow the engine user's permissions and lexical directory aliases
+(including symlinks/junctions), not a sandbox or the client filesystem. Paths must
+be absolute UTF-8, NUL-free and at most 16 KiB; no tilde/environment expansion.
+Responses retain cleaned lexical paths and engine-computed parents; drive, Unix
+and UNC share roots have no parent. Only immediate directory names/paths are
+returned, including hidden directories; no file contents, cloning or uploads are
+provided. Invalid/non-directory paths return 400, missing paths 404,
+permission failures 403 and other I/O failures a recoverable 500.
+
+A listing inspects at most 10,000 raw entries in batches of 128, returns at most
+1,000 directories and stays within 256 KiB encoded JSON. The retained subset is
+sorted by name, not necessarily the globally first alphabetical entries. Caps and
+skipped broken/inaccessible/unrepresentable entries mark `incomplete`; `skipped`
+counts inspected omitted entries, not unscanned entries. A partial read error is
+an error rather than an empty success. Handles close and cancellation is checked
+between batches/metadata calls, but a blocking OS filesystem call (for example an
+offline mount) cannot be forcibly interrupted. UI generations discard stale
+listing/native results after navigation, edits, cancellation and close/reopen.
+Build/static evidence and pending runtime acceptance are recorded in
+`REMOTE_DIRECTORY_BROWSER_IMPLEMENTATION_PROGRESS.md`.
+
+Right-clicking the current directory's contents, Shift+F10, or **Directory actions**
+opens a menu with **New folder**. The inline name editor requires explicit Create;
+Cancel/Escape before submission makes no filesystem change. The authenticated,
+CSRF/storage-contract-protected POST creates exactly one leaf via `os.Mkdir`,
+never missing parents, and never replaces files/directories. Names must be one
+nonblank UTF-8 component, not `.`/`..`, without either path separator or control
+characters, at most 255 bytes. Windows device names/invalid characters/trailing
+periods or spaces are also refused. Combined path is limited to 16 KiB; bounded
+JSON body is 128 KiB. Aliases retain normal OS resolution, without elevated rights.
+Permissions are 0755 subject to the engine process's umask and filesystem ACLs.
+
+Duplicate entries return 409; write permission failures 403; missing parent 404;
+invalid input/non-directory parent 400; other creation errors 500. Success returns
+the created lexical name/path and the picker opens it without registering a project.
+During submission, conflicting actions are disabled. A transport/timeout failure
+is uncertain, not proof nothing was created: Create stays disabled until the user
+refreshes or abandons that editor. No automatic mutation retry or cleanup occurs.
+
+Right-click a child folder for **Rename** and **Delete**; keyboard Context Menu /
+Shift+F10 targets the focused row, while **Directory actions** targets the selected
+child. Blank space and the `...` parent row offer only New folder. The name editor
+requires explicit Rename. Delete opens an inline confirmation naming the exact
+folder and path, initially focusing Cancel; opening or cancelling it never sends
+a deletion request. Successful rename refreshes the parent and selects the new
+name; successful delete refreshes the parent and clears the selection. Confirmed
+changes are announced in the status summary.
+
+PATCH and DELETE use the same authentication, CSRF, storage-contract and bounded
+parent/name validation as creation. Source must be a real directory, not a final
+symlink/junction. Rename stays in the same parent and uses atomic no-replace
+operations (Linux `renameat2(RENAME_NOREPLACE)`, Windows `MoveFile`); unsupported
+filesystems/other engine OSs fail explicitly rather than falling back to Unix
+`os.Rename` replacement. An unchanged name is a validated no-op; case-only rename
+support remains filesystem-dependent. Delete requires `confirmation` matching the
+source name and uses directory-only nonrecursive removal (`rmdir`/`RemoveDirectory`),
+never `RemoveAll` or a file-removal fallback. Nonempty folders return 409 and retain
+all contents. There is no recycle bin, recursive deletion or undo.
+
+Integrity checks protect filesystem roots, home and its ancestors, the complete
+engine-data tree and its ancestors, and all registered project roots/ancestors
+(including removed projects). Destination paths are checked too; project paths
+are never silently rewritten. Existing aliases and missing leaves' existing
+ancestors are resolved during protection checks; unresolvable protected paths fail
+closed. App mutations/registration share the app lock during these single OS
+operations. These guards do not sandbox the filesystem or prevent races with
+external programs/mount changes. Project child folders remain ordinary filesystem
+content under the engine user's OS permissions.
+
+Existing-target/nonempty/protected conflicts return 409; permission failures 403;
+missing paths 404; invalid input/file/link paths 400; other I/O failures 500. An
+unconfirmed transport or server-5xx outcome disables submission until explicit
+refresh or abandonment. Conflicting navigation/selection is disabled in flight;
+there is no automatic retry. Windows, permission/conflict and protected-path edge
+cases require their own runtime acceptance, beyond build or happy-path evidence.
 
 ### Project GitHub webhooks
 

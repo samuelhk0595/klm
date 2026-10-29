@@ -78,6 +78,33 @@ and a React client. A project has a name, directory, and icon. Ordinary sessions
 to one project and use Pi, OpenCode, or Codex headlessly. The client presents the
 messages, exposed reasoning, commands, and MCP/tool events those harnesses emit.
 
+Project registration keeps a manual absolute-path field and defaults to an in-app
+engine-filesystem directory browser on every client. It lists existing directories
+under the engine user's permissions, with a locations sidebar, home/path
+navigation and name filtering/sorting. The first `...` row opens the server-reported
+parent on double click or Enter; roots have no parent row. A single click selects a child directory;
+a double click, Enter or its Open action navigates into it. The primary action
+selects that child, or the current directory when none is selected. Directory
+aliases retain their lexical paths;
+bounded or skipped listings are disclosed. Native picking is a secondary explicit
+action only when advertised by the engine, never inferred from client locality or
+OS. A directory's context menu (also available from Directory actions) offers
+New folder, requiring an explicit name and Create confirmation. It creates one
+child under the displayed directory with the engine user's permissions, without
+overwriting an existing entry or registering a project. The picker opens the new
+folder after confirmed creation; uncertain delivery requires explicit refresh,
+not automatic retry. Right-clicking a child directory also offers Rename and
+Delete; Directory actions exposes them for the selected child on keyboard/touch.
+Rename requires explicit confirmation and never replaces an existing entry.
+Delete requires confirmation of the named folder and removes only empty directories,
+never their contents. Roots, the engine user's home and their ancestors, the engine
+data tree, and registered project roots/ancestors are protected from these actions;
+project metadata is not silently retargeted. Directory links cannot be renamed or
+deleted here. Browsing otherwise does not modify directories, clone, upload or read
+file contents. Editing an existing project never changes its directory.
+Compilation evidence and pending human acceptance are tracked in
+`REMOTE_DIRECTORY_BROWSER_IMPLEMENTATION_PROGRESS.md`.
+
 Top-level sessions are grouped by persistent, project-scoped **topics**, replacing
 visual session folders. A new independent project session starts without a topic
 unless the user explicitly creates it inside an existing topic.
@@ -652,6 +679,23 @@ engine MCP interface remains outside this slice.
 The private bridge also exposes graph operations according to the conversation's
 role. Graph-node sessions receive their own Choice capability, without access to
 main/side conversation history or tools to invoke other graphs.
+
+### Linux headless engine
+
+Linux now supports the existing engine CLI lifecycle and local pairing/revocation
+through a protected same-user Unix socket. Windows retains its named-pipe control.
+An optional `KLM_API_BIND_HOST` literal loopback setting isolates the public API
+behind a TLS proxy; its unset default preserves the existing Windows/LAN binding.
+A dedicated-user systemd deployment template is provided in `distribution/linux`.
+The template does not claim automatic worker crash supervision or agent sandboxing.
+
+This does not move frontend hosting into the engine: Windows Tauri retains its
+bundled UI and can target a remote engine. An initial Ubuntu deployment exercised
+start/stop, protected socket permissions, HTTPS and real browser pairing, then
+stopped at the first blocker: no harness executables installed. Native Tauri
+remote pairing, harness/provider execution, Linux graph containment and ai-jail
+remain unvalidated/unimplemented as applicable. Detailed evidence and operational
+limits are in `LINUX_VPS_IMPLEMENTATION_PROGRESS.md`.
 
 ### Skills and MCP Library
 
