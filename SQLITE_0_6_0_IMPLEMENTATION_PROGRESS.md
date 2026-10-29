@@ -10,6 +10,77 @@ This ledger distinguishes delivered/reviewed code, measured evidence and remaini
 runtime/release/performance acceptance; it does not certify every original plan
 acceptance criterion as fulfilled.
 
+## Chat preparation persistence hotfix (2026-10-29)
+
+- Investigated installed `engine.log`, read-only SQLite queries and the user's
+  exports for sessions `ca4fcb14838eced413d0585ca94ab5a5` (Implementar instalação
+  global de harnesses) and `f226c76da02b97b65576c076f3edcf1c` (Executor).
+- The first session has user messages at local 01:56:54, 02:01:59, 02:06:25 and
+  18:28:26, immediately preceding the logged persistence failures at 01:57:01,
+  02:02:00, 02:06:26 and 18:28:28. Database/export timestamps are UTC (local +3h).
+  It selects the `ai-memory` MCP; Executor has no selected MCP connections.
+- Identified an unconditional legacy write in
+  `execute -> prepareCapabilities -> prepareMCP -> capabilityWarning -> commitLocked`.
+  An unavailable MCP, changed/missing selected tool or other preparation diagnostic
+  tries to append a Library status event. Under SQL authority this instead trips
+  `failStorageLocked`, making the entire engine read-only and cancelling other turns.
+  Thus an otherwise recoverable MCP warning can interrupt unrelated conversations.
+- The selected local MCP port had no listener when inspected. Historical logs do
+  not retain the precise diagnostic, so connection unavailability is strongly
+  consistent with the evidence, not retrospectively proven. The `preparing`
+  snapshot is persisted before MCP discovery; the warning event itself fails to
+  persist, explaining why the exports do not contain that diagnostic.
+- `capabilityWarning` now uses the existing SQL transaction/publication path to
+  append the event and update session metadata atomically. Legacy-only execution
+  keeps its existing branch; the SQL-authority rejection remains intact.
+- Focused regression `TestSQLiteCapabilityWarningKeepsTurnsActive` exercises
+  `prepareMCP` with a supplied diagnostic, an isolated SQLite fixture and two turn
+  contexts, without launching a harness or contacting a real MCP. Before the fix
+  it reproduced the exact legacy-persistence error. After the fix,
+  `go test . -run '^TestSQLiteCapabilityWarningKeepsTurnsActive$' -count=1` passed:
+  warning persisted, neither turn cancelled, subsequent SQL write accepted.
+- Installed binary and user data were not changed. Remaining human validation:
+  install/build the corrected engine, restart it, send a message with the selected
+  MCP unavailable and confirm the warning is visible while chats remain usable.
+  Live OpenCode/MCP execution and release packaging were not validated here.
+
+## Follow-up legacy-write call-path audit (2026-10-29)
+
+User requested a wider search after the MCP warning fix. Static inspection of
+non-test Go files counted **156 call sites**: `commitLocked` (107),
+`commitTransactionLocked` (11), `graphChangeLocked` (27), `saveState` (6),
+`appendStreamRecord` (3), and `writeClientAuthJSON` (2). This includes internal
+wrapper calls, not 156 independent runtime entry points.
+
+A temporary read-only Go AST inventory retained unknown branches and pruned
+explicit `store != nil` / `store == nil` branches under SQL authority. It left
+33 conservative candidates, which were traced manually through their callers,
+route registration and startup. **No additional currently reachable legacy-write
+path was confirmed.** This is source-level evidence, not live-provider acceptance
+or a formal reachability proof.
+
+| Remaining legacy code | Current SQL routing / isolation |
+| --- | --- |
+| `spawnSessionLocked` | Its production caller `spawnSession` returns through `spawnSQLSession` first. |
+| `automationSnapshot`, `startAutomationTurnLocked`, `blockAutomationTriggerLocked` | `prepareCapabilities` selects SQL snapshots; `scheduleAutomationsLocked` selects `scheduleSQLAutomationsLocked` before legacy helpers. |
+| Automation CRUD/run-now/settings handlers | `automationRoutes` registers `sqlAutomationRoutes` instead. `sqliteSessionTx.engineSettings` is a different SQL reader, not the legacy HTTP handler of the same name. |
+| Board configuration/connection/move handlers | `activityBoardRoutes` registers `sqlActivityBoardRoutes` instead. |
+| Graph invoke/assess/update and reserved startup | `graphConversationCall` selects `sqlGraphConversationCall`; the scheduler selects SQL startup before legacy helpers. |
+| Linked bridge answer/ask writes | The complementary `session_spawn` / non-spawn checks route every SQL call before the legacy switch. |
+| Consultation expiry | The SQL branch ends with `continue`; the later legacy write belongs only to the non-SQL loop path. |
+| `commitWebhooksLocked`, legacy cleanup/release | HTTP handlers select SQL paths; `webhookWorker` selects `sqliteWebhookWorker`; SQL startup cleans through `cleanWebhookBatch`. |
+| Stream and usage journal appends | `commitStreamUpdates` and `setUsageObservation` return through SQL writers first; the transaction writer rejects SQL authority. |
+| JSON authentication/access writes | `saveLocked` / `saveAccessLocked` select SQL; normal startup supplies the store through `newClientAuthStorage`. |
+| `checkpointJournal`, legacy recovery/cleanup and `loadState` writes | Legacy checkpoint worker is not started by `serveSQLiteEngine`; old catalog/library recovery and abandoned-task cleanup have no current production callers. Startup uses SQL recovery/checkpoint functions. |
+
+Also inspected direct legacy file references and application construction: the
+runtime store is set before workers/API admission and is not reset to nil. The
+separate temporary OpenCode catalog profile does not run chat persistence.
+
+No additional runtime edits were needed for this follow-up. No new tests, full
+suite, installed-engine restart or real-data mutation were performed. The focused
+MCP regression result above remains the behavioral evidence for the actual fix.
+
 ## Boundary and baseline (2026-10-27)
 
 - Read `AGENTS.md`, full `product.md`, and full 919-line implementation plan.

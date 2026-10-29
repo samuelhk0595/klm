@@ -516,6 +516,19 @@ func slicesContains(values []string, value string) bool {
 func (p *adapter) capabilityWarning(message string) error {
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
+	if p.app.store != nil {
+		return p.sqlAnalyticsWrite(func(st *sqliteSessionTx) error {
+			if _, err := st.appendEvent(p.id, event("status", "Library: "+message)); err != nil {
+				return err
+			}
+			s, err := st.sessionMeta(p.id)
+			if err != nil {
+				return err
+			}
+			s.UpdatedAt = now()
+			return st.putSessionMeta(s)
+		})
+	}
 	return p.app.commitLocked(func(d *diskState) {
 		s := d.session(p.id)
 		s.Events = append(s.Events, event("status", "Library: "+message))
