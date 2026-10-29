@@ -178,7 +178,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 		if p.effort != "" {
 			args = append(args, "--thinking", p.effort)
 		}
-		proc, err = startInteractive(p.turn, b, args, cwd, p.runtime)
+		proc, err = startInteractive(p.turn, b, args, cwd, p.runtime, protocolLineInput{dir: p.app.dir, harness: "pi"})
 		if err != nil {
 			cleanup()
 			if ctx.Err() != nil {

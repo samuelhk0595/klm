@@ -109,6 +109,9 @@ func runEngine(dir string) error {
 		return err
 	}
 	defer lock.Close()
+	if err := prepareProtocolStaging(dir); err != nil {
+		return err
+	}
 	// Reserve the fixed port before loading/recovering state or starting work.
 	address, err := publicAPIListenAddress()
 	if err != nil {

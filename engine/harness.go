@@ -164,11 +164,13 @@ func (b *cappedBuffer) String() string { return string(b.data) }
 // Bound each in-flight line, not the lifetime volume of a streaming RPC process.
 // Delivery to the bounded Frames channel supplies backpressure in startInteractive.
 type jsonLines struct {
-	mu      sync.Mutex
-	pending []byte
-	err     error
-	consume func([]byte) error
-	cancel  func()
+	mu         sync.Mutex
+	pending    []byte
+	err        error
+	consume    func([]byte) error
+	cancel     func()
+	projection *protocolLineInput
+	stage      *protocolFrame
 }
 
 func (l *jsonLines) Write(p []byte) (int, error) {
@@ -178,6 +180,9 @@ func (l *jsonLines) Write(p []byte) (int, error) {
 		return 0, l.err
 	}
 	n := len(p)
+	if l.projection != nil {
+		return l.writeProjected(p)
+	}
 	for len(p) > 0 {
 		end := bytes.IndexByte(p, '\n')
 		part := p
@@ -201,6 +206,10 @@ func (l *jsonLines) Write(p []byte) (int, error) {
 
 func (l *jsonLines) reject(text string) error {
 	l.err = errors.New(text)
+	if l.stage != nil {
+		l.err = errors.Join(l.err, l.stage.Close())
+		l.stage = nil
+	}
 	l.cancel()
 	return l.err
 }
@@ -214,6 +223,9 @@ func (l *jsonLines) flush() error {
 func (l *jsonLines) flushLocked() error {
 	if l.err != nil {
 		return l.err
+	}
+	if l.projection != nil {
+		return l.flushProjected()
 	}
 	line := bytes.TrimSpace(bytes.TrimPrefix(l.pending, []byte{0xef, 0xbb, 0xbf}))
 	if len(line) > 0 {

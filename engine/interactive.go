@@ -22,7 +22,7 @@ type interactiveProcess struct {
 	owner  *ownedProcess
 }
 
-func startInteractive(t *turn, b binary, args []string, cwd string, runtime *sessionRuntime) (*interactiveProcess, error) {
+func startInteractive(t *turn, b binary, args []string, cwd string, runtime *sessionRuntime, projection ...protocolLineInput) (*interactiveProcess, error) {
 	parent := t.ctx
 	if runtime != nil {
 		parent = runtime.app.ctx
@@ -51,6 +51,11 @@ func startInteractive(t *turn, b binary, args []string, cwd string, runtime *ses
 		return nil, errors.New("Could not open harness input.")
 	}
 	frames := make(chan map[string]any, 64)
+	if len(projection) > 0 {
+		// No backlog of decoded native maps on the projected path. Producers keep
+		// at most one bounded retained frame while waiting for the consumer.
+		frames = make(chan map[string]any)
+	}
 	done := make(chan struct{})
 	p := &interactiveProcess{Frames: frames, Done: done, stdin: stdin, cancel: cancel, owner: owner}
 	lines := &jsonLines{cancel: cancel, consume: func(line []byte) error {
@@ -67,6 +72,11 @@ func startInteractive(t *turn, b binary, args []string, cwd string, runtime *ses
 			return ctx.Err()
 		}
 	}}
+	if len(projection) > 0 {
+		input := projection[0]
+		input.ctx = ctx
+		lines.projection = &input
+	}
 	cmd.Stdout = lines
 	cmd.Stderr = &cappedBuffer{}
 	started := time.Now()
@@ -81,6 +91,7 @@ func startInteractive(t *turn, b binary, args []string, cwd string, runtime *ses
 		stdin.Close()
 		_ = owner.Stop()
 		_ = cmd.Wait()
+		lines.closeStaging()
 		_ = owner.Close()
 		return nil, err
 	}
@@ -89,6 +100,7 @@ func startInteractive(t *turn, b binary, args []string, cwd string, runtime *ses
 		if ctx.Err() == nil {
 			_ = lines.flush()
 		}
+		lines.closeStaging()
 		p.err = lines.err
 		if err != nil {
 			// Only expose exit metadata, never argv, stderr or arbitrary Wait errors.

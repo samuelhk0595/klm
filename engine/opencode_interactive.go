@@ -240,7 +240,7 @@ func (h *openCodeHTTP) jsonResponse(ctx context.Context, method, path string, bo
 	defer response.Body.Close()
 	var data []byte
 	if method == http.MethodGet && strings.HasPrefix(endpoint, "/session/") && strings.HasSuffix(endpoint, "/message") && result != nil {
-		data, err = readOpenCodeHistoryJSON(response.Body)
+		data, err = readOpenCodeHistoryJSONContext(ctx, response.Body)
 	} else {
 		data, err = io.ReadAll(io.LimitReader(response.Body, openCodeResponseLimit+1))
 	}
@@ -350,49 +350,23 @@ func (h *openCodeHTTP) ownsSession(ctx context.Context, id string, owned map[str
 	return false, nil
 }
 
-// SSE frames, including multi-line data fields, have the same bound as CLI JSON lines.
-func openCodeEvents(ctx context.Context, body io.Reader, events chan<- map[string]any, failed chan<- error) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 4096), openCodeFrameLimit+1)
-	var data []byte
-	frameBytes := 0
-	err := errors.New("OpenCode event stream disconnected before the turn completed.")
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		frameBytes += len(line) + 1
-		if frameBytes > openCodeFrameLimit {
-			err = errors.New("OpenCode event frame exceeded KLM's 2 MiB limit.")
-			break
+// Bound retained content independently of redundant wire data. Complete JSON and
+// SSE framing are validated before an event reaches the adapter state machine.
+func openCodeEvents(ctx context.Context, body io.Reader, dir string, events chan<- map[string]any, failed chan<- error) {
+	err := readProjectedSSE(ctx, body, dir, func(data []byte) error {
+		var event map[string]any
+		if json.Unmarshal(data, &event) != nil || str(event, "type") == "" {
+			return errProtocolJSON
 		}
-		if len(line) == 0 {
-			if len(data) > 0 {
-				var event map[string]any
-				if json.Unmarshal(data, &event) != nil || str(event, "type") == "" {
-					err = errors.New("OpenCode returned an invalid event frame.")
-					break
-				}
-				select {
-				case events <- event:
-				case <-ctx.Done():
-					return
-				}
-			}
-			data = data[:0]
-			frameBytes = 0
-		} else if bytes.HasPrefix(line, []byte("data:")) {
-			value := bytes.TrimPrefix(line[5:], []byte(" "))
-			if len(data) > 0 {
-				data = append(data, '\n')
-			}
-			data = append(data, value...)
+		select {
+		case events <- event:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-	}
-	if scanErr := scanner.Err(); scanErr != nil {
-		if errors.Is(scanErr, bufio.ErrTooLong) {
-			err = fmt.Errorf("OpenCode event frame exceeded KLM's 2 MiB limit: %w", scanErr)
-		} else {
-			err = fmt.Errorf("Could not read the OpenCode event stream: %w", scanErr)
-		}
+	})
+	if err == nil {
+		err = errors.New("OpenCode event stream disconnected before the turn completed.")
 	}
 	select {
 	case failed <- err:
@@ -747,9 +721,18 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	if !strings.HasPrefix(strings.ToLower(stream.Header.Get("Content-Type")), "text/event-stream") {
 		return errors.New("OpenCode did not provide an event stream.")
 	}
-	events := make(chan map[string]any, 64)
+	events := make(chan map[string]any)
 	streamFailed := make(chan error, 1)
-	go openCodeEvents(ctx, stream.Body, events, streamFailed)
+	streamDone := make(chan struct{})
+	go func() {
+		defer close(streamDone)
+		openCodeEvents(ctx, stream.Body, p.app.dir, events, streamFailed)
+	}()
+	defer func() {
+		cancel()
+		_ = stream.Body.Close()
+		<-streamDone // Release staged files before the turn/data-directory owner exits.
+	}()
 
 	permissions := map[string]bool{}
 	questions := map[string]*atomic.Bool{}
