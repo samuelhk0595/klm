@@ -171,6 +171,14 @@ func (a *app) discoverCatalog(ctx context.Context, s Session, cwd string) (*Mode
 }
 
 func (a *app) sessionForRead(w http.ResponseWriter, r *http.Request) (Session, string, bool) {
+	if a.store != nil {
+		s, cwd, err := a.readSQLConversation(r.Context(), r.PathValue("id"))
+		if err != nil {
+			sqlHTTPError(w, err)
+			return Session{}, "", false
+		}
+		return s, cwd, true
+	}
 	a.mu.Lock()
 	s := a.state.session(r.PathValue("id"))
 	if s == nil {
@@ -578,6 +586,19 @@ func openCodeCatalog(ctx context.Context, b binary, cwd string) (*ModelCatalog, 
 func (p *adapter) resolvedSelection(model, effort string) error {
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
+	if p.app.store != nil {
+		return p.sqlAnalyticsWrite(func(st *sqliteSessionTx) error {
+			s, err := st.sessionMeta(p.id)
+			if err != nil {
+				return err
+			}
+			if s.ResolvedModel == model && s.ResolvedEffort == effort {
+				return nil
+			}
+			s.ResolvedModel, s.ResolvedEffort, s.UpdatedAt = model, effort, now()
+			return st.putSessionMeta(s)
+		})
+	}
 	s := p.app.state.session(p.id)
 	if s == nil || (s.ResolvedModel == model && s.ResolvedEffort == effort) {
 		return nil
@@ -606,6 +627,10 @@ func (a *app) updateModelSettings(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := a.changeSessionSettings(r.Context(), id, body.Model, body.Effort, nil); err != nil {
 		failSessionControl(w, err)
+		return
+	}
+	if a.store != nil {
+		a.respondSQLSession(w, r, id, 200)
 		return
 	}
 	a.mu.Lock()

@@ -14,6 +14,9 @@ import (
 )
 
 func (a *app) libraryRoutes(mux *http.ServeMux) {
+	if a.store != nil {
+		mux.HandleFunc("GET /api/library/mcp/{connectionID}", a.getSQLMCPConnection)
+	}
 	mux.HandleFunc("GET /api/library", a.getLibrary)
 	mux.HandleFunc("POST /api/library/recover", a.recoverLibrary)
 	mux.HandleFunc("POST /api/library/mcp", a.saveMCPConnection)
@@ -30,6 +33,10 @@ func (a *app) libraryRoutes(mux *http.ServeMux) {
 }
 
 func (a *app) getLibrary(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.getSQLLibrary(w, r)
+		return
+	}
 	a.libraryMu.Lock()
 	defer a.libraryMu.Unlock()
 	root, skills, err := scanSkillLibrary()
@@ -191,6 +198,10 @@ func (a *app) libraryDeletionPreview(kind, id string) (libraryDeletionPreview, e
 }
 
 func (a *app) previewLibraryDeletion(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.previewSQLLibraryDeletion(w, r)
+		return
+	}
 	a.authoringMu.Lock()
 	defer a.authoringMu.Unlock()
 	a.libraryMu.Lock()
@@ -204,6 +215,10 @@ func (a *app) previewLibraryDeletion(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) deleteLibraryItem(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.deleteSQLLibraryItem(w, r)
+		return
+	}
 	var body struct {
 		Revision string `json:"revision"`
 	}
@@ -390,6 +405,18 @@ func (a *app) recoverLibrary(w http.ResponseWriter, r *http.Request) {
 	defer a.authoringMu.Unlock()
 	a.libraryMu.Lock()
 	defer a.libraryMu.Unlock()
+	if a.store != nil {
+		if err := a.store.recoverSQLLibrary(r.Context(), func(changes sqliteSessionChanges) {
+			if a.sqlChanges != nil {
+				a.sqlChanges.publish(changes)
+			}
+		}); err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		respond(w, 200, map[string]bool{"recovered": true})
+		return
+	}
 	for {
 		a.mu.Lock()
 		if len(a.state.LibraryDeletions) == 0 {

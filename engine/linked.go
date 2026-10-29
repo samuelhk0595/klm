@@ -108,6 +108,21 @@ func (a *app) sideConversation(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
+	if a.store != nil {
+		a.mu.Lock()
+		id, created, err := a.createSQLSideLocked(r.Context(), r.PathValue("id"), body.Harness)
+		a.mu.Unlock()
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		status := 200
+		if created {
+			status = 201
+		}
+		a.respondSQLSession(w, r, id, status)
+		return
+	}
 	a.mu.Lock()
 	main := a.state.automationSessionView(a.state.session(r.PathValue("id")))
 	if main == nil || main.Role == sessionRoleGeneralAgent || main.ParentID != "" || a.state.project(main.ProjectID) == nil || a.state.project(main.ProjectID).Removed {
@@ -157,6 +172,17 @@ func (a *app) sideHarness(w http.ResponseWriter, r *http.Request) {
 		Harness string `json:"harness"`
 	}
 	if !decode(w, r, &body) {
+		return
+	}
+	if a.store != nil {
+		a.mu.Lock()
+		err := a.changeSQLHarnessLocked(r.Context(), r.PathValue("id"), body.Harness)
+		a.mu.Unlock()
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		a.respondSQLSession(w, r, r.PathValue("id"), 200)
 		return
 	}
 	a.mu.Lock()
@@ -302,6 +328,13 @@ func (a *app) scheduleLinkedLocked() {
 	if a.closing || a.storageErr != nil {
 		return
 	}
+	if a.store != nil {
+		a.scheduleSQLMessagesLocked()
+		a.scheduleGraphActivitiesLocked()
+		a.scheduleGraphNotificationsLocked()
+		a.scheduleSQLConsultationsLocked()
+		return
+	}
 	a.scheduleMessagesLocked()
 	a.scheduleGraphActivitiesLocked()
 	a.scheduleGraphNotificationsLocked()
@@ -371,6 +404,20 @@ func (a *app) scheduleLinkedLocked() {
 }
 
 func (a *app) cancelLinkedLocked(id string) error {
+	if a.store != nil {
+		var ids []string
+		err := a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error { var err error; ids, err = st.cancelConsultations(id); return err })
+		if err == nil {
+			for _, t := range a.runs {
+				for _, id := range ids {
+					if t.consultationID == id {
+						t.cancel()
+					}
+				}
+			}
+		}
+		return err
+	}
 	return a.commitLocked(func(d *diskState) {
 		for i := range d.Consultations {
 			c := &d.Consultations[i]
@@ -394,6 +441,10 @@ func (a *app) cancelLinkedLocked(id string) error {
 }
 
 func (a *app) cancelConsultation(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.cancelSQLConsultation(w, r)
+		return
+	}
 	a.mu.Lock()
 	c := a.state.consultation(r.PathValue("requestID"))
 	if c == nil || (c.From != r.PathValue("id") && c.To != r.PathValue("id")) {
@@ -435,6 +486,40 @@ func (a *app) expireConsultations() {
 			return
 		case <-ticker.C:
 			a.mu.Lock()
+			if a.store != nil {
+				_ = a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
+					ids, err := sqliteQueryIDs(st.ctx, st.tx, `SELECT id FROM data_consultations WHERE status IN ('queued','answering') AND created_at<? ORDER BY created_at LIMIT 100`, sqliteTimeKey(time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339Nano)))
+					if err != nil {
+						return err
+					}
+					for _, id := range ids {
+						var c Consultation
+						if err := decodeSQLiteRecord(st.ctx, st.tx, "consultations", id, 1<<20, &c); err != nil {
+							return err
+						}
+						c.Status, c.Error, c.UpdatedAt = "failed", "Consultation timed out after ten minutes.", now()
+						if err := st.putRoot("consultations", id, c); err != nil {
+							return err
+						}
+						if err := st.syncConsultationCards(c, c.UpdatedAt); err != nil {
+							return err
+						}
+					}
+					return nil
+				})
+				for _, t := range a.runs {
+					if t.consultationID == "" {
+						continue
+					}
+					var status string
+					if err := a.store.readers.QueryRowContext(a.ctx, `SELECT status FROM data_consultations WHERE id=?`, t.consultationID).Scan(&status); err == nil && status == "failed" && !t.delivery {
+						t.cancel()
+					}
+				}
+				a.scheduleLinkedLocked()
+				a.mu.Unlock()
+				continue
+			}
 			for _, c := range a.state.Consultations {
 				created, _ := time.Parse(time.RFC3339Nano, c.CreatedAt)
 				if !consultationTerminal(c.Status) && time.Since(created) > 10*time.Minute {

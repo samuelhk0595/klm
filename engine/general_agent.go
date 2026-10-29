@@ -1,6 +1,8 @@
 package main
 
 import (
+	"database/sql"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -123,6 +125,10 @@ func (a *app) generalConversation(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, err.Error())
 		return
 	}
+	if a.store != nil {
+		a.respondSQLSession(w, r, id, 200)
+		return
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	respond(w, 200, a.currentSessionUpdateLocked(id))
@@ -139,6 +145,29 @@ func (a *app) ensureGeneralSession() (string, error) {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.store != nil {
+		var id string
+		err := a.store.readers.QueryRowContext(a.ctx, `SELECT id FROM data_sessions WHERE role='general_agent' LIMIT 1`).Scan(&id)
+		if err == nil {
+			return id, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+		harness := "pi"
+		for _, option := range a.harnesses {
+			if option.Available {
+				harness = option.ID
+				break
+			}
+		}
+		s := newTopLevelSession("", "General agent", "", harness, "", "")
+		s.Role, s.ExecutionCWD = sessionRoleGeneralAgent, cwd
+		if err := a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error { return st.createSession(s, a.dir) }); err != nil {
+			return "", err
+		}
+		return s.ID, nil
+	}
 	if s := a.state.generalSession(); s != nil {
 		return s.ID, nil
 	}

@@ -73,11 +73,24 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 	}
 	p.app.mu.Lock()
 	session := p.app.state.session(p.id)
+	var sqlNative nativeSession
+	if p.app.store != nil {
+		meta, native, _, readErr := p.app.store.readTurnSession(ctx, p.id)
+		if readErr != nil {
+			p.app.mu.Unlock()
+			return readErr
+		}
+		session = &meta
+		sqlNative = native
+	}
 	if session == nil {
 		p.app.mu.Unlock()
 		return errors.New("Pi session no longer exists.")
 	}
 	native, dataDir := p.app.state.Native[p.id], p.app.dir
+	if p.app.store != nil {
+		native = sqlNative
+	}
 	p.app.mu.Unlock()
 	if !filepath.IsAbs(native.Path) {
 		return errors.New("Pi requires an absolute persisted session file path.")

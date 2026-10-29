@@ -384,6 +384,9 @@ func saveState(dir string, d *diskState) error {
 
 // Caller holds app.mu. Every writer uses the same ordered durable transaction gate.
 func (a *app) commitLocked(change func(*diskState)) error {
+	if a.store != nil {
+		return a.failStorageLocked(errors.New("legacy persistence attempted while SQLite is authoritative"))
+	}
 	return a.commitTransactionLocked(func(d *diskState) error { change(d); return nil })
 }
 

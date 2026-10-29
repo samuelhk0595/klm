@@ -8,6 +8,10 @@ import (
 )
 
 func (a *app) getAnalytics(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.getSQLAnalytics(w, r)
+		return
+	}
 	q, err := queryAnalytics(r)
 	if err != "" {
 		fail(w, 400, err)

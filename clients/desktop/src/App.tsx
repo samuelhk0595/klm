@@ -1,6 +1,8 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Download, Focus, GitBranch, Maximize2, Minimize2, Minus, PanelLeft, PanelRight, PanelsTopLeft } from 'lucide-react';
 import { IS_DESKTOP, IS_MOBILE_HOST, openFocus, startWindowDrag } from './platform';
+import { clientFetch } from './clientAuth';
+import { bindEngineIdentity, currentEngineIdentity, engineStorageKey } from './engineIdentity';
 import { Button, IconButton } from './design-system/Button';
 import { BottomSheet } from './design-system/BottomSheet';
 import { Badge } from './design-system/Badge';
@@ -23,6 +25,7 @@ import { SessionStatusBar } from './features/chat/SessionStatusBar';
 import { ModelPicker } from './features/chat/ModelPicker';
 import { GeneralHarnessPicker } from './features/chat/GeneralHarnessPicker';
 import { KlmAgentWorkspace } from './features/klm-agent/KlmAgentWorkspace';
+import { ActivityPagingContext } from './features/klm-agent/activityPaging';
 import { SessionOverlay } from './features/klm-agent/SessionOverlay';
 import { isSessionResponse, mergeSessions, prependHistory } from './features/chat/sessionState';
 import { ConversationHistory } from './features/chat/ConversationHistory';
@@ -32,9 +35,10 @@ import { GraphPicker } from './features/chat/GraphPicker';
 import { PermissionCard } from './features/chat/PermissionCard';
 import { QuestionCard } from './features/chat/QuestionCard';
 import { MessageQueue } from './features/chat/MessageQueue';
+import { GraphRequestPages } from './features/chat/GraphRequestPages';
 import { PendingSubmission, readPendingSubmissions, savePendingSubmissions, type LocalSubmission } from './features/chat/PendingSubmission';
 import { MessageComposer, type ComposerDraft, type SendMode } from './features/chat/MessageComposer';
-import { connectUpdates } from './features/chat/updatesConnection';
+import { readConversationWindow, subscribeScope } from './features/chat/scopedConnection';
 import { DesignSystem } from './DesignSystem';
 import { ProjectRail } from './features/projects/ProjectRail';
 import { ProjectDialog } from './features/projects/ProjectDialog';
@@ -43,7 +47,7 @@ import { StopAutomationDialog } from './features/automations/StopAutomationDialo
 import { useActivityBoard } from './features/activity-board/useActivityBoard';
 import { SettingsDialog } from './features/settings/SettingsDialog';
 import { BackgroundPicker } from './features/settings/BackgroundPicker';
-import { ENGINE_URL, EngineRequestError, getConversationGraph, mergeGraphState, selectConversationGraph, request, type ConversationGraphState, type EngineEvent, type EngineState, type EngineSnapshot, type EventPage, type Harness, type Project, type Session, type SessionResponse, type SessionMetadata, type SourceReference } from './engine';
+import { ENGINE_URL, EngineRequestError, getConversationGraph, mergeGraphState, selectConversationGraph, request, sessionMetadata as normalizeSessionMetadata, type ConversationGraphState, type EngineEvent, type EngineState, type EngineSnapshot, type EventPage, type Harness, type Project, type Session, type SessionResponse, type SessionMetadata, type SourceReference } from './engine';
 import klmIcon from './features/projects/klm-icon.png';
 
 const GraphView = lazy(() => import('./features/graphs/GraphView').then(module => ({ default: module.GraphView })));
@@ -94,7 +98,7 @@ const navigationStorageKey = `klm.workspace-navigation.v1:${ENGINE_URL}`;
 function readWorkspaceNavigation(): WorkspaceNavigation {
   const fallback: WorkspaceNavigation = { activeProjectId: '', selectedSessions: {}, openSideSessions: [], collapsedTopics: {}, collapsedArchivedProjects: [] };
   try {
-    const saved: unknown = JSON.parse(localStorage.getItem(navigationStorageKey) ?? 'null');
+    const saved: unknown = JSON.parse(localStorage.getItem(engineStorageKey(navigationStorageKey)) ?? 'null');
     if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return fallback;
     const value = saved as Partial<WorkspaceNavigation>;
     return {
@@ -115,6 +119,7 @@ function readWorkspaceNavigation(): WorkspaceNavigation {
 }
 
 export function App() {
+  const [engineIdentity, setEngineIdentity] = useState(currentEngineIdentity);
   const [engine, setEngine] = useState<EngineState>({ projects: [], sessions: [], harnesses: [] });
   const [modelPreviews, setModelPreviews] = useState<Record<string, { model: string; effort: string }>>({});
   const { projects, harnesses } = engine;
@@ -122,6 +127,19 @@ export function App() {
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
   const [loaded, setLoaded] = useState(false);
+  const [pageVisible, setPageVisible] = useState(!document.hidden);
+  const [generalChatVisible, setGeneralChatVisible] = useState(false);
+  const [projectSearch, setProjectSearch] = useState('');
+  const [projectPage, setProjectPage] = useState<{ id: string; next: string; topicsNext: string; busy: boolean }>({ id: '', next: '', topicsNext: '', busy: false });
+  const historyAccess = useRef(new Map<string, number>());
+  const projectWindow = useRef({ key: '', pages: 1, start: '' });
+  const topicWindow = useRef({ key: '', cursor: '' });
+  const metadataPins = useRef(new Set<string>());
+  const projectMetadataIds = useRef(new Set<string>());
+  const activityIds = useRef(new Set<string>());
+  const [activityCursor, setActivityCursor] = useState('');
+  const [activityNext, setActivityNext] = useState('');
+  useEffect(() => { const update = () => setPageVisible(!document.hidden); document.addEventListener('visibilitychange', update); return () => document.removeEventListener('visibilitychange', update); }, []);
   const [connectionError, setConnectionError] = useState('');
   const [focusError, setFocusError] = useState('');
   const [savedFocusLayout] = useState<FocusLayout>(() => !IS_DESKTOP && !IS_MOBILE_HOST ? readFocusLayout() : { maximized: false, minimized: false, front: 'main', sessionIds: [] });
@@ -148,7 +166,7 @@ export function App() {
     return () => media.removeEventListener('change', resize);
   }, []);
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || !pageVisible) return;
     const valid = new Set(floatingSessions.map(item => item.id));
     const known = new Set(sessions.map(item => item.id));
     const unavailable = (id: string) => !valid.has(id) && (known.has(id) || unavailableFloatingIds.includes(id));
@@ -253,7 +271,23 @@ export function App() {
   const project = projects.find(item => item.id === activeProjectId) ?? projects[0];
   const projectSessions = sessions.filter(item => item.projectId === project?.id && !item.parentId && item.role !== 'graph_node');
   const visibleProjectSessions = projectSessions.filter(item => !item.archived && !topicArchived(project, item)).sort(newestSessionFirst);
-  const projectSession = projectSessions.find(item => item.id === selectedSessions[project?.id ?? '']) ?? visibleProjectSessions[0];
+  const selectedProjectSessionId = selectedSessions[project?.id ?? ''];
+  const projectSession = selectedProjectSessionId ? projectSessions.find(item => item.id === selectedProjectSessionId) : visibleProjectSessions[0];
+  const unresolvedSelection = selectedProjectSessionId && !sessions.some(item => item.id === selectedProjectSessionId) ? selectedProjectSessionId : '';
+  useEffect(() => {
+    if (!loaded || !pageVisible || generalView || !project || !unresolvedSelection) return;
+    const controller = new AbortController(); const projectId = project.id;
+    void request<Session>(`/api/sessions/${encodeURIComponent(unresolvedSelection)}`, 'GET', undefined, 15000, controller.signal).then(next => {
+      if (!controller.signal.aborted) receiveSession(next);
+    }).catch(error => {
+      if (controller.signal.aborted) return;
+      if (error instanceof EngineRequestError && error.status === 404) setWorkspaceNavigation(current => {
+        if (current.selectedSessions[projectId] !== unresolvedSelection) return current;
+        const selectedSessions = { ...current.selectedSessions }; delete selectedSessions[projectId]; return { ...current, selectedSessions };
+      }); else setConnectionError(errorMessage(error));
+    });
+    return () => controller.abort();
+  }, [loaded, pageVisible, generalView, project?.id, unresolvedSelection]);
   const currentTopic = sessionTopic(project, projectSession);
   const projectSessionArchived = !!projectSession?.archived || topicArchived(project, projectSession);
   const generalSession = sessions.find(item => item.role === 'general_agent');
@@ -333,6 +367,7 @@ export function App() {
   const [sideErrors, setSideErrors] = useState<Record<string, string>>({});
   const openingSide = useRef(new Set<string>());
   const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>({});
+  metadataPins.current = new Set([activeId, generalSession?.id ?? '', sideSession?.id ?? '', ...floatingSessionIds, ...Object.values(floatingSubagentIds), ...mobileChatSheets.flatMap(sheet => [sheet.sessionId, sheet.subagentId ?? '']), ...[...historyAccess.current].sort((a,b) => b[1]-a[1]).slice(0,6).map(([id]) => id)]);
   const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(window.location.search).get('klm-library') === '1');
   const [automationStop, setAutomationStop] = useState<{ resolve: (confirmed: boolean) => void }>();
   const shell = useRef<HTMLDivElement>(null);
@@ -365,11 +400,11 @@ export function App() {
     // empty render must not erase the project/session saved before a reload.
     if (!loaded) return;
     try {
-      localStorage.setItem(navigationStorageKey, JSON.stringify({
+      localStorage.setItem(engineStorageKey(navigationStorageKey), JSON.stringify({
         ...workspaceNavigation,
         generalOpen: generalView,
         activeProjectId: project?.id ?? '',
-        selectedSessions: project && projectSession ? { ...selectedSessions, [project.id]: projectSession.id } : selectedSessions,
+        selectedSessions,
       }));
     } catch { /* Navigation still works when browser storage is unavailable. */ }
   }, [loaded, workspaceNavigation, project?.id, projectSession?.id, generalView, selectedSessions]);
@@ -391,6 +426,7 @@ export function App() {
   useEffect(() => {
     let active = true;
     let refreshing = false;
+    if (!pageVisible) return;
     async function refresh() {
       if (refreshing) return;
       refreshing = true;
@@ -398,16 +434,40 @@ export function App() {
       try {
         const next = await request<EngineSnapshot>('/api/state');
         if (!active) return;
+        const identityChanged = next.engineId ? bindEngineIdentity(next.engineId) : false;
+        if (next.engineId) setEngineIdentity(next.engineId);
+        if (identityChanged) {
+          historyAccess.current.clear(); projectMetadataIds.current.clear(); activityIds.current.clear(); metadataPins.current.clear();
+          projectWindow.current = { key: '', pages: 1, start: '' }; topicWindow.current = { key: '', cursor: '' };
+          for (const id of submissionTails.current.keys()) stopVersions.current.set(id, (stopVersions.current.get(id) ?? 0) + 1);
+          const restoredNavigation = readWorkspaceNavigation(); const restoredSubmissions = readPendingSubmissions();
+          for (const pending of submissionControllers.current.values()) pending.controller.abort();
+          submissionControllers.current.clear(); submissionTails.current.clear(); submissionRequests.current.clear(); generalHarnessBlocks.current.clear();
+          pending.current.clear(); setPendingSessions({}); setSessionErrors({}); setSideErrors({}); setGraphErrors({}); setSessionTabs({}); setOpenSubagentTabs({});
+          automationStop?.resolve(false); setAutomationStop(undefined); setCreatingSession(null); setRenamingSession(null); setEditingProject(null); setProjectSettingsId(''); setChoosingTopicSessionId(''); setAddingProject(null); setSettingsOpen(false);
+          for (const [session, items] of Object.entries(restoredSubmissions)) for (const item of items) if (item.status !== 'failed') generalHarnessBlocks.current.set(item.id, session);
+          setEngine({ projects: [], sessions: [], harnesses: [] }); setLoaded(false);
+          setDrafts({}); setModelPreviews({}); setLocalMessages(restoredSubmissions); setWorkspaceNavigation(restoredNavigation); setView(restoredNavigation.generalOpen ? 'general' : 'chat');
+          const layout = readFocusLayout(); setFloatingSessionIds(layout.sessionIds); setFloatingSubagentIds(layout.subagentIds ?? {}); setUnavailableFloatingIds([]);
+          setOverlaySessionId(''); setMobileChatSheets([]); setActivityCursor(''); setRefreshVersion(n => n + 1);
+          return;
+        }
+        const activity = await request<{ items: Session[]; nextCursor?: string }>(`/api/activity/sessions?limit=100${activityCursor ? `&cursor=${encodeURIComponent(activityCursor)}` : ''}`);
+        if (!active) return;
         const projectsUnchanged = revision === projectRevision.current;
+        const previousActivityIds = activityIds.current;
         setEngine(current => {
-          const visibleProjects = projectsUnchanged ? next.projects : current.projects;
+          if (identityChanged) current = { projects: [], sessions: [], harnesses: [] };
+          const visibleProjects = projectsUnchanged ? next.projects.map(p => ({ ...current.projects.find(old => old.id === p.id), ...p })) : current.projects;
           const visibleIds = new Set(visibleProjects.map(project => project.id));
           return {
             projects: visibleProjects,
-            sessions: orderSessionSnapshot(current.sessions, next.sessions).filter(session => visibleIds.has(session.projectId) || session.role === 'general_agent' || session.projectId === '' && session.role === 'subagent'),
+            sessions: orderSessionSnapshot(current.sessions.filter(s => !previousActivityIds.has(s.id) || activity.items.some(next => next.id === s.id) || metadataPins.current.has(s.id) || projectMetadataIds.current.has(s.id)).map(s => previousActivityIds.has(s.id) && !activity.items.some(next => next.id === s.id) ? { ...s, activityListed: false } : s), [...next.sessions, ...activity.items.map(s => ({ ...normalizeSessionMetadata(s), activityListed: true }))]).filter(session => visibleIds.has(session.projectId) || session.role === 'general_agent' || session.projectId === '' && session.role === 'subagent'),
             harnesses: next.harnesses,
           };
         });
+        activityIds.current = new Set(activity.items.map(s => s.id));
+        setActivityNext(activity.nextCursor ?? '');
         setLoaded(true);
         setConnectionError('');
       } catch (error) {
@@ -417,9 +477,69 @@ export function App() {
       }
     }
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 30000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [refreshVersion, loaded]);
+    const timer = window.setInterval(() => { if (!document.hidden) void refresh(); }, 30000);
+    let queued: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = pageVisible ? subscribeScope('global', '', () => { if (!queued) queued = setTimeout(() => { queued = undefined; void refresh(); }, 1000); }) : () => {};
+    return () => { active = false; clearTimeout(queued); window.clearInterval(timer); unsubscribe(); };
+  }, [refreshVersion, pageVisible, activityCursor]);
+
+  useEffect(() => {
+    if (!loaded || !pageVisible || generalView || !project) return;
+    const id = project.id; const controller = new AbortController(); let pending = false; let again = false;
+    const key = `${id}/${projectSearch}`;
+    if (projectWindow.current.key !== key) projectWindow.current = { key, pages: 1, start: '' };
+    if (topicWindow.current.key !== key) topicWindow.current = { key, cursor: '' };
+    async function readWindow() {
+      const items: Session[] = []; let next = projectWindow.current.start;
+      for (let pageIndex = 0; pageIndex < projectWindow.current.pages; pageIndex++) {
+        const page = await request<{ items: Session[]; nextCursor?: string }>(`/api/projects/${encodeURIComponent(id)}/sessions?limit=100&archived=all&search=${encodeURIComponent(projectSearch)}${next ? `&cursor=${encodeURIComponent(next)}` : ''}`, 'GET', undefined, 15000, controller.signal);
+        items.push(...page.items); next = page.nextCursor ?? ''; if (!next) break;
+      }
+      return { items, nextCursor: next };
+    }
+    async function load() {
+      if (pending) { again = true; return; } pending = true;
+      try {
+        const [page, topics] = await Promise.all([
+          readWindow(),
+          request<{ items: Topic[]; nextCursor?: string }>(`/api/projects/${encodeURIComponent(id)}/topics?limit=200&search=${encodeURIComponent(projectSearch)}${topicWindow.current.cursor ? `&cursor=${encodeURIComponent(topicWindow.current.cursor)}` : ''}`, 'GET', undefined, 15000, controller.signal),
+        ]);
+        if (controller.signal.aborted) return;
+        const listed = new Set(page.items.map(item => item.id));
+        projectMetadataIds.current = listed;
+        setEngine(current => ({ ...current, projects: current.projects.map(p => p.id === id ? { ...p, topics: topics.items, topicOrder: topics.items.map(t => t.id) } : { ...p, topics: undefined, topicOrder: undefined }), sessions: mergeSessions(current.sessions.filter(s => listed.has(s.id) || metadataPins.current.has(s.id) || activityIds.current.has(s.id)), page.items.map(normalizeSessionMetadata)) }));
+        setProjectPage({ id, next: page.nextCursor ?? '', topicsNext: topics.nextCursor ?? '', busy: false });
+        setConnectionError('');
+      } catch (error) {
+        if (!controller.signal.aborted && error instanceof EngineRequestError && error.status === 409 && (projectWindow.current.start || topicWindow.current.cursor)) { projectWindow.current.start = ''; topicWindow.current.cursor = ''; again = true; }
+        else if (!controller.signal.aborted) setConnectionError(errorMessage(error));
+      }
+      finally { pending = false; if (again && !controller.signal.aborted) { again = false; void load(); } }
+    }
+    void load(); let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = subscribeScope('project', id, () => { if (!timer) timer = setTimeout(() => { timer = undefined; void load(); }, 750); });
+    return () => { controller.abort(); clearTimeout(timer); unsubscribe(); };
+  }, [loaded, project?.id, generalView, pageVisible, refreshVersion, projectSearch]);
+
+  async function loadMoreProject(topics = false) {
+    if (!project || projectPage.id !== project.id || projectPage.busy) return;
+    const id = project.id; const cursor = topics ? projectPage.topicsNext : projectPage.next; if (!cursor) return;
+    setProjectPage(p => ({ ...p, busy: true }));
+    try {
+      if (topics) {
+        const page = await request<{ items: Topic[]; nextCursor?: string }>(`/api/projects/${id}/topics?limit=200&search=${encodeURIComponent(projectSearch)}&cursor=${encodeURIComponent(cursor)}`);
+        topicWindow.current.cursor = cursor;
+        setEngine(current => ({ ...current, projects: current.projects.map(p => p.id === id ? { ...p, topics: page.items, topicOrder: page.items.map(t => t.id) } : p) }));
+        setProjectPage(p => ({ ...p, topicsNext: page.nextCursor ?? '' }));
+      } else {
+        const page = await request<{ items: Session[]; nextCursor?: string }>(`/api/projects/${id}/sessions?archived=all&search=${encodeURIComponent(projectSearch)}&cursor=${encodeURIComponent(cursor)}`);
+        const rotate = projectWindow.current.pages >= 4;
+        if (rotate) projectWindow.current = { ...projectWindow.current, start: cursor, pages: 1 }; else projectWindow.current.pages++;
+        projectMetadataIds.current = new Set([...(rotate ? [] : projectMetadataIds.current), ...page.items.map(s => s.id)]);
+        setEngine(current => ({ ...current, sessions: mergeSessions(rotate ? current.sessions.filter(s => metadataPins.current.has(s.id) || activityIds.current.has(s.id)) : current.sessions, page.items.map(normalizeSessionMetadata)) })); setProjectPage(p => ({ ...p, next: page.nextCursor ?? '' }));
+      }
+    } catch (error) { setConnectionError(errorMessage(error)); } finally { setProjectPage(p => ({ ...p, busy: false })); }
+  }
 
   useEffect(() => {
     if (!activeId) {
@@ -466,9 +586,11 @@ export function App() {
       } finally { pending = false; }
     }
     void refreshGraph();
+    let queued: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = pageVisible ? subscribeScope('conversation', activeId, () => { if (!queued) queued = setTimeout(() => { queued = undefined; void refreshGraph(); }, 250); }) : () => {};
     const timer = window.setInterval(() => { if (stream.current?.readyState !== EventSource.OPEN) void refreshGraph(); }, 30000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [activeId, generalConversation, catalog, refreshVersion, applyGraph]);
+    return () => { active = false; clearTimeout(queued); unsubscribe(); window.clearInterval(timer); };
+  }, [activeId, generalConversation, catalog, refreshVersion, applyGraph, pageVisible]);
   useEffect(() => {
     if (!selectedGraphId) setSessionTabs(current => current[activeId] === 'graph' ? { ...current, [activeId]: 'chat' } : current);
   }, [activeId, selectedGraphId]);
@@ -483,53 +605,52 @@ export function App() {
     finally { graphSelectionPending.current.delete(id); setGraphPreview(current => { const next = { ...current }; delete next[id]; return next; }); setSelectingGraphs(current => ({ ...current, [id]: false })); }
   }
   const streamSet = new Set<string>();
-  if (activeId) streamSet.add(activeId);
-  if (generalView && generalSession) streamSet.add(generalSession.id);
-  if (sideVisible && sideSession) streamSet.add(sideSession.id);
-  mobileChats.forEach(sheet => {
-    streamSet.add(sheet.session.id);
-    if (sheet.subagentId) streamSet.add(sheet.subagentId);
-    sheet.session.events.forEach(event => {
-      if (event.type === 'subagent' && ['running', 'pending', 'started'].includes(event.status ?? 'running') && typeof event.data?.childSessionId === 'string') streamSet.add(event.data.childSessionId);
-    });
-  });
-  floatingSessions.forEach(target => {
-    streamSet.add(target.id);
-    const childId = floatingSubagentIds[target.id];
-    if (childId) streamSet.add(childId);
-    target.events.forEach(event => {
-      if (event.type === 'subagent' && ['running', 'pending', 'started'].includes(event.status ?? 'running') && typeof event.data?.childSessionId === 'string') streamSet.add(event.data.childSessionId);
-    });
-  });
-  session?.events.forEach(event => {
-    const childSessionId = event.type === 'subagent' && ['running', 'pending', 'started'].includes(event.status ?? 'running') && typeof event.data?.childSessionId === 'string' ? event.data.childSessionId : '';
-    if (childSessionId) streamSet.add(childSessionId);
-  });
-  openSubagentIds.forEach(id => streamSet.add(id));
+  if (pageVisible) {
+    if (activeId && chatView && activeTab !== 'graph' && (!focusEnabled || !focusMinimized) && !mobileNavigationVisible && (!generalView || generalChatVisible)) streamSet.add(activeSubagentId || activeId);
+    if (generalView && generalChatVisible && overlaySession && generalSession) streamSet.add(generalSession.id);
+    if (sideVisible && sideSession) streamSet.add(sideSession.id);
+    const sheet = mobileChats.at(-1); if (sheet) streamSet.add(sheet.subagentId || sheet.session.id);
+    if (focusEnabled) floatingSessions.forEach(target => streamSet.add(floatingSubagentIds[target.id] || target.id));
+  }
   const streamIds = JSON.stringify([...streamSet].sort());
   useEffect(() => {
     const ids = JSON.parse(streamIds) as string[];
-    return connectUpdates(ENGINE_URL, ids,
-      () => Object.fromEntries(sessionsRef.current.filter(item => ids.includes(item.id) && item.history).map(item => [item.id, item.history!.revision])),
-      (event, source) => {
-      if (stream.current !== source) return;
-      try {
-        const packet: unknown = JSON.parse(event.data);
-        if (!packet || typeof packet !== 'object' || !('kind' in packet)) throw new Error('Invalid update');
-        if (packet.kind === 'inventory' && 'sessions' in packet && 'projects' in packet && 'harnesses' in packet) {
-          const snapshot = packet as EngineSnapshot & { kind: string };
-          setEngine(current => ({ projects: snapshot.projects, sessions: orderSessionSnapshot(current.sessions, snapshot.sessions), harnesses: snapshot.harnesses }));
-          setLoaded(true);
-        } else if (packet.kind === 'summary' && 'summary' in packet) {
-          setEngine(current => { const sessions = mergeSessions(current.sessions, [packet.summary as Session]); return sessions === current.sessions ? current : { ...current, sessions }; });
-        } else if (packet.kind === 'session' && 'update' in packet && isSessionResponse(packet.update)) {
-          setEngine(current => { const sessions = mergeSessions(current.sessions, [packet.update as SessionResponse], true); return sessions === current.sessions ? current : { ...current, sessions }; });
-        } else throw new Error('Invalid update');
-        setConnectionError('');
-      } catch { setConnectionError('The engine sent an invalid live update. Retry to refresh the session.'); }
-      },
-      () => setConnectionError('Live updates disconnected. Reconnecting automatically.'),
-      source => { stream.current = source; });
+    const cleanups = ids.map(id => {
+      const controller = new AbortController(); let pending = false; let again = false; let timer: ReturnType<typeof setTimeout> | undefined;
+      let latestNotice: { kind: string; revision: string } | undefined;
+      let resetPending = false;
+      const schedule = () => {
+        if (controller.signal.aborted) return;
+        if (pending) { again = true; return; }
+        if (timer) return;
+        timer = setTimeout(() => {
+          timer = undefined; const notice = latestNotice; latestNotice = undefined; const reset = resetPending; resetPending = false;
+          const history = sessionsRef.current.find(s => s.id === id)?.history;
+          if (!reset && notice?.kind === 'ready' && history && BigInt(history.revision) >= BigInt(notice.revision)) return;
+          void refresh(reset);
+        }, 150);
+      };
+      const refresh = async (reset = false) => {
+        if (controller.signal.aborted) return;
+        if (pending) { again = true; return; } pending = true;
+        try {
+          const update = await readConversationWindow(id, sessionsRef.current.find(s => s.id === id), controller.signal, reset);
+          if (controller.signal.aborted) return;
+          historyAccess.current.set(id, Date.now());
+          if (historyAccess.current.size > 64) for (const [old] of [...historyAccess.current].sort((a,b) => a[1]-b[1])) { if (!ids.includes(old)) historyAccess.current.delete(old); if (historyAccess.current.size <= 64) break; }
+          setEngine(current => {
+            const merged = mergeSessions(current.sessions, [update], true);
+            const keep = new Set([...ids, ...[...historyAccess.current].sort((a,b) => b[1]-a[1]).slice(0,6).map(([id]) => id)]);
+            return { ...current, sessions: merged.map(s => !keep.has(s.id) && s.history ? { ...s, events: [], history: undefined } : s) };
+          }); setConnectionError('');
+        } catch (error) { if (!controller.signal.aborted) setConnectionError(errorMessage(error)); }
+        finally { pending = false; if (again && !controller.signal.aborted) { again = false; schedule(); } }
+      };
+      const unsubscribe = subscribeScope('conversation', id, notice => { latestNotice = notice; resetPending ||= notice.kind === 'reset'; schedule(); });
+      void refresh();
+      return () => { controller.abort(); clearTimeout(timer); unsubscribe(); };
+    });
+    return () => cleanups.forEach(close => close());
   }, [streamIds, refreshVersion]);
 
   useEffect(() => {
@@ -582,12 +703,13 @@ export function App() {
     submissionTails.current.delete(id);
   }
   async function updateSession(target: Session, action: 'messages' | 'stop' | 'harness', body: (ComposerDraft & { sources?: SourceReference[]; mode?: SendMode }) | { harness: Harness['id'] } | Record<string, never>) {
+    const identity = currentEngineIdentity();
     const id = target.id;
     let stopBody: { automationRunId: string } | undefined;
     if (action === 'stop' && target.automation?.status === 'running') {
       if (automationStop) return false;
       const confirmed = await new Promise<boolean>(resolve => setAutomationStop({ resolve }));
-      if (!confirmed) return false;
+      if (!confirmed || identity !== currentEngineIdentity()) return false;
       stopBody = { automationRunId: target.automation.runId };
     }
     if (action === 'harness' && target.role === 'general_agent' && generalHarnessBlocked(target)) return false;
@@ -643,6 +765,7 @@ export function App() {
     }
   }
   function submitLocal(target: Session, message: LocalSubmission) {
+    const identity = currentEngineIdentity();
     const { id, draft, sources, mode } = message;
     if (submissionRequests.current.has(id)) return;
     submissionRequests.current.add(id);
@@ -654,6 +777,7 @@ export function App() {
     const previous = submissionTails.current.get(target.id) ?? Promise.resolve();
     const stopVersion = stopVersions.current.get(target.id) ?? 0;
     const task = previous.then(() => {
+      if (identity !== currentEngineIdentity()) throw new DOMException('Engine identity changed.', 'AbortError');
       if ((stopVersions.current.get(target.id) ?? 0) !== stopVersion) throw new EngineRequestError('Message paused by an interruption. Restore it when ready.', 409);
       const controller = new AbortController();
       submissionControllers.current.set(id, { sessionId: target.id, controller });
@@ -661,15 +785,18 @@ export function App() {
       return request<SessionResponse>(`/api/sessions/${encodeURIComponent(target.id)}/messages`, 'POST', { ...draft, sources, mode, clientId: id }, 45000, signal);
     })
       .then(next => {
+        if (identity !== currentEngineIdentity()) return;
         setEngine(current => { const sessions = mergeSessions(current.sessions, [next], 'mutation'); return sessions === current.sessions ? current : { ...current, sessions }; });
         setLocalMessages(current => ({ ...current, [target.id]: (current[target.id] ?? []).map(item => item.id === id ? { ...item, status: 'accepted' } : item) }));
         setSessionErrors(current => ({ ...current, [target.id]: '' }));
       }).catch(error => {
+        if (identity !== currentEngineIdentity()) return;
         const status = error instanceof EngineRequestError && error.status >= 400 && error.status < 500 && error.status !== 408 ? 'failed' : 'uncertain';
         if (status === 'failed') generalHarnessBlocks.current.delete(id);
         setLocalMessages(current => ({ ...current, [target.id]: (current[target.id] ?? []).map(item => item.id === id ? { ...item, status } : item) }));
         setSessionErrors(current => ({ ...current, [target.id]: errorMessage(error) }));
       }).finally(() => {
+        if (identity !== currentEngineIdentity()) return;
         submissionRequests.current.delete(id);
         submissionControllers.current.delete(id);
         if (submissionTails.current.get(target.id) === task) submissionTails.current.delete(target.id);
@@ -699,7 +826,7 @@ export function App() {
     return sendMessage(session, draft, [], mode);
   }
   function receiveSession(snapshot: SessionResponse) {
-    setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [snapshot]) }));
+    setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [snapshot], 'kind' in snapshot && snapshot.kind === 'reset' && !!snapshot.history) }));
   }
   function receiveHistory(page: EventPage) {
     setEngine(current => ({ ...current, sessions: prependHistory(current.sessions, page) }));
@@ -751,8 +878,9 @@ export function App() {
     if (!session) return;
     const id = session.id;
     try {
-      const snapshot = await request<Session>(`/api/sessions/${encodeURIComponent(id)}/export`);
-      const url = URL.createObjectURL(new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' }));
+      const response = await clientFetch(`/api/sessions/${encodeURIComponent(id)}/export`, { signal: AbortSignal.timeout(60000) });
+      if (!response.ok) throw new Error('Could not export the conversation. Retry.');
+      const url = URL.createObjectURL(await response.blob());
       const link = document.createElement('a'); link.href = url; link.download = `session-${id}.json`; link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) { setSessionErrors(current => ({ ...current, [id]: errorMessage(error) })); }
@@ -771,6 +899,7 @@ export function App() {
     setMobileChatSheets(current => current.filter(sheet => sheet.id !== id));
   }
   function openSessionOverlay(target: Session) {
+    receiveSession(target);
     if (IS_MOBILE_HOST) {
       pushMobileChatSheet(target.id);
       return;
@@ -779,6 +908,7 @@ export function App() {
     setSessionTabs(current => ({ ...current, [target.id]: 'chat' }));
   }
   function openSessionInProject(target: Session) {
+    receiveSession(target);
     if (target.role === 'general_agent') {
       navigation.current += 1;
       setMobileProjectRailOpen(false);
@@ -801,6 +931,7 @@ export function App() {
     setFocusMinimized(false); setFocusFront('main');
   }
   function openFloatingSession(target: Session) {
+    receiveSession(target);
     setFloatingSessionIds(ids => ids.includes(target.id) ? ids : [...ids, target.id]);
     setFloatingSubagentIds(current => { if (!current[target.id]) return current; const next = { ...current }; delete next[target.id]; return next; });
     setFocusMaximized(false);
@@ -903,7 +1034,10 @@ export function App() {
     if (target && pending.current.has(target.id)) return 'Another session update is still in progress.';
     if (target) { pending.current.add(target.id); setPendingSessions(current => ({ ...current, [target.id]: true })); }
     try {
-      const { session: assignedSession, ...next } = await request<Project & { session?: SessionResponse }>(`/api/projects/${encodeURIComponent(projectId)}/topics`, 'POST', { ...input, ...(target ? { sessionId: target.id } : {}) });
+      const result = await request<{ topic: Topic; sessionId?: string }>(`/api/projects/${encodeURIComponent(projectId)}/topics`, 'POST', { ...input, ...(target ? { sessionId: target.id } : {}) });
+      const previous = projects.find(p => p.id === projectId)!;
+      const next = { ...previous, topics: [result.topic, ...(previous.topics ?? []).filter(t => t.id !== result.topic.id)], topicOrder: [result.topic.id, ...(previous.topicOrder ?? []).filter(id => id !== result.topic.id)] };
+      const assignedSession = result.sessionId ? await request<SessionResponse>(`/api/sessions/${encodeURIComponent(result.sessionId)}`) : undefined;
       projectRevision.current += 1;
       setEngine(current => ({ ...current, projects: current.projects.map(item => item.id === projectId ? next : item), sessions: assignedSession ? mergeSessions(current.sessions, [assignedSession]) : current.sessions }));
       if (assignedSession) {
@@ -919,7 +1053,10 @@ export function App() {
   }
   async function patchTopic(projectId: string, topic: Topic, input: Partial<Pick<Topic, 'name' | 'color' | 'archived'>> & { position?: { beforeId: string } }): Promise<string | null> {
     try {
-      const next = await request<Project>(`/api/projects/${encodeURIComponent(projectId)}/topics/${encodeURIComponent(topic.id)}`, 'PATCH', input);
+      const updated = await request<Topic>(`/api/projects/${encodeURIComponent(projectId)}/topics/${encodeURIComponent(topic.id)}`, 'PATCH', input);
+      const previous = projects.find(p => p.id === projectId)!;
+      const next = { ...previous, topics: previous.topics?.map(t => t.id === updated.id ? { ...t, ...updated } : t) };
+      if (input.position) next.topicOrder = moveBefore((previous.topicOrder ?? previous.topics?.map(t => t.id) ?? []).map(id => ({ id })), updated.id, input.position.beforeId).map(t => t.id);
       projectRevision.current += 1;
       setEngine(current => ({ ...current, projects: current.projects.map(item => item.id === projectId ? next : item) }));
       return null;
@@ -936,7 +1073,7 @@ export function App() {
     tabItems.push({ value: `subagent:${id}`, label, closeLabel: `Close ${label}`, onClose: () => closeSubagent(id) });
   }
 
-  return <SessionNavigationProvider sessions={sessions} projects={projects} onOpenSession={IS_MOBILE_HOST ? openSessionOverlay : openSessionInProject}><div ref={shell} className={`app-shell ${focusMaximized ? 'is-maximized' : ''} ${focusMinimized && focusEnabled ? 'is-minimized' : ''} ${sidebarOpen ? 'sidebar-open' : ''} ${sideVisible && session ? 'side-agent-open' : ''}`}
+  return <ActivityPagingContext.Provider value={{ hasMore: !!activityNext, older: !!activityCursor, next: () => setActivityCursor(activityNext), latest: () => setActivityCursor('') }}><SessionNavigationProvider key={engineIdentity} sessions={sessions} projects={projects} onOpenSession={IS_MOBILE_HOST ? openSessionOverlay : openSessionInProject}><div ref={shell} className={`app-shell ${focusMaximized ? 'is-maximized' : ''} ${focusMinimized && focusEnabled ? 'is-minimized' : ''} ${sidebarOpen ? 'sidebar-open' : ''} ${sideVisible && session ? 'side-agent-open' : ''}`}
     data-mobile-screen={mobileNavigationVisible ? 'sessions' : mobileSessionVisible ? 'chat' : undefined}
     data-mobile-project-rail={IS_MOBILE_HOST && generalView ? mobileProjectRailOpen ? 'open' : 'hidden' : undefined}
     style={{ ...(focusEnabled ? focusMainGeometry : undefined), zIndex: focusFront === 'main' ? 3 : 1 }} data-resized={focusEnabled && focusMainGeometry ? true : undefined} inert={focusMinimized && focusEnabled}
@@ -976,7 +1113,8 @@ export function App() {
   >
     <ProjectRail projects={projects} sessions={sessions} activeId={boardView ? boardProjectId : generalView ? '' : project?.id ?? ''} generalActive={generalView} onGeneralAgent={() => { navigation.current += 1; setOverlaySessionId(''); setSidebarOpen(false); setMobileProjectRailOpen(false); setView('general'); }} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onReorder={reorderProject} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />
     {!generalView && sidebarOpen && <button className="panel-backdrop" aria-label="Close side panel" onClick={() => setSidebarOpen(false)} />}
-    {!generalView && !boardView && project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} collapsed={topicCollapseState(workspaceNavigation, project)} archivedCollapsed={collapsedArchivedProjects.includes(project.id)}
+    {!generalView && !boardView && project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} collapsed={topicCollapseState(workspaceNavigation, project)} archivedCollapsed={collapsedArchivedProjects.includes(project.id)} onSearchChange={setProjectSearch}
+      paging={<>{projectWindow.current.start && <Button size="sm" onClick={() => { projectWindow.current.start = ''; projectWindow.current.pages = 1; setRefreshVersion(n => n + 1); }}>Newest sessions</Button>}{projectPage.id === project.id && projectPage.next && <Button size="sm" disabled={projectPage.busy} onClick={() => void loadMoreProject()}>Load more sessions</Button>}{topicWindow.current.cursor && <Button size="sm" onClick={() => { topicWindow.current.cursor = ''; setRefreshVersion(n => n + 1); }}>First topics</Button>}{projectPage.id === project.id && projectPage.topicsNext && <Button size="sm" disabled={projectPage.busy} onClick={() => void loadMoreProject(true)}>Next topics</Button>}</>}
       onCollapsedChange={topics => setWorkspaceNavigation(current => ({ ...current, collapsedTopics: { ...current.collapsedTopics, [project.id]: typeof topics === 'function' ? topics(topicCollapseState(current, project)) : topics } }))}
       onArchivedCollapsedChange={collapsed => setWorkspaceNavigation(current => ({ ...current, collapsedArchivedProjects: collapsed ? [...new Set([...current.collapsedArchivedProjects, project.id])] : current.collapsedArchivedProjects.filter(id => id !== project.id) }))}
       onNew={newSession} onRename={setRenamingSession} onEditTopic={topic => setEditingTopic({ projectId: project.id, topic })}
@@ -998,7 +1136,7 @@ export function App() {
       {generalWindowError && !focusMinimized && <div role="alert" className="storage-error">{generalWindowError} <Button size="sm" disabled={openingGeneralWindow} onClick={() => void openGeneralFloatingWindow()}>Retry</Button></div>}
       {connectionError && <div role="alert" className="storage-error">{connectionError} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}
       {boardView && <Suspense fallback={<p role="status">Loading tasks…</p>}><ActivityBoardPage projects={projects} projectId={boardProjectId} visible={!focusMinimized || !focusEnabled} board={tasksBoard} onProjectChange={setBoardProjectId} onBack={() => setView(boardOrigin.current)} onConnections={id => { const target = projects.find(p => p.id === id); if (target) openProjectSettings(target, 'tasks'); }} /></Suspense>}
-      <KlmAgentWorkspace enabled={generalView} visible={!focusMinimized || !focusEnabled} projects={projects} sessions={sessions} projectRailOpen={mobileProjectRailOpen} onToggleProjectRail={IS_MOBILE_HOST ? () => setMobileProjectRailOpen(current => !current) : undefined} overlaySessionId={IS_MOBILE_HOST ? mobileChats.at(-1)?.session.id : overlaySession?.id} onOpenOverlay={openSessionOverlay} onCloseOverlay={() => setOverlaySessionId('')} onOpenProject={openSessionInProject} onOpenFloatingChat={focusEnabled ? () => void openGeneralFloatingWindow() : undefined} openingFloatingChat={openingGeneralWindow} onOpenBoard={() => openBoard()}>
+      <KlmAgentWorkspace enabled={generalView} visible={!focusMinimized || !focusEnabled} projects={projects} sessions={sessions} onChatVisibility={setGeneralChatVisible} projectRailOpen={mobileProjectRailOpen} onToggleProjectRail={IS_MOBILE_HOST ? () => setMobileProjectRailOpen(current => !current) : undefined} overlaySessionId={IS_MOBILE_HOST ? mobileChats.at(-1)?.session.id : overlaySession?.id} onOpenOverlay={openSessionOverlay} onCloseOverlay={() => setOverlaySessionId('')} onOpenProject={openSessionInProject} onOpenFloatingChat={focusEnabled ? () => void openGeneralFloatingWindow() : undefined} openingFloatingChat={openingGeneralWindow} onOpenBoard={() => openBoard()}>
       {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav<SessionTab> value={view === 'design' ? 'chat' : activeTab} onChange={tab => { setView('chat'); setSessionTabs(current => ({ ...current, [activeId]: tab })); }} items={view === 'chat' ? tabItems : [{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <>{focusEnabled && !projectSessionArchived && <IconButton className="session-open-floating" label="Open session in floating window and minimize main window" onClick={() => { openFloatingSession(session); setFocusMinimized(true); }}><PanelsTopLeft /></IconButton>}<button className={`topic-tag topic-color-${currentTopic?.color ?? 'neutral'}`} title={projectSessionArchived ? `Edit topic: ${currentTopic?.name ?? 'Ungrouped'}` : 'Change topic'} aria-haspopup="dialog" disabled={!!connectionError || projectSessionArchived && !currentTopic} onClick={() => { if (projectSessionArchived && currentTopic) setEditingTopic({ projectId: project.id, topic: currentTopic }); else setChoosingTopicSessionId(session.id); }}>{currentTopic?.name ?? 'Choose topic'}</button></>}</div>}
       {boardView ? null : view === 'design' ? <DesignSystem /> : (view === 'agents' || view === 'graphs') && project ? <ProjectAuthoring key={`${project.id}:${view}:${agentsVisit}:${graphsVisit}`} projectId={project.id} area={view} /> : !loaded ? <div className="empty-chat"><h2>{connectionError ? 'Engine disconnected' : 'Connecting to engine...'}</h2></div> : generalView && !session ? <div className="empty-chat"><h2>{generalError || 'Opening KLM Agent...'}</h2>{generalError && <Button onClick={() => setGeneralRetry(current => current + 1)}>Retry</Button>}</div> : !generalView && !project ? <div className="empty-chat"><h2>Add a project</h2><Button onClick={() => void openProjectPicker()}>Add project</Button></div> : !session ? <div className="empty-chat"><h2>Create a session</h2><Button onClick={() => newSession()} disabled={!!connectionError}>Create session</Button></div> : <>
         <SessionOverlay session={overlaySession} project={overlayProject} onClose={() => setOverlaySessionId('')} onOpenProject={openSessionInProject}
@@ -1028,6 +1166,7 @@ export function App() {
             })}
           </div>}
           <PendingSubmission items={localMessages[session.id] ?? []} onRestore={item => restoreLocal(session, item)} onRetry={item => submitLocal(session, item)} />
+          <GraphRequestPages key={`graph-requests/${session.id}`} session={session} projectName={conversationProject?.name ?? ''} onResolved={() => graphRequestResolved(session.id)} />
           <MessageQueue key={`queue/${session.id}`} session={session} disabled={!!pendingSessions[session.id]} onSnapshot={receiveSession} onInterrupt={interruptSubmissions} />
           {generalConversation && <GeneralHarnessPicker session={session} harnesses={harnesses} disabled={!!pendingSessions[session.id] || generalHarnessBlocked(session) || !!connectionError} onChange={harness => void updateSession(session, 'harness', { harness })} />}
           {generalView && !harnesses.some(harness => harness.id === session.harness && harness.available) && <p role="status" className="form-error">The selected harness is not installed.</p>}
@@ -1054,10 +1193,13 @@ export function App() {
     {!IS_DESKTOP && !IS_MOBILE_HOST && !focusMaximized && <FocusWindowResizeHandles onResizeEnd={saveMainGeometry} />}
     {addingProject !== null && <ProjectDialog initialFolder={addingProject} onSave={addProject} onClose={() => { navigation.current += 1; setAddingProject(null); }} />}
     {editingProject && <ProjectDialog key={`edit-project:${editingProject.id}`} initialFolder={editingProject.folder} project={editingProject} onSave={input => editProject(editingProject.id, input)} onClose={() => setEditingProject(null)} />}
-    {settingsProject && <ProjectSettingsDialog key={`${settingsProject.id}:${projectSettingsSection}`} project={settingsProject} sessions={engine.sessions} initialSection={projectSettingsSection} tasks={tasksBoard} onSave={editProject} onRemove={removeProject} onOpenSession={id => { const target = engine.sessions.find(s => s.id === id); if (target) { setProjectSettingsId(''); openSessionInProject(target); } }} onClose={() => setProjectSettingsId('')} />}
+    {settingsProject && <ProjectSettingsDialog key={`${settingsProject.id}:${projectSettingsSection}`} project={settingsProject} sessions={engine.sessions} initialSection={projectSettingsSection} tasks={tasksBoard} onSave={editProject} onRemove={removeProject} onOpenSession={async id => {
+      const target = sessionsRef.current.find(s => s.id === id) ?? await request<Session>(`/api/sessions/${encodeURIComponent(id)}`);
+      receiveSession(target); setProjectSettingsId(''); openSessionInProject(target);
+    }} onClose={() => setProjectSettingsId('')} />}
     {automationStop && <StopAutomationDialog onDecision={confirmed => { const resolve = automationStop.resolve; setAutomationStop(undefined); resolve(confirmed); }} />}
     {creatingSession && createProject && <CreateSessionDialog project={createProject} harnesses={harnesses} topicId={creatingSession.topicId} onCreate={createSession} onClose={() => { navigation.current += 1; setCreatingSession(null); }} />}
-    {canChooseTopic && choosingTopicSession && choosingTopicProject && <TopicDialog key={`choose-topic:${choosingTopicSession.id}`} topic={sessionTopic(choosingTopicProject, choosingTopicSession)} selection={{ topics: choosingTopicProject.topics ?? [], onSelect: id => chooseSessionTopic(choosingTopicSession, id), onCreate: input => createTopic(choosingTopicProject.id, input, choosingTopicSession) }} onSave={input => {
+    {canChooseTopic && choosingTopicSession && choosingTopicProject && <TopicDialog key={`choose-topic:${choosingTopicSession.id}`} topic={sessionTopic(choosingTopicProject, choosingTopicSession)} selection={{ projectId: choosingTopicProject.id, topics: choosingTopicProject.topics ?? [], onSelect: id => chooseSessionTopic(choosingTopicSession, id), onCreate: input => createTopic(choosingTopicProject.id, input, choosingTopicSession) }} onSave={input => {
       const topic = sessionTopic(choosingTopicProject, choosingTopicSession);
       return topic ? patchTopic(choosingTopicProject.id, topic, input) : Promise.resolve('Topic is unavailable. Close and try again.');
     }} onClose={() => setChoosingTopicSessionId('')} />}
@@ -1099,5 +1241,5 @@ export function App() {
           onBackToSession={() => setFloatingSubagentIds(current => { const next = { ...current }; delete next[target.id]; return next; })} />}
       />
     </>}
-  </SessionNavigationProvider>;
+  </SessionNavigationProvider></ActivityPagingContext.Provider>;
 }

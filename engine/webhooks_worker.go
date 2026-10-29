@@ -102,6 +102,10 @@ func (a *app) releasePendingWebhooks() {
 }
 
 func (a *app) webhookWorker() {
+	if a.store != nil {
+		a.sqliteWebhookWorker()
+		return
+	}
 	poll := time.NewTicker(time.Second)
 	cleanup := time.NewTicker(time.Minute)
 	defer poll.Stop()

@@ -71,6 +71,12 @@ func automationWaiting(d *diskState, sessionID string) bool {
 }
 
 func (a *app) scheduleAutomationsLocked() {
+	if a.store != nil {
+		if err := a.scheduleSQLAutomationsLocked(); err != nil && a.ctx.Err() == nil {
+			a.failStorageLocked(err)
+		}
+		return
+	}
 	at := time.Now().UTC()
 	for _, v := range a.state.Automations {
 		p := a.state.project(v.ProjectID)

@@ -338,6 +338,9 @@ func replayTransaction(state *diskState, patches []statePatch) error {
 }
 
 func (a *app) commitTransactionLocked(change func(*diskState) error) error {
+	if a.store != nil {
+		return a.failStorageLocked(errors.New("legacy transaction attempted while SQLite is authoritative"))
+	}
 	if a.storageErr != nil {
 		return a.storageErr
 	}

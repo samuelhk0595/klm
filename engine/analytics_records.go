@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -304,6 +305,9 @@ func analyticsWait(d *diskState, t *turn, key string, start bool, attributable b
 func (p *adapter) analyticsWaitEnd(key string) error {
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
+	if p.app.store != nil {
+		return p.sqlAnalyticsWrite(func(st *sqliteSessionTx) error { return st.analyticsWait(p.turn, key, false, true, true) })
+	}
 	if p.app.state.Analytics == nil {
 		return nil
 	}
@@ -360,6 +364,18 @@ func (p *adapter) analyticsStart() error {
 func (p *adapter) analyticsDispatch() (time.Time, error) {
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
+	if p.app.store != nil {
+		err := p.sqlAnalyticsWrite(func(st *sqliteSessionTx) error {
+			e, key, err := st.analyticsExecution(p.turn.analyticsID)
+			if err != nil {
+				return err
+			}
+			e.Dispatched = now()
+			e.Last = e.Dispatched
+			return st.putExistingRecord("analytics_executions", key, e)
+		})
+		return time.Now(), err
+	}
 	if p.app.state.Analytics == nil {
 		return time.Now(), nil
 	}
@@ -377,6 +393,32 @@ func (p *adapter) analyticsDispatch() (time.Time, error) {
 func (p *adapter) analyticsStartAt(anchor time.Time) error {
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
+	if p.app.store != nil {
+		if p.subagent {
+			return nil
+		}
+		changed := false
+		err := p.sqlAnalyticsWrite(func(st *sqliteSessionTx) error {
+			e, key, err := st.analyticsExecution(p.turn.analyticsID)
+			if err != nil {
+				return err
+			}
+			if e.Accepted != "" || e.Ended != "" {
+				return nil
+			}
+			if err := st.clearPreparationTiming(key); err != nil {
+				return err
+			}
+			e.UnknownUntil = ""
+			e.Accepted, e.Last = analyticsStamp(anchor), analyticsStamp(anchor)
+			changed = true
+			return st.putExistingRecord("analytics_executions", key, e)
+		})
+		if err == nil && changed {
+			p.turn.analyticsAnchor = anchor
+		}
+		return err
+	}
 	if p.app.state.Analytics == nil || p.subagent {
 		return nil
 	}
@@ -409,6 +451,9 @@ func (p *adapter) analyticsIdleCandidate(at time.Time) {
 func (p *adapter) analyticsTerminated() error {
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
+	if p.app.store != nil {
+		return p.sqlAnalyticsWrite(func(st *sqliteSessionTx) error { return st.finishAnalytics(p.turn, !p.processesDrained, nil) })
+	}
 	if p.app.state.Analytics == nil {
 		return nil
 	}
@@ -421,6 +466,9 @@ func (p *adapter) analyticsTerminated() error {
 func (p *adapter) analyticsEndAt(at time.Time) error {
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
+	if p.app.store != nil {
+		return p.sqlAnalyticsWrite(func(st *sqliteSessionTx) error { return st.finishAnalytics(p.turn, false, &at) })
+	}
 	return p.app.commitLocked(func(d *diskState) {
 		if d.Analytics == nil {
 			return
@@ -521,6 +569,10 @@ func analyticsCloseUnaccepted(e *AnalyticsExecution, at string) bool {
 	return true
 }
 func (a *app) reserveAnalyticsLocked(t *turn, s Session) error {
+	if a.store != nil {
+		t.analyticsID = newID()
+		return a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error { return st.reserveAnalytics(t, s) })
+	}
 	if a.state.Analytics == nil {
 		return nil
 	}
@@ -555,6 +607,47 @@ func (p *adapter) analyticsChildInvocation(child *adapter, invocation string) er
 	}
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
+	if p.app.store != nil {
+		return p.sqlAnalyticsWrite(func(st *sqliteSessionTx) error {
+			if err := st.initializeAnalytics(); err != nil {
+				return err
+			}
+			id := analyticsHash(child.id, invocation)
+			key := sqliteOwnedKey("settings", id)
+			var exists bool
+			if err := st.tx.QueryRowContext(st.ctx, `SELECT EXISTS(SELECT 1 FROM data_analytics_executions WHERE id=?)`, key).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				return nil
+			}
+			s, err := st.sessionMeta(p.id)
+			if err != nil {
+				return err
+			}
+			owner, err := st.analyticsOwner(s)
+			if err != nil {
+				return err
+			}
+			stamp := now()
+			e := AnalyticsExecution{ID: id, SessionID: child.id, OwnerID: owner.ID, ProjectID: owner.ProjectID, Role: sessionRoleSubagent, Harness: p.harness, Reserved: stamp, Accepted: stamp, Last: stamp, Ended: stamp}
+			if err := st.putRecord("analytics_executions", key, "settings", id, -1, e); err != nil {
+				return err
+			}
+			for _, field := range []string{"spans", "usage"} {
+				if err := st.emptyCollection("analytics_executions", key, field, "array"); err != nil {
+					return err
+				}
+			}
+			if err := st.analyticsReason(key, "child_timing_and_usage_unavailable"); err != nil {
+				return err
+			}
+			if p.turn.analyticsID != "" {
+				return st.analyticsReason(sqliteOwnedKey("settings", p.turn.analyticsID), "native_child_coverage_partial")
+			}
+			return nil
+		})
+	}
 	if p.app.state.Analytics == nil {
 		return nil
 	}
@@ -624,7 +717,38 @@ func (a *app) checkpointAnalytics() {
 			a.mu.Lock()
 			open := len(a.runs) > 0 || len(a.graphRuns) > 0
 			if open && a.storageErr == nil {
-				_ = a.commitLocked(a.checkpointAnalyticsLocked)
+				if a.store != nil {
+					_ = a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
+						for _, t := range a.runs {
+							e, key, err := st.analyticsExecution(t.analyticsID)
+							if errors.Is(err, sql.ErrNoRows) {
+								continue
+							}
+							if err != nil {
+								return err
+							}
+							if e.Ended != "" || e.Accepted == "" {
+								continue
+							}
+							at, drift := t.analyticsInstant()
+							if drift {
+								e.UnknownUntil = now()
+								if err := st.analyticsReason(key, "clock_discontinuity"); err != nil {
+									return err
+								}
+							} else if err := st.analyticsAdvance(&e, key, at); err != nil {
+								return err
+							}
+							if err := st.putExistingRecord("analytics_executions", key, e); err != nil {
+								return err
+							}
+						}
+						for id:=range a.graphRuns{key:=sqliteOwnedKey("settings",id);var g AnalyticsGraphTiming;err:=decodeSQLiteRecord(st.ctx,st.tx,"analytics_graphs",key,64<<10,&g);if errors.Is(err,sql.ErrNoRows){continue};if err!=nil{return err};if g.End!=""{continue};at,drift:=a.analyticsGraphInstant(id);if drift{g.Interrupted=true}else if !g.Interrupted{g.Last=analyticsStamp(at)};if err:=st.putExistingRecord("analytics_graphs",key,g);err!=nil{return err}}
+						return nil
+					})
+				} else {
+					_ = a.commitLocked(a.checkpointAnalyticsLocked)
+				}
 			}
 			a.mu.Unlock()
 		}

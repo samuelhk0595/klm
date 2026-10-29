@@ -587,8 +587,19 @@ func (p *adapter) startOpenCodeServer(b binary, cwd string, ctx context.Context)
 
 func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err error) {
 	p.app.mu.Lock()
-	s := *p.app.state.session(p.id)
-	native := p.app.state.Native[p.id]
+	var s Session
+	var native nativeSession
+	if p.app.store != nil {
+		var readErr error
+		s, native, _, readErr = p.app.store.readTurnSession(p.turn.ctx, p.id)
+		if readErr != nil {
+			p.app.mu.Unlock()
+			return readErr
+		}
+	} else {
+		s = *p.app.state.session(p.id)
+		native = p.app.state.Native[p.id]
+	}
 	p.app.mu.Unlock()
 	t := p.turn
 	ctx, cancel := context.WithCancel(t.ctx)

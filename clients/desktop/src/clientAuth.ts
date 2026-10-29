@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { IS_DESKTOP, resolveEngineURL } from './platform';
+import { currentEngineIdentity } from './engineIdentity';
 
 const engine = resolveEngineURL();
 let nativeCredential: string | null = null;
@@ -35,6 +36,8 @@ export async function clientFetch(path: string, init: RequestInit = {}): Promise
   const version = generation;
   const headers = new Headers(init.headers);
   headers.set('X-KLM-CSRF', '1');
+  headers.set('X-KLM-Read-Contract', '3');
+  if (currentEngineIdentity()) headers.set('X-KLM-Engine-ID', currentEngineIdentity());
   if (IS_DESKTOP && nativeCredential) headers.set('Authorization', `Bearer ${nativeCredential}`);
   const response = await fetch(`${engine}${path}`, { ...init, headers, credentials: IS_DESKTOP ? 'omit' : 'include' });
   // Responses from a previous credential must neither invalidate its replacement

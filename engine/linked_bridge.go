@@ -422,6 +422,12 @@ func (b *linkedBridge) call(ctx context.Context, name string, raw json.RawMessag
 	if generalAsk {
 		name = "linked_ask"
 	}
+	if p.app.store != nil && name == "session_spawn" {
+		return p.spawnSession(ctx, args.spawnArgs)
+	}
+	if p.app.store != nil && name != "session_spawn" {
+		return p.callSQLLinked(ctx, name, sqlLinkedArgs{SessionID: args.SessionID, Query: args.Query, Topic: args.Topic, Question: args.Question, RequestID: args.RequestID, Answer: args.Answer, MessageID: args.MessageID, IncludeArchived: args.IncludeArchived, Cursor: args.Cursor, Limit: args.Limit, Offset: args.Offset}, generalAsk)
+	}
 	a := p.app
 	a.mu.Lock()
 	if a.closing || a.storageErr != nil || a.runs[p.id] != p.turn || p.turn.ctx.Err() != nil {

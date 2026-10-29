@@ -5,6 +5,7 @@ import { Button } from '../../design-system/Button';
 import { request, type EngineEvent, type Session, type SessionResponse } from '../../engine';
 import { ChatMessage, InlineMarkdownContent, MarkdownContent } from './ChatMessage';
 import { SessionEvent } from './SessionEvent';
+import { EventContent } from './EventContent';
 
 type WorkEvent = EngineEvent & { type: 'reasoning' | 'command' | 'mcp' | 'tool' };
 type TimelineItem = { kind: 'event'; event: EngineEvent } | {
@@ -17,6 +18,7 @@ function isWorkEvent(event: EngineEvent): event is WorkEvent {
 }
 
 function isHiddenStatus(event: EngineEvent) {
+  if (event.content) return false;
   return event.type === 'status' && event.status !== 'warning' && event.status !== 'cancelled';
 }
 
@@ -192,7 +194,7 @@ export function EventSequence({ events, status, updatedAt, renderEvent, showActi
   return <>
     {items.map(item => item.kind === 'work'
       ? <ConversationWork key={`work/${item.id}`} item={item} />
-      : <Fragment key={item.event.id}>{renderEvent ? renderEvent(item.event) : <SessionEvent event={item.event} />}</Fragment>)}
+      : <Fragment key={item.event.id}>{item.event.content ? <EventContent event={item.event} /> : renderEvent ? renderEvent(item.event) : <SessionEvent event={item.event} />}</Fragment>)}
     {showActiveWork && status === 'running' && !hasActiveWork && !responding ? <ActiveWorkPlaceholder startedAt={activeWorkStartedAt} /> : null}
   </>;
 }

@@ -17,7 +17,7 @@ export function ProjectSettingsDialog({ project, sessions, onSave, onRemove, onC
   onSave: (id: string, input: Pick<Project, 'name' | 'icon'>) => Promise<string | null>;
   onRemove: (id: string) => Promise<string | null>;
   onClose: () => void;
-  onOpenSession: (id: string) => void;
+  onOpenSession: (id: string) => void | Promise<void>;
   tasks: ActivityBoardState;
   initialSection?: ProjectSettingsSection;
 }) {
@@ -25,6 +25,12 @@ export function ProjectSettingsDialog({ project, sessions, onSave, onRemove, onC
   const returnFocus = useRef<HTMLElement | null>(null);
   const [section, setSection] = useState<ProjectSettingsSection>(initialSection);
   const [busy, setBusy] = useState(false);
+  const [sessionError, setSessionError] = useState('');
+  async function openSession(id: string) {
+    setSessionError('');
+    try { await onOpenSession(id); }
+    catch (error) { setSessionError(error instanceof Error ? error.message : 'Could not open session.'); }
+  }
   useEffect(() => {
     const element = dialog.current;
     if (!returnFocus.current) returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -42,7 +48,8 @@ export function ProjectSettingsDialog({ project, sessions, onSave, onRemove, onC
         <button type="button" disabled={busy} className={section === 'automations' ? 'is-active' : ''} aria-current={section === 'automations' ? 'page' : undefined} onClick={() => setSection('automations')}><Zap />Automations</button>
       </nav>
       <div className="settings-panel">
-        {section === 'automations' ? <AutomationsSettings project={project} sessions={sessions} onOpenSession={onOpenSession} onBusyChange={setBusy} /> : section === 'general' ? <ProjectGeneralSettings key={project.id} project={project} onSave={onSave} onRemove={onRemove} onClose={onClose} onBusyChange={setBusy} /> : section === 'webhooks' ? <WebhooksSettings key={project.id} projectId={project.id} onBusyChange={setBusy} /> : <>
+        {sessionError && <p className="form-error" role="alert">{sessionError}</p>}
+        {section === 'automations' ? <AutomationsSettings project={project} sessions={sessions} onOpenSession={id => void openSession(id)} onBusyChange={setBusy} /> : section === 'general' ? <ProjectGeneralSettings key={project.id} project={project} onSave={onSave} onRemove={onRemove} onClose={onClose} onBusyChange={setBusy} /> : section === 'webhooks' ? <WebhooksSettings key={project.id} projectId={project.id} onBusyChange={setBusy} /> : <>
           {tasks.error && <p className="form-error" role="alert">{tasks.error}<Button size="sm" onClick={() => void tasks.load()}>Retry</Button></p>}
           {tasks.config ? <ProjectTaskConnections key={project.id} project={project} config={tasks.config} onSaved={tasks.setConfig} onBusyChange={setBusy} /> : !tasks.error && <p role="status">Loading…</p>}
         </>}

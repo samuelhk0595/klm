@@ -8,6 +8,7 @@ import { ENGINE_URL, request } from '../../engine';
 import { IS_DESKTOP, IS_MOBILE_HOST } from '../../platform';
 import { getLibrary, libraryPath, type DeletionPreview, type LibraryInventory, type MCPConfig, type MCPConnection } from './api';
 import './library.css';
+import { LibrarySkillsPaging } from './LibrarySkillsPaging';
 
 const failure = (error: unknown) => error instanceof Error ? error.message : 'Library request failed.';
 
@@ -15,6 +16,8 @@ export function LibraryPanel({ onGeneralAgent }: { onGeneralAgent?: () => void }
   const [inventory, setInventory] = useState<LibraryInventory>();
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [remoteSearch, setRemoteSearch] = useState('');
+  useEffect(() => { const timer = setTimeout(() => setRemoteSearch(search), 200); return () => clearTimeout(timer); }, [search]);
   const [editing, setEditing] = useState<MCPConnection | 'new'>();
   const [busy, setBusy] = useState(false);
   const [deletion, setDeletion] = useState<{ kind: string; id: string; name: string; preview: DeletionPreview }>();
@@ -22,9 +25,9 @@ export function LibraryPanel({ onGeneralAgent }: { onGeneralAgent?: () => void }
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
-    getLibrary(controller.signal).then(setInventory, reason => { if (!controller.signal.aborted) setError(failure(reason)); });
+    getLibrary(controller.signal,remoteSearch).then(value => { if (!controller.signal.aborted) setInventory(value); }, reason => { if (!controller.signal.aborted) setError(failure(reason)); });
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt,remoteSearch]);
   function refresh() { setError(''); setAttempt(n => n + 1); }
   async function action(fn: () => Promise<unknown>) {
     setBusy(true); setError('');
@@ -46,8 +49,9 @@ export function LibraryPanel({ onGeneralAgent }: { onGeneralAgent?: () => void }
       <Button size="sm" disabled={busy} onClick={() => void preview('skills', skill.id, skill.name || skill.id)}>Usage / Delete</Button>
     </article>)}
     {inventory && !inventory.skills.length && <p className="muted">No user skills installed.</p>}
+    {inventory && <LibrarySkillsPaging inventory={inventory} onPage={setInventory} />}
     <div className="library-heading"><h4>MCP connections</h4><Button size="sm" disabled={busy} onClick={() => setEditing('new')}>Add connection</Button></div>
-    {inventory?.connections.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).map(connection => <article className="library-item" key={connection.id}>
+    {inventory?.connections.map(connection => <article className="library-item" key={connection.id}>
       <div><strong>{connection.name}</strong><p className="muted">{connection.config.transport === 'stdio' ? connection.config.command : connection.config.url}</p>
         <small>{connection.catalog ? `${connection.catalog.tools.length} known tools${connection.catalog.resources ? ' · Resources' : ''}` : 'Not discovered'} · {connection.lastTestAt ? `Last test ${new Date(connection.lastTestAt).toLocaleString()}` : 'Never tested'}</small>
         {connection.lastTestError && <p className="form-error">{connection.lastTestError}</p>}
@@ -65,6 +69,16 @@ export function LibraryPanel({ onGeneralAgent }: { onGeneralAgent?: () => void }
     {deletion && <div className="library-confirmation" role="group" aria-label="Confirm library deletion"><h4>Delete {deletion.name}?</h4><p>Remove these saved references. Captured runs and active turns keep their snapshots.</p>
       <ul>{deletion.preview.references.map(ref => <li key={`${ref.kind}/${ref.projectId}/${ref.id}`}>{ref.title} · {ref.kind === 'captured_run' ? 'Captured run (preserved)' : ref.kind}</li>)}</ul>
       {!deletion.preview.references.length && <p>No saved references.</p>}
+      {deletion.preview.hasMore && <Button size="sm" disabled={busy} onClick={() => void action(async () => {
+        const page = await request<DeletionPreview>(`/api/library/${deletion.kind}/${encodeURIComponent(deletion.id)}/deletion?offset=${deletion.preview.nextOffset}`);
+        if (page.revision !== deletion.preview.revision) throw new Error('References changed. Open the deletion preview again.');
+        setDeletion({ ...deletion, preview: page });
+      })}>Next references</Button>}
+      {(deletion.preview.nextOffset ?? 0) > deletion.preview.references.length && <Button size="sm" disabled={busy} onClick={() => void action(async () => {
+        const page = await request<DeletionPreview>(`/api/library/${deletion.kind}/${encodeURIComponent(deletion.id)}/deletion`);
+        if (page.revision !== deletion.preview.revision) throw new Error('References changed. Open the deletion preview again.');
+        setDeletion({ ...deletion, preview: page });
+      })}>First references</Button>}
       <div className="dialog-actions"><Button disabled={busy} onClick={() => setDeletion(undefined)}>Cancel</Button><Button variant="primary" disabled={busy} onClick={() => void action(async () => { await request(`/api/library/${deletion.kind}/${encodeURIComponent(deletion.id)}`, 'DELETE', { revision: deletion.preview.revision }); setDeletion(undefined); })}>Delete and remove references</Button></div>
     </div>}
   </section>;

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Harness struct {
@@ -227,12 +229,24 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	defer a.wg.Done()
 	defer t.cancel()
 	a.mu.Lock()
-	if current := a.state.session(s.ID); current != nil {
-		s = *a.state.automationSessionView(current)
+	var reservationErr error
+	reasoningStart := 0
+	if a.store != nil {
+		current, continuation, count, readErr := a.store.readTurnSession(t.ctx, s.ID)
+		reservationErr = readErr
+		if readErr == nil {
+			s, native, reasoningStart = current, continuation, count
+		}
+	} else {
+		if current := a.state.session(s.ID); current != nil {
+			s = *a.state.automationSessionView(current)
+		}
+		reasoningStart = len(s.Events)
 	}
-	reasoningStart := len(s.Events)
 	t.reasoningStart = &reasoningStart
-	reservationErr := a.reserveAnalyticsLocked(t, s)
+	if reservationErr == nil {
+		reservationErr = a.reserveAnalyticsLocked(t, s)
+	}
 	a.mu.Unlock()
 	p := &adapter{app: a, turn: t, id: s.ID, harness: s.Harness, role: s.Role, yolo: s.YOLO, cwd: cwd,
 		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true}
@@ -274,11 +288,22 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 		guidance, err = conversationGuidance(&s)
 		if err == nil {
 			payload.Text = guidance + "\n\n" + payload.Text
-			a.mu.Lock()
-			payload.Text = a.topicContextLocked(a.state.session(s.ID)) + payload.Text
-			a.mu.Unlock()
-			if s.Role == sessionRoleGeneralAgent {
-				payload.Text = a.generalTurnSnapshot() + "\n\n" + payload.Text
+			if a.store != nil {
+				var topic string
+				topic, err = a.sqlTopicContext(t.ctx, s)
+				payload.Text = topic + payload.Text
+				if err == nil && s.Role == sessionRoleGeneralAgent {
+					var snapshot string
+					snapshot, err = a.sqlGeneralTurnSnapshot(t.ctx)
+					payload.Text = snapshot + "\n\n" + payload.Text
+				}
+			} else {
+				a.mu.Lock()
+				payload.Text = a.topicContextLocked(a.state.session(s.ID)) + payload.Text
+				a.mu.Unlock()
+				if s.Role == sessionRoleGeneralAgent {
+					payload.Text = a.generalTurnSnapshot() + "\n\n" + payload.Text
+				}
 			}
 		}
 	}
@@ -315,16 +340,20 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 			}
 			if p.automationRunID != "" && err == nil {
 				a.mu.Lock()
-				run := a.state.activeAutomation(s.ID)
-				if run == nil || run.ID != p.automationRunID || a.runs[s.ID] != t {
-					err = errors.New("Automation ownership changed during model preparation.")
-				} else if !run.SettingsResolved {
-					err = a.commitLocked(func(d *diskState) {
-						r := d.automationRun(p.automationRunID)
-						r.Snapshot.Model, r.Snapshot.Effort, r.SettingsResolved = p.model, p.effort, true
-					})
+				if a.store != nil {
+					err = a.resolveSQLAutomationSettingsLocked(p)
 				} else {
-					p.model, p.effort = run.Snapshot.Model, run.Snapshot.Effort
+					run := a.state.activeAutomation(s.ID)
+					if run == nil || run.ID != p.automationRunID || a.runs[s.ID] != t {
+						err = errors.New("Automation ownership changed during model preparation.")
+					} else if !run.SettingsResolved {
+						err = a.commitLocked(func(d *diskState) {
+							r := d.automationRun(p.automationRunID)
+							r.Snapshot.Model, r.Snapshot.Effort, r.SettingsResolved = p.model, p.effort, true
+						})
+					} else {
+						p.model, p.effort = run.Snapshot.Model, run.Snapshot.Effort
+					}
 				}
 				a.mu.Unlock()
 			}
@@ -387,10 +416,23 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 		p.failed = true
 	}
 	delete(a.runs, s.ID)
-	for _, c := range a.state.Consultations {
-		if c.From == s.ID && c.Status == "cancelled" {
-			if recipient := a.runs[c.To]; recipient != nil && recipient.consultationID == c.ID {
+	if a.store != nil {
+		for _, recipient := range a.runs {
+			if recipient.consultationID == "" {
+				continue
+			}
+			var status string
+			readErr := a.store.readers.QueryRowContext(context.Background(), `SELECT status FROM data_consultations WHERE id=? AND x_from=?`, recipient.consultationID, s.ID).Scan(&status)
+			if readErr == nil && status == "cancelled" {
 				recipient.cancel()
+			}
+		}
+	} else {
+		for _, c := range a.state.Consultations {
+			if c.From == s.ID && c.Status == "cancelled" {
+				if recipient := a.runs[c.To]; recipient != nil && recipient.consultationID == c.ID {
+					recipient.cancel()
+				}
 			}
 		}
 	}
@@ -414,6 +456,9 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 // Called by execute only after native settlement/drain and stream flush. Kept as
 // one transaction so queue uncertainty and linked completion cannot split.
 func (p *adapter) finishTurnStateLocked(err error) error {
+	if p.app.store != nil {
+		return p.finishSQLTurnLocked(err)
+	}
 	t := p.turn
 	return p.app.commitLocked(func(d *diskState) {
 		analyticsFinish(d, t, !p.processesDrained || t.stopErr != nil)
@@ -692,6 +737,26 @@ func (p *adapter) nativeID(id string) error {
 	}
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
+	if p.app.store != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		err := p.app.persistSQLLocked(ctx, func(st *sqliteSessionTx) error {
+			var n nativeSession
+			err := decodeSQLiteRecord(ctx, st.tx, "native_sessions", p.id, 64<<10, &n)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if n.ID == id {
+				return nil
+			}
+			n.ID = id
+			return st.putRoot("native_sessions", p.id, n)
+		})
+		if err != nil {
+			return p.app.failStorageLocked(err)
+		}
+		return nil
+	}
 	if p.app.state.Native[p.id].ID == id {
 		return nil
 	}

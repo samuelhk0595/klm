@@ -90,7 +90,7 @@ func dispatchCLI(args []string) error {
 	}
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
-	deadline = time.Now().Add(45 * time.Second)
+	nextProgress := time.Now().Add(15 * time.Second)
 	for {
 		if err := engineControl(dir, "ready"); err == nil {
 			fmt.Printf("KLM engine started at http://localhost:%s.\n", apiPort)
@@ -101,8 +101,11 @@ func dispatchCLI(args []string) error {
 			return fmt.Errorf("engine exited during startup (%v); see %s (check port %s and the data-directory lock)", err, logPath, apiPort)
 		default:
 		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("engine readiness timed out; see %s", logPath)
+		// A large verified import is not a hung HTTP server. Keep observing the
+		// owned child until ready/exit instead of killing it at an arbitrary 45s.
+		if time.Now().After(nextProgress) {
+			fmt.Printf("KLM is preparing storage and recovering owned work; see %s.\n", logPath)
+			nextProgress = time.Now().Add(15 * time.Second)
 		}
 		time.Sleep(150 * time.Millisecond)
 	}

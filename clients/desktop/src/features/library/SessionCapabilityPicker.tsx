@@ -3,6 +3,7 @@ import { AlertCircle, ArrowLeft, BookOpen, Check, ChevronRight, LockKeyhole, Plu
 import { Button, IconButton } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import { getLibrary, type CapabilitySelection, type LibraryInventory, type MCPConnection, type MCPSelection, type SkillEntry } from './api';
+import { LibrarySkillsPaging } from './LibrarySkillsPaging';
 
 type Category = 'skills' | 'connections';
 type PickerEntry = { id: string; name: string; description: string; missing?: boolean; skill?: SkillEntry; connection?: MCPConnection };
@@ -16,6 +17,8 @@ export function SessionCapabilityPicker({ value, onChange, harness, general, dis
   const [attempt, setAttempt] = useState(0);
   const [category, setCategory] = useState<Category>('skills');
   const [query, setQuery] = useState('');
+  const [remoteQuery, setRemoteQuery] = useState('');
+  useEffect(() => { const timer = setTimeout(() => setRemoteQuery(query), 200); return () => clearTimeout(timer); }, [query]);
   const [selectedOnly, setSelectedOnly] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showDetail, setShowDetail] = useState(false);
@@ -24,19 +27,19 @@ export function SessionCapabilityPicker({ value, onChange, harness, general, dis
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError('');
-    getLibrary(controller.signal).then(result => { if (!controller.signal.aborted) setInventory(result); }, reason => {
+    getLibrary(controller.signal,remoteQuery).then(result => { if (!controller.signal.aborted) setInventory(result); }, reason => {
       if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : 'Could not load Library.');
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [attempt]);
+  }, [attempt,remoteQuery]);
 
   const skills: PickerEntry[] = inventory ? [
     ...inventory.skills.map(skill => ({ id: skill.id, name: skill.name || skill.id, description: skill.description, skill })),
-    ...value.skills.filter(id => !inventory.skills.some(skill => skill.id === id)).map(id => ({ id, name: id, description: 'This selected skill is no longer in the Library.', missing: true })),
+    ...value.skills.filter(id => !inventory.skills.some(skill => skill.id === id)).map(id => ({ id, name: id, description: inventory.search || inventory.skillsHasMore || inventory.skillsWindowStart ? 'Saved selection outside this page.' : 'This selected skill is no longer in the Library.', missing: !(inventory.search || inventory.skillsHasMore || inventory.skillsWindowStart) })),
   ] : [];
   const connections: PickerEntry[] = inventory ? [
     ...inventory.connections.map(connection => ({ id: connection.id, name: connection.name, description: connection.catalog ? `${connection.catalog.tools.length} known ${connection.catalog.tools.length === 1 ? 'tool' : 'tools'}${connection.catalog.resources ? ' · Resources' : ''}` : 'No tool catalog', connection })),
-    ...value.mcpConnections.filter(selected => !inventory.connections.some(connection => connection.id === selected.connectionId)).map(selected => ({ id: selected.connectionId, name: selected.connectionId, description: 'This selected connection is no longer in the Library.', missing: true })),
+    ...value.mcpConnections.filter(selected => !inventory.connections.some(connection => connection.id === selected.connectionId)).map(selected => ({ id: selected.connectionId, name: selected.connectionId, description: inventory.search ? 'Saved selection outside these results.' : 'This selected connection is no longer in the Library.', missing: !inventory.search })),
   ] : [];
   const entries = category === 'skills' ? skills : connections;
   const isSelected = (id: string) => category === 'skills' ? value.skills.includes(id) : value.mcpConnections.some(connection => connection.connectionId === id);
@@ -94,6 +97,7 @@ export function SessionCapabilityPicker({ value, onChange, harness, general, dis
             </div>;
           })}
         </div>
+        {inventory && category === 'skills' && <LibrarySkillsPaging inventory={inventory} onPage={setInventory} />}
         {general && category === 'skills' && <div className="session-picker-system"><LockKeyhole aria-hidden="true" /><span><strong>skill-library-manager</strong><small>System managed · Always included</small></span></div>}
       </div>
       <section className="session-picker-detail" aria-label="Item details">

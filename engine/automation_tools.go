@@ -36,6 +36,9 @@ func (p *adapter) callAutomationTool(name string, raw json.RawMessage) (any, err
 	a := p.app
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.store != nil {
+		return p.recordSQLAutomationOutcome(name, args.Reason)
+	}
 	r := a.state.activeAutomation(p.id)
 	if r == nil || r.ID != p.automationRunID || p.subagent || p.role != "" || a.runs[p.id] != p.turn || p.turn.ctx.Err() != nil || r.StopRequested {
 		return nil, errors.New("This turn does not own an active automation run.")

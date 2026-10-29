@@ -81,6 +81,16 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /api/health", a.health)
 	mux.HandleFunc("GET /api/version", a.getVersion)
 	mux.HandleFunc("GET /api/state", a.getState)
+	if a.store != nil {
+		mux.HandleFunc("GET /api/activity/sessions", a.sqlSessionActivity)
+		mux.HandleFunc("GET /api/projects/{id}/sessions", a.projectSQLSessions)
+		mux.HandleFunc("GET /api/projects/{id}/topics", a.projectSQLTopics)
+		mux.HandleFunc("GET /api/projects/{id}/topics/{topicId}", a.getSQLTopic)
+		mux.HandleFunc("GET /api/sessions/{id}", a.chatSessionHandler(a.getSQLSession))
+		mux.HandleFunc("GET /api/sessions/{id}/content", a.chatSessionHandler(a.sqlEventContent))
+		mux.HandleFunc("GET /api/sessions/{id}/pending", a.chatSessionHandler(a.sqlPendingPage))
+		mux.HandleFunc("GET /api/sessions/{id}/graph/content", a.sqlGraphContentHTTP)
+	}
 	mux.HandleFunc("GET /api/analytics", a.getAnalytics)
 	mux.HandleFunc("GET /api/transcription/settings", a.getTranscriptionSettings)
 	mux.HandleFunc("PATCH /api/transcription/settings", a.updateTranscriptionSettings)
@@ -148,6 +158,24 @@ func (a *app) routes() http.Handler {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if a.store != nil {
+			_, pattern := mux.Handler(r)
+			if identity := r.Header.Get("X-KLM-Engine-ID"); identity != "" && r.URL.Path != "/api/state" && r.URL.Path != "/api/health" && r.URL.Path != "/api/version" && !strings.HasPrefix(r.URL.Path, "/api/auth/") && pattern != "POST /api/webhooks/github/{webhookId}" && pattern != "GET /api/library/mcp/oauth/callback" {
+				var current string
+				if err := a.store.readers.QueryRowContext(r.Context(), `SELECT value FROM store_meta WHERE key='database_id'`).Scan(&current); err != nil {
+					sqlHTTPError(w, err)
+					return
+				}
+				if current != identity {
+					fail(w, 409, "Engine identity changed. Reload the workspace before continuing.")
+					return
+				}
+			}
+			if pattern != "POST /api/webhooks/github/{webhookId}" && !strings.HasPrefix(r.URL.Path, "/api/auth/") && r.URL.Path != "/api/health" && r.URL.Path != "/api/version" && r.URL.Path != "/api/library/mcp/oauth/callback" && r.Header.Get("X-KLM-Read-Contract") != sqliteReadContract && r.URL.Query().Get("contract") != sqliteReadContract {
+				fail(w, 426, "Update the client to use this engine's storage contract.")
+				return
+			}
+		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			_, pattern := mux.Handler(r)
 			// Signed ingress owns its raw-body/media/admission validation.
@@ -192,6 +220,17 @@ func (a *app) health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	activeGraphs := 0
+	if a.store != nil {
+		running := len(a.runs)
+		a.mu.Unlock()
+		count, err := a.sqlHealth(r.Context())
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		respond(w, 200, map[string]any{"status": "ok", "version": 2, "contract": sqliteReadContract, "runningSessions": running, "activeGraphRuns": count})
+		return
+	}
 	for _, run := range a.state.GraphRuns {
 		if graphRunActive(run.Status) {
 			activeGraphs++
@@ -203,6 +242,10 @@ func (a *app) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) getState(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.getSQLState(w, r)
+		return
+	}
 	a.mu.Lock()
 	projects := []Project{}
 	sessions := []SessionSummary{}
@@ -364,6 +407,17 @@ func (a *app) createProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
+	if a.store != nil {
+		a.mu.Lock()
+		registered, _, err := a.registerSQLProjectLocked(r.Context(), p, false, "")
+		a.mu.Unlock()
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		respond(w, 201, projectSQLView(registered))
+		return
+	}
 	a.mu.Lock()
 	var previous *Project
 	for i := range a.state.Projects {
@@ -407,6 +461,26 @@ func (a *app) updateProject(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "Icon must be a PNG data URL, at most 128 KiB and 1024 by 1024 pixels.")
 		return
 	}
+	if a.store != nil {
+		var before *string
+		if body.Position != nil {
+			before = &body.Position.BeforeID
+		}
+		var p Project
+		a.mu.Lock()
+		err := a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error {
+			var err error
+			p, err = st.patchProject(r.PathValue("id"), body.Name, body.Icon, before)
+			return err
+		})
+		a.mu.Unlock()
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		respond(w, 200, projectSQLView(p))
+		return
+	}
 	a.mu.Lock()
 	id := r.PathValue("id")
 	if p := a.state.project(id); p == nil || p.Removed {
@@ -444,6 +518,17 @@ func (a *app) updateProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) removeProject(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.mu.Lock()
+		err := a.removeSQLProjectLocked(r.Context(), r.PathValue("id"))
+		a.mu.Unlock()
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		respond(w, 200, map[string]bool{"removed": true})
+		return
+	}
 	a.mu.Lock()
 	id := r.PathValue("id")
 	p := a.state.project(id)
@@ -546,6 +631,28 @@ func (a *app) createSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if a.store != nil {
+		if body.Workspace != "" && body.Workspace != "Ungrouped" {
+			fail(w, 400, "Omit workspace. Use topicId to choose an existing topic.")
+			return
+		}
+		a.mu.Lock()
+		if _, ok := a.binaries[body.Harness]; !ok {
+			a.mu.Unlock()
+			fail(w, 400, "Harness is unknown or not installed.")
+			return
+		}
+		s := newTopLevelSession(body.ProjectID, title, "Ungrouped", body.Harness, model, "")
+		s.TopicID = body.TopicID
+		err := a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error { return st.createSession(s, a.dir) })
+		a.mu.Unlock()
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		a.respondSQLSession(w, r, s.ID, 201)
+		return
+	}
 	a.mu.Lock()
 	p := a.state.project(body.ProjectID)
 	if p == nil || p.Removed {
@@ -605,6 +712,19 @@ func (a *app) patchSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Title == nil && body.Archived == nil && body.TopicID == nil {
 		fail(w, 400, "Provide title, archived or topicId.")
+		return
+	}
+	if a.store != nil {
+		a.mu.Lock()
+		err := a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error {
+			return st.patchSessionLabels(r.PathValue("id"), body.Title, body.TopicID, body.Archived, nil)
+		})
+		a.mu.Unlock()
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		a.respondSQLSession(w, r, r.PathValue("id"), 200)
 		return
 	}
 	a.mu.Lock()
@@ -667,6 +787,10 @@ func (a *app) patchEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Favorite == nil {
 		fail(w, 400, "Provide favorite to update the message.")
+		return
+	}
+	if a.store != nil {
+		a.patchSQLFavorite(w, r, *body.Favorite)
 		return
 	}
 	a.mu.Lock()
@@ -737,6 +861,18 @@ func (a *app) message(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(body.Text) == "" || len(body.Text) > 128<<10 || !utf8.ValidString(body.Text) || strings.ContainsRune(body.Text, 0) {
 		fail(w, 400, "Message must be nonempty UTF-8 text, at most 128 KiB, without NUL characters.")
+		return
+	}
+	if a.store != nil {
+		identity := body.ClientID
+		if identity == "" {
+			identity = newID()
+		}
+		if err := a.admitSQLMessage(r, r.PathValue("id"), identity, body.Text, body.Mode, body.Sources, body.Mentions); err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		a.respondSQLSession(w, r, r.PathValue("id"), 202)
 		return
 	}
 	a.mu.Lock()
@@ -953,6 +1089,24 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
+	if a.store != nil {
+		a.mu.Lock()
+		err := a.confirmSQLAutomationStopLocked(r.Context(), id, body.AutomationRunID)
+		var t *turn
+		if err == nil {
+			t, err = a.stopSQLSessionLocked(id, nil)
+		}
+		a.mu.Unlock()
+		if err == nil {
+			err = waitSessionStop(r.Context(), t)
+		}
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		a.respondSQLSession(w, r, id, 200)
+		return
+	}
 	a.mu.Lock()
 	if run := a.state.activeAutomation(id); run != nil {
 		if body.AutomationRunID != run.ID {
@@ -992,6 +1146,9 @@ func (a *app) stop(w http.ResponseWriter, r *http.Request) {
 
 // Caller holds app.mu. Cancellation precedes persistence, even on write failure.
 func (a *app) stopSessionLocked(id string, origin *SpawnOrigin) (*turn, error) {
+	if a.store != nil {
+		return a.stopSQLSessionLocked(id, origin)
+	}
 	if r := a.state.activeAutomation(id); r != nil && !r.StopRequested {
 		return nil, controlError(409, "Confirm stopping the automation run in its conversation first.")
 	}
@@ -1067,6 +1224,17 @@ func waitSessionStop(ctx context.Context, t *turn) error {
 }
 
 func (a *app) events(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		copy := r.Clone(r.Context())
+		u := *r.URL
+		query := u.Query()
+		query.Set("scope", "conversation")
+		query.Set("id", r.PathValue("id"))
+		u.RawQuery = query.Encode()
+		copy.URL = &u
+		a.scopedSQLUpdates(w, copy)
+		return
+	}
 	id := r.PathValue("id")
 	ch := make(chan struct{}, 1)
 	since, resumable := parseEventRevision(r)
@@ -1138,6 +1306,30 @@ func (a *app) events(w http.ResponseWriter, r *http.Request) {
 // Node sessions expose their request reply routes, but are not independent chats.
 func (a *app) chatSessionHandler(handler http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if a.store != nil {
+			s, err := a.store.readSessionMeta(r.Context(), r.PathValue("id"))
+			if err != nil {
+				sqlHTTPError(w, err)
+				return
+			}
+			if s.GraphRunID != "" || s.Role == sessionRoleSubagent && r.Method != http.MethodGet {
+				fail(w, 404, "Conversation not found.")
+				return
+			}
+			if s.ProjectID != "" {
+				p, err := a.store.readProjectMeta(r.Context(), s.ProjectID)
+				if err != nil {
+					sqlHTTPError(w, err)
+					return
+				}
+				if p.Removed {
+					fail(w, 404, "Project not found.")
+					return
+				}
+			}
+			handler(w, r)
+			return
+		}
 		a.mu.Lock()
 		s := a.state.session(r.PathValue("id"))
 		private := s != nil && s.GraphRunID != ""
@@ -1152,6 +1344,10 @@ func (a *app) chatSessionHandler(handler http.HandlerFunc) http.HandlerFunc {
 }
 
 func (a *app) getConversationGraph(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.getSQLConversationGraph(w, r)
+		return
+	}
 	a.mu.Lock()
 	s := a.state.session(r.PathValue("id"))
 	if s == nil || s.Role == sessionRoleGeneralAgent || s.ParentID != "" || s.GraphRunID != "" {
@@ -1180,6 +1376,10 @@ func (a *app) selectConversationGraph(w http.ResponseWriter, r *http.Request) {
 		failSessionControl(w, err)
 		return
 	}
+	if a.store != nil {
+		a.getSQLConversationGraph(w, r)
+		return
+	}
 	a.mu.Lock()
 	projection := a.state.graphProjection(id)
 	a.mu.Unlock()
@@ -1200,6 +1400,10 @@ type GraphRunSummary struct {
 }
 
 func (a *app) getGraphRun(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.getSQLGraphRun(w, r)
+		return
+	}
 	a.mu.Lock()
 	run := a.state.graphRun(r.PathValue("runID"))
 	if run == nil {

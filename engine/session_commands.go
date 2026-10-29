@@ -66,6 +66,12 @@ func (a *app) commandReceiptLocked(receipt SessionCommand) map[string]any {
 }
 
 func (a *app) sendSessionLocked(from *Session, args sendArgs) (any, error) {
+	if a.store != nil {
+		if from == nil {
+			return nil, errors.New("Sender is unavailable.")
+		}
+		return a.sendSQLSessionLocked(*from, args)
+	}
 	if from == nil || !consultationEndpoint(from) && from.Role != sessionRoleGeneralAgent {
 		return nil, errors.New("Session collaboration is unavailable to this sender.")
 	}

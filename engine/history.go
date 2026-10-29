@@ -107,13 +107,16 @@ func sessionSummary(view *Session) SessionSummary {
 // Metadata edits, tools and consultation activity do not change message recency.
 func lastSessionMessageAt(events []Event) string {
 	for i := len(events) - 1; i >= 0; i-- {
-		entry := events[i]
-		if entry.ConsultationID != "" || entry.CreatedAt == "" {
-			continue
+		if stamp := eventMessageAt(events[i]); stamp != "" {
+			return stamp
 		}
-		if entry.Type == "user" || entry.Type == "assistant" && strings.TrimSpace(entry.Text) != "" {
-			return entry.CreatedAt
-		}
+	}
+	return ""
+}
+
+func eventMessageAt(e Event) string {
+	if e.ConsultationID == "" && e.CreatedAt != "" && (e.Type == "user" || e.Type == "assistant" && strings.TrimSpace(e.Text) != "") {
+		return e.CreatedAt
 	}
 	return ""
 }
@@ -253,6 +256,10 @@ func (a *app) historyPageLocked(id, cursor string, limit int) (*EventPage, bool)
 }
 
 func (a *app) history(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.sqlHistory(w, r)
+		return
+	}
 	limit := historyPageLimit
 	if value := r.URL.Query().Get("limit"); value != "" {
 		parsed, err := strconv.Atoi(value)
@@ -277,6 +284,10 @@ func (a *app) history(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) exportSession(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.exportSQLSession(w, r)
+		return
+	}
 	a.mu.Lock()
 	view := a.sessionViewLocked(r.PathValue("id"))
 	if view != nil {

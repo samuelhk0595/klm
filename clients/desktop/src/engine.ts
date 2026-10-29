@@ -2,8 +2,11 @@ import type { AuthoringCatalog, GraphFile } from './features/graphs/files';
 import { resolveEngineURL } from './platform';
 import { clientFetch } from './clientAuth';
 import type { ConversationCapabilities } from './features/library/api';
+import { engineIdentityGeneration } from './engineIdentity';
 
 export const ENGINE_URL = resolveEngineURL();
+export type Revision = string | number; // Numeric values are accepted only for existing local fixtures.
+export const compareRevision = (a: Revision, b: Revision) => BigInt(a) < BigInt(b) ? -1 : BigInt(a) > BigInt(b) ? 1 : 0;
 
 export type Project = {
   topics?: Topic[];
@@ -16,7 +19,7 @@ export type Project = {
   archivedFolders: string[];
 };
 
-export type Topic = { id: string; name: string; color: 'neutral' | 'blue' | 'purple' | 'green' | 'amber' | 'rose' | 'cyan' | 'teal' | 'orange' | 'red'; createdAt: string; archived?: boolean };
+export type Topic = { id: string; name: string; color: 'neutral' | 'blue' | 'purple' | 'green' | 'amber' | 'rose' | 'cyan' | 'teal' | 'orange' | 'red'; createdAt: string; archived?: boolean; order?: number; revision?: Revision };
 
 export type Harness = {
   id: 'pi' | 'opencode' | 'codex';
@@ -26,6 +29,7 @@ export type Harness = {
 };
 
 export type EngineEvent = {
+	content?: { sessionId: string; ordinal: string; digest: string; bytes: number; domain?: string; key?: string };
 	consultationId?: string;
   id: string;
   type: 'user' | 'agent_prompt' | 'session_spawn' | 'assistant' | 'reasoning' | 'command' | 'mcp' | 'tool' | 'error' | 'status' | 'consultation' | 'subagent';
@@ -46,6 +50,12 @@ export type SessionUsage = {
 export type QueuedMessage = { id: string; text: string; mode: "queue" | "steer" | "interrupt"; status: "queued" | "steering" | "sending" | "accepted" | "interrupting" | "paused" | "uncertain"; error?: string; origin?: { sessionId: string; title: string; kind?: 'instruction' | 'question_answer' } };
 
 export type Session = {
+	metadataOnly?: boolean;
+	detailLoaded?: boolean;
+	permissionCount?: number;
+	questionCount?: number;
+	activityListed?: boolean;
+	pendingMore?: Record<string, boolean>;
   automation?: { runId: string; automationId: string; status: 'running' | 'succeeded' | 'failed' | 'execution_failed' | 'interrupted_by_user' };
   capabilities?: ConversationCapabilities;
   queue?: QueuedMessage[] | null;
@@ -61,6 +71,7 @@ export type Session = {
   lastMessageAt?: string;
   workspace: string;
   topicId?: string;
+  topic?: Topic;
   harness: Harness['id'];
   harnessLocked?: boolean;
   model?: string;
@@ -72,7 +83,7 @@ export type Session = {
   archived?: boolean;
   runtimeActive?: boolean;
   events: EngineEvent[];
-  history?: { revision: number; startIndex: number; total: number; nextCursor?: string; hasMore: boolean };
+  history?: { revision: Revision; startIndex: number; total: number; nextCursor?: string; hasMore: boolean; hasNewer?: boolean };
   permissions?: PermissionRequest[];
   questions?: QuestionRequest[];
   usage?: SessionUsage;
@@ -84,39 +95,43 @@ export type SourceReference = { sessionId: string; messageId: string; passage: s
 
 export type SessionSummary = Omit<Session, 'events' | 'history' | 'sources'>;
 export type EventPage = {
-  sessionId: string; revision: number; startIndex: number; endIndex: number;
-  total: number; events: EngineEvent[] | null; nextCursor?: string; hasMore: boolean;
+  sessionId: string; revision: Revision; startIndex: number; endIndex: number;
+  total: number; events: EngineEvent[] | null; nextCursor?: string; hasMore: boolean; hasNewer?: boolean;
 };
 export type SessionUpdate = {
-  kind: 'reset' | 'delta'; revision: number; summary: SessionSummary; total: number;
-  changes: { index: number; revision: number; event: EngineEvent }[];
+  windowRefresh?: boolean;
+  kind: 'reset' | 'delta'; revision: Revision; summary: SessionSummary; total: number;
+  changes: { index: number; revision: Revision; event: EngineEvent }[];
   history?: EventPage;
 };
 export type SessionResponse = Session | SessionUpdate;
-export type EngineSnapshot = Omit<EngineState, 'sessions'> & { sessions: SessionSummary[]; revision?: number };
+export type EngineSnapshot = Omit<EngineState, 'sessions'> & { sessions: SessionSummary[]; revision?: Revision; contract?: string; engineId?: string };
 
 export type ConversationGraphState = {
   sessionId: string;
   selectedGraphId: string;
-  revision: number;
+  revision: Revision;
   run: GraphRunProjection | null;
   requests: GraphRequestProjection[];
+  requestsHasMore?: boolean; requestsNextOffset?: number;
 };
 export type GraphRunProjection = {
   id: string; graphId: string; active: boolean;
-  status: 'starting' | 'running' | 'ending'; revision: number;
+  status: 'starting' | 'running' | 'ending'; revision: Revision;
   snapshot: GraphFile;
   activeNodeIds: string[]; completedNodeIds: string[];
   completedChoiceIds: string[]; collectingJoinIds: string[];
 };
-export type GraphActivationSummary = { id: string; occurrence: number; status: string };
+export type GraphActivationSummary = { id: string; occurrence: Revision; status: string };
 export type GraphNodeActivity = {
   capabilities?: ConversationCapabilities['applied'];
   runActive: boolean;
   activations: GraphActivationSummary[];
+  hasMore?: boolean; nextOffset?: number;
   activation: (GraphActivationSummary & {
     input: Record<string, string>; events: EngineEvent[]; error?: string;
     createdAt: string; updatedAt: string;
+    hasMore?: boolean; nextOffset?: number; hasEarlier?: boolean; previousOffset?: number; total?: number;
     submission?: { choice: { origin: string; id: string }; payload: Record<string, string>; acceptedAt?: string };
   }) | null;
 };
@@ -129,7 +144,7 @@ export type GraphRequestProjection = {
 
 // Graph revisions advance independently of the chat's updatedAt timestamp.
 export function mergeGraphState(previous: ConversationGraphState | undefined, incoming: ConversationGraphState | undefined) {
-  if (!incoming || (previous && incoming.revision <= previous.revision)) return previous;
+  if (!incoming || (previous && compareRevision(incoming.revision, previous.revision) <= 0)) return previous;
   return incoming;
 }
 
@@ -209,6 +224,18 @@ export class EngineRequestError extends Error {
 }
 
 export async function request<T>(path: string, method = 'GET', body?: unknown, timeoutMs = 15000, signal?: AbortSignal): Promise<T> {
+  const identityGeneration = engineIdentityGeneration();
+  if (body && typeof body === 'object' && (/\/automations(?:\/|$)/.test(path) || path === '/api/settings/engine' || path.endsWith('/capabilities'))) {
+    const value = { ...body } as Record<string, unknown>;
+    if (value.revision !== undefined) value.revision = String(value.revision);
+    if (value.automation && typeof value.automation === 'object') {
+      const automation = { ...value.automation } as Record<string, unknown>;
+      if (automation.revision !== undefined) automation.revision = String(automation.revision);
+      if (automation.afterSequence !== undefined) automation.afterSequence = String(automation.afterSequence);
+      value.automation = automation;
+    }
+    body = value;
+  }
   let response: Response;
   const timeout = method === 'GET' ? AbortSignal.timeout(timeoutMs) : undefined;
   const requestSignal = signal && timeout ? AbortSignal.any([signal, timeout]) : signal ?? timeout;
@@ -226,12 +253,43 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, t
     throw new Error(`Cannot connect to the engine at ${ENGINE_URL}. Start the engine and retry.`);
   }
   const result: unknown = await response.json().catch(() => null);
+  if (path.split('?')[0] !== '/api/state' && identityGeneration !== engineIdentityGeneration()) throw new DOMException('Engine identity changed.', 'AbortError');
   if (!response.ok) {
     const detail = result && typeof result === 'object' && 'error' in result && typeof result.error === 'string' ? result.error : `Engine request failed (${response.status}).`;
     throw new EngineRequestError(detail, response.status);
   }
   if (result === null) throw new Error('The engine returned an invalid JSON response. Retry the request.');
-  return result as T;
+  return normalizeEngineResponse(path, result) as T;
+}
+
+export function sessionMetadata(value: Partial<Session>): Session {
+  return { ...value, id: value.id!, title: value.title ?? '', projectId: value.projectId ?? '', workspace: value.workspace ?? 'Ungrouped',
+    harness: value.harness ?? 'pi', status: value.status ?? 'idle', role: value.role || undefined,
+    createdAt: value.createdAt ?? '', updatedAt: value.updatedAt ?? '', events: value.events ?? [], metadataOnly: true };
+}
+function ordinal(value: string | number) {
+  const number = Number(value); if (!Number.isSafeInteger(number) || number < 0) throw new Error('Invalid history position.'); return number;
+}
+function normalizeEngineResponse(path: string, value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const object = value as Record<string, any>;
+  if (typeof object.data === 'string' && typeof object.nextOffset === 'string') return { ...object, offset: ordinal(object.offset), nextOffset: ordinal(object.nextOffset), totalBytes: ordinal(object.totalBytes) };
+  if (/\/graph\/runs\/[^/]+\/nodes\/[^/]+\/activity/.test(path) && object.activation?.events) {
+    const sessionId = decodeURIComponent(path.split('/')[3]);
+    return { ...object, activation: { ...object.activation, events: object.activation.events.map((entry: any) => entry.content ? { id: entry.id, type: 'status', text: '', createdAt: '', content: { ...entry.content, bytes: Number(entry.content.bytes), sessionId, ordinal: '' } } : entry) } };
+  }
+  if (path.split('?')[0] === '/api/state') {
+    if (object.contract !== '3') throw new Error('This client requires engine storage contract 3.');
+    return { ...object, projects: object.projects.map((p: Project) => ({ ...p, folders: [], archivedFolders: [] })), sessions: object.general ? [sessionMetadata(object.general)] : [] };
+  }
+  if (object.session && typeof object.eventCount === 'string') return { ...sessionMetadata(object.session), detailLoaded: true, permissionCount: object.session.permissions?.length ?? 0, questionCount: object.session.questions?.length ?? 0, pendingMore: object.more };
+  if (/^\/api\/projects(?:\/[^/?]+)?$/.test(path.split('?')[0]) && typeof object.folder === 'string') return { ...object, folders: [], archivedFolders: [] };
+  if (typeof object.sessionId === 'string' && typeof object.count === 'string' && Array.isArray(object.events)) {
+    const events: EngineEvent[] = object.events.map((row: any) => row.event ?? ({ id: row.id, type: 'status', text: '', createdAt: '', content: { sessionId: object.sessionId, ordinal: row.ordinal, digest: row.content.digest, bytes: row.content.bytes } }));
+    const start = object.before === '' ? 0 : ordinal(object.before);
+    return { sessionId: object.sessionId, revision: object.revision, startIndex: start, endIndex: start + events.length, total: ordinal(object.count), events, nextCursor: object.hasOlder ? object.before : undefined, hasMore: object.hasOlder, hasNewer: object.hasNewer } satisfies EventPage;
+  }
+  return value;
 }
 
 export async function pickDirectory(signal?: AbortSignal): Promise<string | null> {

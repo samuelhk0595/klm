@@ -18,6 +18,10 @@ type updateSubscription struct {
 // Each logical subscription carries its own cursor. Missing/expired cursors
 // hydrate from a bounded reset; a current global cursor cannot skip a new chat.
 func (a *app) updates(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.scopedSQLUpdates(w, r)
+		return
+	}
 	ids := strings.Split(r.URL.Query().Get("ids"), ",")
 	if len(ids) > 256 {
 		fail(w, 400, "Too many observed conversations.")

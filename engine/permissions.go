@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -114,6 +115,17 @@ func (p *adapter) requestPermission(req Permission, scope map[string]any, reply 
 			return nil
 		}
 	}
+	if a.store != nil {
+		decision, reason, err := p.requestSQLPermissionLocked(&req, key, ruleHarness, ruleKind, ruleKey, facts.decision, reply)
+		a.mu.Unlock()
+		if err != nil {
+			return err
+		}
+		if decision != "" {
+			return p.replyAutomaticPermission(req, decision, reason, reply)
+		}
+		return nil
+	}
 	s := a.state.session(p.id)
 	if s == nil {
 		a.mu.Unlock()
@@ -175,6 +187,31 @@ func (p *adapter) dismissPermission(sourceID string) error {
 	a := p.app
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.store != nil {
+		for id, pending := range p.turn.approvals {
+			if pending.request.SourceID != sourceID {
+				continue
+			}
+			err := p.sqlAnalyticsWrite(func(st *sqliteSessionTx) error {
+				if err := st.analyticsWait(p.turn, id, false, true, true); err != nil {
+					return err
+				}
+				key, err := st.requestKey("pending_permissions", p.id, id)
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				return st.deleteRecord("pending_permissions", key)
+			})
+			if err == nil {
+				delete(p.turn.approvals, id)
+			}
+			return err
+		}
+		return nil
+	}
 	for id, pending := range p.turn.approvals {
 		if pending.request.SourceID != sourceID {
 			continue
@@ -202,6 +239,10 @@ func (a *app) permissionDecision(w http.ResponseWriter, r *http.Request) {
 		failSessionControl(w, err)
 		return
 	}
+	if a.store != nil {
+		a.respondSQLSession(w, r, id, 200)
+		return
+	}
 	a.mu.Lock()
 	response := a.currentSessionUpdateLocked(id)
 	a.mu.Unlock()
@@ -222,6 +263,9 @@ func permissionDecisionScope(decision string) string {
 }
 
 func (a *app) replyConversationPermission(id, requestID, decision string, origin *SpawnOrigin, validateLocked func() error) error {
+	if a.store != nil {
+		return a.replySQLPermission(id, requestID, decision, origin, validateLocked)
+	}
 	resolveRelated := false
 	defer func() {
 		if resolveRelated {

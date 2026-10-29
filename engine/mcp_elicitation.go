@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -183,6 +184,48 @@ func (a *app) answerMCPElicitation(w http.ResponseWriter, r *http.Request) {
 	a.mu.Unlock()
 	err := pending.elicitReply(&mcp.ElicitResult{Action: body.Action, Content: body.Content})
 	a.mu.Lock()
+	if a.store != nil {
+		if err != nil {
+			pending.busy = false
+			a.mu.Unlock()
+			fail(w, 409, "Elicitation expired before the reply was delivered.")
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = a.persistSQLLocked(ctx, func(st *sqliteSessionTx) error {
+			if err := st.analyticsWait(t, qid, false, true, true); err != nil {
+				return err
+			}
+			key, err := st.requestKey("pending_questions", id, qid)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if key != "" {
+				if err := st.deleteRecord("pending_questions", key); err != nil {
+					return err
+				}
+			}
+			s, err := st.sessionMeta(id)
+			if err != nil {
+				return err
+			}
+			s.UpdatedAt = now()
+			return st.putSessionMeta(s)
+		})
+		cancel()
+		if err == nil {
+			delete(t.questions, qid)
+		} else {
+			pending.busy = false
+		}
+		a.mu.Unlock()
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		a.respondSQLSession(w, r, id, 200)
+		return
+	}
 	defer a.mu.Unlock()
 	if err != nil {
 		pending.busy = false

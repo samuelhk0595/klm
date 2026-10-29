@@ -201,6 +201,9 @@ func (p *adapter) setSessionTopic(raw json.RawMessage) (any, error) {
 	a := p.app
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.store != nil {
+		return p.setSQLTopicLocked(args.TopicID, args.Name, args.Color)
+	}
 	s := a.state.session(p.id)
 	if !p.activeToolLocked() || s == nil || s.Role != "" || s.ParentID != "" || s.GraphRunID != "" {
 		return nil, errors.New("Initial topic assignment is available only in the active normal project conversation.")
@@ -278,6 +281,22 @@ func (a *app) createTopic(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "Choose a predefined topic color.")
 		return
 	}
+	if a.store != nil {
+		var topic Topic
+		a.mu.Lock()
+		err := a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error {
+			var err error
+			topic, err = st.createTopic(r.PathValue("id"), name, body.Color, body.SessionID)
+			return err
+		})
+		a.mu.Unlock()
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		respond(w, 201, map[string]any{"topic": topic, "sessionId": body.SessionID})
+		return
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	projectID := r.PathValue("id")
@@ -348,6 +367,57 @@ func (a *app) patchTopic(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Color != nil && !validTopicColor(*body.Color) {
 		fail(w, 400, "Choose a predefined topic color.")
+		return
+	}
+	if a.store != nil {
+		var result Topic
+		a.mu.Lock()
+		err := a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error {
+			projectID, topicID := r.PathValue("id"), r.PathValue("topicId")
+			ok, err := st.projectAvailable(projectID)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return controlError(404, "Project not found.")
+			}
+			topic, key, err := st.topic(projectID, topicID)
+			if err != nil {
+				return err
+			}
+			if body.Position != nil {
+				before := body.Position.BeforeID
+				if topic.Archived || body.Archived != nil || before == topicID {
+					return controlError(400, "Reorder active topics in separate requests.")
+				}
+				if before != "" {
+					target, _, err := st.topic(projectID, before)
+					if err != nil || target.Archived {
+						return controlError(400, "Choose an active topic in the same project.")
+					}
+				}
+				if err := st.orderTopic(projectID, topicID, before, false); err != nil {
+					return err
+				}
+			}
+			if body.Name != nil {
+				topic.Name = *body.Name
+			}
+			if body.Color != nil {
+				topic.Color = *body.Color
+			}
+			if body.Archived != nil {
+				topic.Archived = *body.Archived
+			}
+			result = topic
+			return st.putExistingRecord("topics", key, topic)
+		})
+		a.mu.Unlock()
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		respond(w, 200, result)
 		return
 	}
 	a.mu.Lock()

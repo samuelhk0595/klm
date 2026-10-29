@@ -122,21 +122,37 @@ func serveEngineControl(dir string, a *app, shutdown chan struct{}) (net.Listene
 				}
 				switch line {
 				case "pair\n":
-					code, err := a.clientAuth.issuePair()
+					a.mu.Lock()
+					ready := a.controlReady && !a.closing && a.clientAuth != nil
+					auth := a.clientAuth
+					a.mu.Unlock()
+					if !ready {
+						fmt.Fprintln(conn, "Engine is not ready.")
+						return
+					}
+					code, err := auth.issuePair()
 					if err != nil {
 						fmt.Fprintln(conn, "Cannot generate pairing code.")
 					} else {
 						fmt.Fprintln(conn, "pair "+code)
 					}
 				case "revoke-clients\n":
-					if err := a.clientAuth.revoke(""); err != nil {
+					a.mu.Lock()
+					ready := a.controlReady && !a.closing && a.clientAuth != nil
+					auth := a.clientAuth
+					a.mu.Unlock()
+					if !ready {
+						fmt.Fprintln(conn, "Engine is not ready.")
+						return
+					}
+					if err := auth.revoke(""); err != nil {
 						fmt.Fprintln(conn, err.Error())
 					} else {
 						fmt.Fprintln(conn, "ok")
 					}
 				case "ready\n":
 					a.mu.Lock()
-					ready := !a.closing && a.storageErr == nil
+					ready := a.controlReady && !a.closing && a.storageErr == nil
 					a.mu.Unlock()
 					if ready {
 						fmt.Fprintln(conn, "ok")

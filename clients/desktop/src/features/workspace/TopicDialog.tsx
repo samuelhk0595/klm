@@ -4,9 +4,11 @@ import { Button, IconButton } from '../../design-system/Button';
 import type { Topic } from '../../engine';
 import { topicColors } from './topics';
 import './topic-dialog.css';
+import { useTopicPage } from './useTopicPage';
 
 type TopicInput = Pick<Topic, 'name' | 'color'>;
 type TopicSelection = {
+  projectId?: string;
   topics: Topic[];
   onSelect: (id: string) => Promise<string | null>;
   onCreate: (input: TopicInput) => Promise<string | null>;
@@ -32,7 +34,10 @@ export function TopicDialog({ topic, selection, onSave, onClose }: {
   const choosing = mode === 'choose';
   const creating = mode === 'create';
   const title = choosing ? 'Choose topic' : creating ? 'New topic' : 'Edit topic';
-  const activeTopics = selection?.topics.filter(item => !item.archived) ?? [];
+  const page = useTopicPage(selection?.projectId, choosing, query);
+  const [chosenTopic, setChosenTopic] = useState(topic);
+  const candidates = selection?.projectId ? page.items : selection?.topics ?? [];
+  const activeTopics = [...new Map([...candidates, ...(chosenTopic ? [chosenTopic] : [])].filter(item => !item.archived).map(item => [item.id, item])).values()];
   const matches = activeTopics.filter(item => item.name.toLowerCase().includes(query.trim().toLowerCase()));
   const canSubmit = choosing
     ? selectedId !== topic?.id && activeTopics.some(item => item.id === selectedId)
@@ -83,7 +88,7 @@ export function TopicDialog({ topic, selection, onSave, onClose }: {
             <legend className="topic-visually-hidden">Existing topics</legend>
             {matches.map(item => <div key={item.id} className="topic-choice-row">
               <label className={`topic-choice topic-color-${item.color}`}>
-                <input type="radio" name={`${id}-topic`} value={item.id} checked={selectedId === item.id} onChange={() => { setSelectedId(item.id); setError(''); }} />
+                <input type="radio" name={`${id}-topic`} value={item.id} checked={selectedId === item.id} onChange={() => { setSelectedId(item.id); setChosenTopic(item); setError(''); }} />
                 <span className="topic-color-swatch" aria-hidden="true" />
                 <span className="topic-choice-name">{item.name}</span>
                 {item.id === topic?.id && <span className="topic-current-label">Current</span>}
@@ -91,8 +96,9 @@ export function TopicDialog({ topic, selection, onSave, onClose }: {
               </label>
               {item.id === topic?.id && <IconButton label={`Edit topic ${item.name}`} disabled={busy} onClick={() => changeMode('edit')}><Pencil aria-hidden="true" /></IconButton>}
             </div>)}
-            {!matches.length && <p className="topic-picker-empty" role="status">{query.trim() ? 'No matching topics' : 'No active topics'}</p>}
+            {!matches.length && <p className="topic-picker-empty" role="status">{page.loading ? 'Loading topics…' : query.trim() ? 'No matching topics' : 'No active topics'}</p>}
           </fieldset>
+          {selection?.projectId && <div>{page.older && <Button disabled={busy || page.loading} size="sm" onClick={page.first}>First topics</Button>}{page.nextCursor && <Button disabled={busy || page.loading} size="sm" onClick={page.next}>Next topics</Button>}{page.error && <p role="alert" className="form-error">{page.error}<Button size="sm" onClick={page.first}>Reload topics</Button></p>}</div>}
           <Button className="topic-create-action" variant="ghost" disabled={busy} onClick={() => changeMode('create')}><Plus aria-hidden="true" />New topic</Button>
         </> : <>
           <div className="topic-name-field">

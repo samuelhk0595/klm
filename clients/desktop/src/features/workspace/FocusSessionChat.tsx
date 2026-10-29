@@ -6,6 +6,7 @@ import { ConversationHistory } from '../chat/ConversationHistory';
 import { GraphPicker } from '../chat/GraphPicker';
 import { MessageComposer, type ComposerDraft, type SendMode } from '../chat/MessageComposer';
 import { MessageQueue } from '../chat/MessageQueue';
+import { GraphRequestPages } from '../chat/GraphRequestPages';
 import { ModelPicker } from '../chat/ModelPicker';
 import { PendingSubmission, type LocalSubmission } from '../chat/PendingSubmission';
 import { PermissionCard } from '../chat/PermissionCard';
@@ -16,6 +17,7 @@ import { SessionNavigationProvider } from '../chat/SessionNavigation';
 import { useAuthoringCatalog } from '../graphs/catalog';
 import { graphListEntry } from '../graphs/files';
 import { IS_MOBILE_HOST } from '../../platform';
+import { subscribeScope } from '../chat/scopedConnection';
 
 export function FocusSessionChat({ session, projectName, subagents, draft, pending, disconnected, error, submissions, onRestoreSubmission, onRetrySubmission, onSnapshot, onHistory, onEventChange, onDraftChange, onTranscription, onSend, onStop, onInterrupt, onModel, onGraph, onSelectGraph, selectingGraph, selectedGraphId, onOpenSubagent, activeSubagentId, onBackToSession, onOpenSession, generalControls, harnessUnavailable = false }: {
   session: Session; projectName: string; subagents: Session[]; draft: ComposerDraft; pending: boolean; disconnected: boolean; error?: string;
@@ -35,9 +37,22 @@ export function FocusSessionChat({ session, projectName, subagents, draft, pendi
   const graphRun = session.graph?.run;
   useEffect(() => {
     if (general) return;
-    let active = true;
-    void getConversationGraph(session.id).then(snapshot => { if (active) onGraph(snapshot); }).catch(() => {});
-    return () => { active = false; };
+    let active = true; let pending = false; let again = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    async function refresh() {
+      if (!active || document.hidden) return;
+      if (pending) { again = true; return; }
+      pending = true;
+      try { const snapshot = await getConversationGraph(session.id); if (active) onGraph(snapshot); }
+      catch { /* Existing graph/connection errors are rendered by the owning workspace. */ }
+      finally { pending = false; if (again && active) { again = false; schedule(); } }
+    }
+    function schedule() { if (!timer) timer = setTimeout(() => { timer = undefined; void refresh(); }, 150); }
+    const unsubscribe = subscribeScope('conversation', session.id, schedule);
+    const visible = () => { if (!document.hidden) schedule(); };
+    document.addEventListener('visibilitychange', visible);
+    void refresh();
+    return () => { active = false; clearTimeout(timer); unsubscribe(); document.removeEventListener('visibilitychange', visible); };
   }, [session.id, general, onGraph]);
   function refreshGraph() {
     void getConversationGraph(session.id).then(onGraph).catch(() => {});
@@ -63,6 +78,7 @@ export function FocusSessionChat({ session, projectName, subagents, draft, pendi
         })}
       </div>}
       <PendingSubmission items={submissions} onRestore={onRestoreSubmission} onRetry={onRetrySubmission} />
+      <GraphRequestPages session={session} projectName={projectName} onResolved={refreshGraph} />
       <MessageQueue session={session} disabled={pending} onSnapshot={onSnapshot} onInterrupt={onInterrupt} />
       {general && generalControls}
       {harnessUnavailable && <p role="status" className="form-error">The selected harness is not installed.</p>}

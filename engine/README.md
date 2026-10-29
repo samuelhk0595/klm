@@ -1,5 +1,133 @@
 # KLM Engine
 
+## 0.6.0 storage and client contract
+
+Normal `klm start` now uses **`<data-dir>/engine.sqlite3` as the sole runtime
+authority**. Windows release data stays in `%APPDATA%/klm/engine`; dev-tag builds
+use the separate `engine-dev` directory or an explicit absolute `KLM_DEV_DATA_DIR`.
+The executable, installer and user data remain separate. Do not point a validation
+build at a real release/dev data directory without explicitly choosing to upgrade it.
+
+### First upgrade and immutable originals
+
+After acquiring the data-directory lock and reserving the fixed API port, the
+engine copies the exact pre-upgrade source bytes to:
+
+```text
+<data-dir>/legacy-backups/<migration-id>/state.json
+<data-dir>/legacy-backups/<migration-id>/stream.sealed
+<data-dir>/legacy-backups/<migration-id>/stream.journal
+<data-dir>/legacy-backups/<migration-id>/client-auth.json
+<data-dir>/legacy-backups/<migration-id>/engine-access.json
+<data-dir>/legacy-backups/<migration-id>/manifest.json
+```
+
+Only source files that existed are copied; the manifest also records absence,
+lengths and hashes. These originals—including whitespace and journal tails—are
+retained indefinitely throughout **0.6.0**. No cleanup/retention job deletes them.
+For a new/empty data directory, the manifest records absent sources; no original
+checkpoint is manufactured. The fence still names the canonical backup filename,
+so consult the manifest rather than assuming every named source file exists.
+The importer reads the copies, replays sealed then active journal records without
+truncating the originals, normalizes supported legacy semantics, and independently
+verifies imported records/chunks/indexes/counts before committing authority.
+Complete corruption, unsupported fields/formats and unsafe ownership do not turn
+into an empty database. An incomplete final journal frame is reported/ignored by
+the read-only importer; the original tail remains in the backup.
+
+The root `state.json` is then a **version-600 rejecting downgrade fence**, not a
+checkpoint or the preserved original. It names `klm-sqlite`, the database identity
+and the original-backup path. `storage-cutover.json` and SQL metadata record the
+publication state. SQLite schema version, product version 0.6.0, this fence version
+and HTTP contract 3 are independent version namespaces.
+
+**Committed SQL authority is irreversible in the normal startup path.** Later
+starts never fall back to checkpoint/journal JSON, even if SQL is missing or fails
+to open. Removing a marker/database does not request a supported downgrade. Older
+binaries must not run against this fenced directory. A deliberate pre-upgrade
+point-in-time recovery requires separate copies and compatible referenced native/
+filesystem artifacts; it loses later SQL changes and is not automated rollback.
+The five preserved source files are not a replacement for a complete stopped-engine
+backup of native transcripts, workspaces and other referenced artifacts.
+
+`klm start` waits for its owned worker to finish preparation/recovery or exit and
+prints periodic progress instead of killing a valid import after 45 seconds.
+Readiness is published only after initialization. Failures are recorded in
+`engine.log`; resolve them before retrying. Pairing and revocation require readiness;
+local control can stop preparation. No interrupted model turn, missed automation
+occurrence or uncertain provider write is automatically replayed.
+
+### Runtime and API compatibility
+
+- One serialized SQL writer commits related records before publication, with WAL,
+  FULL synchronization, bounded readers and explicit shutdown checkpoint/close.
+  Growing histories are separate ordered records/chunks, not a global JSON state
+  object. Filesystem outboxes preserve durable intent before external effects.
+- Application requests negotiate `X-KLM-Read-Contract: 3` (SSE may use `contract=3`).
+  Old inventory clients receive 426. Pairing/auth bootstrap, health/version, signed
+  webhook ingress and OAuth callback retain their documented independent handling.
+  `X-KLM-Engine-ID` pins a known database identity; a stale identity receives 409
+  on application operations, while `/api/state` can discover the replacement.
+- `/api/state` returns compact projects, harnesses, database identity/revision and
+  general-conversation metadata, **not all sessions or histories**. Selected project
+  session/topic pages, exact conversation detail and live activity have their own
+  scopes. Revisions/sequences cross the client boundary as decimal strings.
+- History pages contain at most 50 records / 2 MiB, with exclusive ordinal cursors.
+  Oversized events use digest-bound base64 byte-content continuation. Exports stream
+  normalized records without parsing/re-encoding them in the browser. Scoped SSE
+  sends bounded invalidation/reset notices, not transcript or global-inventory copies.
+- The shared client multiplexes its watched global/project/conversation scopes over
+  one physical update connection, leaving HTTP/1.1 connections available for reads,
+  Send and Stop even with multiple floating chats. `/api/updates?contract=3` accepts
+  repeated `watch=global/`, `watch=project/<id>` and `watch=conversation/<id>` values
+  (up to 64 scopes); notices name the affected watched scopes. Ready/reset without
+  a scope list applies to all scopes on that connection. Single-scope requests
+  remain supported. Scope changes reconnect and resynchronize bounded windows.
+- Topic/session searches apply before pagination. Exact session metadata includes
+  its topic, order and archive state independently of the loaded topic page.
+  Library search covers the whole configured skill/connection scope before paging.
+  Pending requests, graph activity, automation lists and Library references expose
+  explicit continuation controls; clients must not infer absence from a partial page.
+- UI history caches retain bounded windows; hidden/minimized general chats and
+  unopened native children do not acquire histories. Navigation, Focus and pending
+  delivery state are bound to the database identity, with one-time adoption of
+  pre-contract preferences. UI subscriptions never control background execution.
+
+Current bounds include the existing 256 MiB maximum event record and transport
+limits below. Text append checkpoints optimize new/canonical events; imported events
+without checkpoints and very large non-text metadata may require an exact-record
+fallback. This is not a claim of constant-time arbitrary JSON rewrites. Live provider,
+installer/LAN and platform-specific harness acceptance is recorded separately from
+compilation and isolated browser fixtures in
+`../SQLITE_0_6_0_IMPLEMENTATION_PROGRESS.md`.
+
+Release version sources are aligned at **0.6.0**: desktop npm/package lock,
+Tauri configuration/Cargo package lock, mobile `0.6.0+3`, and Windows engine
+build/installer defaults. Release builds inject the engine version; unversioned
+local builds report `development`.
+
+### Implementation/release acceptance status
+
+Implementation and **exactly two independent review rounds** are complete. Round 1's
+three ordinary-use regressions were fixed; final round 2 requested no changes and
+reported no material findings. Scoped Go checks, TypeScript/dev builds and actual
+isolated CLI/Playwright evidence are recorded in
+`../SQLITE_0_6_0_IMPLEMENTATION_PROGRESS.md` and both `SQLITE_0_6_0_REVIEW_*.md` reports.
+
+The actual 1.04 GiB checkpoint was subsequently copied consistently, migrated and
+inspected in the browser. Import took 874.60 seconds and produced a 2.58 GiB database.
+On that migrated copy, normal CLI stop/start measured 53.5/189.5 ms with warm OS
+caches; first normal startup after migration took 478.4 ms. These are local dev
+measurements, not cold-boot or controlled old-versus-new benchmarks. The retained
+original checkpoint hash matched capture and migration manifests.
+
+This is not packaged-release acceptance. The installed source was not upgraded
+and no installer was applied. Live native/provider execution, Flutter/WebView,
+installer/login/LAN behavior and the original plan's full 10× memory/p95-latency
+measurements remain pending. Existing bounded-page/write-set/network evidence is
+narrower than that complete performance acceptance. Do not infer a performance
+pass or universal migration/runtime guarantee from the reviews.
+
 ## Secure client pairing
 
 ### Debug-only open client access
@@ -21,7 +149,9 @@ The engine logs when open dev access is enabled.
 
 ### Protected mode (default)
 
-After upgrading, every browser, native desktop and mobile WebView must pair once.
+Every new browser, native desktop and mobile WebView must pair once. The 0.6.0
+import preserves existing paired identities, credential hashes and timestamps;
+an already paired installation is not deliberately re-paired by the storage upgrade.
 On the **engine computer**, run `klm pair`, then enter the code and a client name in
 the client's **Connect to engine** screen. Codes contain 256 random bits, expire in
 five minutes, are single-use, and are replaced by the next `klm pair`. They are held
@@ -93,12 +223,11 @@ Authorization headers; browser fetch/SSE includes cookies. Engine switching relo
 the application, so displayed state and credentials are not reused across engines.
 
 Expiration is **7 consecutive days without authenticated client requests only**,
-with no absolute lifetime. Each admitted request writes last use atomically to the
-small `client-auth.json` credential file before serving protected data. The file
-contains only SHA-256 credential hashes and device metadata, at most 128 active
-devices; it is independent of history/state transactions. This simple strategy
-does one bounded file sync/replacement per authenticated request, not per SSE
-event. Browser cookies renew on the same admitted requests; an open client sends
+with no absolute lifetime. Each admitted request commits last use to SQL before
+serving protected data. Pairing records contain SHA-256 credential hashes and device
+metadata, at most 128 active devices; no transcript rewrite is involved. The legacy
+`client-auth.json` is import input, not a live credential store after cutover.
+Browser cookies renew on the same admitted requests; an open client sends
 an authenticated renewal every minute. Server stream output never renews use.
 Activity survives restart; failed persistence denies the request or pairing.
 Redemption is limited to 20 attempts per engine per minute and a 2 KiB JSON body.
@@ -126,15 +255,16 @@ and the normal mutation Origin/CSRF checks. Validation is the same at save and
 startup: exact HTTPS origins (HTTP only for loopback), no wildcard/path, explicit
 IP CIDRs, at most 32 entries of each kind and a 16 KiB JSON request body.
 
-Save writes `%APPDATA%/klm/engine/engine-access.json` atomically (or the separate
-dev data directory). The existing process keeps its active policy; **Restart
-required** appears only when the saved values differ. On subsequent starts, this
-file takes precedence over `KLM_ALLOWED_ORIGINS` and `KLM_TRUSTED_TLS_PROXIES`,
-including intentionally empty lists. Until the file exists, environment variables
-remain the initial source. Built-in local app/dev/Focus origins remain available.
+Save commits SQL access-policy records in the engine data directory. The existing
+process keeps its active policy; **Restart required** appears only when saved values
+differ. Saved SQL policy takes precedence over `KLM_ALLOWED_ORIGINS` and
+`KLM_TRUSTED_TLS_PROXIES`, including intentionally empty lists. Until policy has
+been saved, environment variables remain the bootstrap source. A pre-upgrade
+`engine-access.json` is imported with that distinction intact. Built-in local
+app/dev/Focus origins remain available.
 For first setup while the public origin is blocked, use an already paired local
-browser or native client. Removing the settings file with the engine stopped
-restores environment-based bootstrap without deleting paired credentials.
+browser or native client. Edit policy through the authenticated settings API/UI;
+removing the legacy JSON file does not reset an authoritative SQL policy.
 
 **Restart engine** requires a confirmation explicitly warning that all agents and
 graph runs in progress will be interrupted. Saving alone never restarts the engine;
@@ -346,12 +476,19 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 | --- | --- | --- |
 | GET | `/api/health` | `{status:"ok",version:2,runningSessions:number,activeGraphRuns:number}`; 503 on persistence failure |
 | GET | `/api/version` | `{version:string}`; running engine release version, or `development` for unversioned local builds |
-| GET | `/api/state` | `{projects:Project[],sessions:Session[],harnesses:Harness[]}` |
+| GET | `/api/state` | `{contract:"3",engineId,revision,projects:CompactProject[],harnesses:Harness[],general?:CompactSession}`; no session inventory/history |
+| GET | `/api/projects/{id}/sessions` | Bounded `{items,hasMore,nextCursor,revision}`; `search`, `topicId`, `archived` and returned `cursor` scope the page |
+| GET | `/api/projects/{id}/topics` | Bounded `{items,hasMore,nextCursor,revision}`; `search`, `active=true` and returned `cursor` scope the page |
+| GET | `/api/projects/{id}/topics/{topicId}` | Exact same-project Topic, independent of loaded pages |
+| GET | `/api/sessions/{id}` | Session detail envelope `{session,revision,eventCount,more}`; bounded queue/requests, embedded topic, no history |
+| GET | `/api/sessions/{id}/history` | Bounded event page; `before`/`after` exclusive ordinal cursors, `limit` at most 50; oversized records reference content |
+| GET | `/api/sessions/{id}/content` | Digest-bound base64 byte fragments using returned content references/offsets |
+| GET | `/api/updates` | Scoped SSE invalidations; `scope=global`, `scope=project&id=...` or `scope=conversation&id=...`, with contract 3 |
 | POST | `/api/projects` | `{name,folder,icon}` -> 201 Project |
 | PATCH | `/api/projects/{id}` | `{name?,icon?}` -> 200 Project |
 | DELETE | `/api/projects/{id}` | `{removed:true}`; hides the project, preserving its files and saved history; 409 while a session is running |
-| PATCH | `/api/projects/{id}/topics/{topicId}` | `{name?,color?,archived?,position?:{beforeId:string}}` -> 200 canonical Project; empty beforeId places an active topic last |
-| POST | `/api/projects/{id}/topics` | `{name,color?,sessionId?}` -> 201 canonical Project; creates a topic first in the saved order, color defaults to neutral. Optional same-project active normal `sessionId` assigns the chat atomically and adds `session:SessionUpdate` to the response. Without it, creates an empty topic. |
+| PATCH | `/api/projects/{id}/topics/{topicId}` | `{name?,color?,archived?,position?:{beforeId:string}}` -> compact topic mutation envelope; empty beforeId places an active topic last |
+| POST | `/api/projects/{id}/topics` | `{name,color?,sessionId?}` -> 201 compact topic mutation envelope; creates a topic first in saved order. Optional same-project active normal `sessionId` assigns the chat atomically. |
 | POST / PATCH | `/api/projects/{id}/folders` | 410; visual folders were replaced by persistent topics |
 | GET | `/api/projects/{id}/paths?q=...` | `{paths:[{path,kind:"file"\|"directory"}],partial:boolean}`; project-relative paths |
 | POST | `/api/sessions` | `{projectId,title,harness,model?,topicId?}` -> 201 SessionUpdate; omitted topicId starts unassigned, explicit topicId must be an active topic in that project; legacy workspace accepts only empty/Ungrouped |
@@ -364,7 +501,7 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 | PATCH | `/api/sessions/{id}/settings` | `{model:string,effort:string}` -> Session; empty strings select harness defaults |
 | GET | `/api/sessions/{id}/quota` | `{quota:QuotaSnapshot\|null}`; null for unsupported/unverified connections |
 | POST | `/api/sessions/{id}/messages` | `{text,mentions?:[{id,path,kind,start,end}],sources?:[{sessionId,messageId,passage}]}` -> 202 Session, already containing the durable user event |
-| GET | `/api/sessions/{id}/events` | SSE, initial and subsequent full Session JSON snapshots |
+| GET | `/api/sessions/{id}/events` | Compatibility route to conversation-scoped SSE invalidations; no Session/history snapshots |
 | PATCH | `/api/sessions/{id}/events/{eventID}` | `{favorite}` -> 200 Event; completed assistant messages only |
 | GET | `/api/sessions/{id}/graph` | Conversation selection, active-run projection and node requests |
 | PATCH | `/api/sessions/{id}/graph` | `{selectedGraphId:string}`; empty string selects None |
@@ -376,6 +513,11 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 
 Adding the same directory again restores a removed project's identity, topics,
 and session history with the name and icon chosen in the add dialog.
+
+Session-returning mutations in this table use the contract-3 detail envelope
+`{session,revision,eventCount,more}`, including creation, message admission,
+settings, Stop and pending-request replies. Historical `SessionUpdate` names do
+not imply an embedded transcript. Follow the appropriate page/content endpoint.
 
 ### Project GitHub webhooks
 
@@ -466,7 +608,7 @@ not the event/delivery headers; no signature, cookies or arbitrary header dump i
 stored. Payload is untrusted data, not an instruction to execute.
 
 Event, pending entry, receipt sequence and connection timestamps commit together
-through the existing journal's durable Sync before a new delivery returns
+in a durable SQL transaction before a new delivery returns
 `202 {"accepted":true,"duplicate":false,"eventId":"..."}`. A retained, unexpired
 duplicate of `(webhookId,deliveryId)` returns
 `200 {"accepted":true,"duplicate":true,"eventId":"..."}` without changing TTL,
@@ -488,9 +630,9 @@ redelivery when appropriate.
 
 Secrets and payloads live in the engine data directory, not the project repository
 or client localStorage. Secrets are needed for HMAC and stored with the engine's
-private records; encryption at rest is not promised. Existing data without webhook
-fields loads as empty; validation runs at load, after journal replay and before
-save/checkpoint. Downgrading to a binary that rejects these fields is not supported.
+private records; encryption at rest is not promised. Legacy records are validated
+during verified import; runtime writes preserve the same ownership/retention rules
+in SQL transactions. Downgrading the authoritative directory is unsupported.
 
 #### Retention and lifecycle
 
@@ -534,10 +676,9 @@ before HTTP, then every minute in batches of 100, including removed projects.
   again restores the ProjectID, connection IDs, URLs, secrets and enabled flags;
   the worker resumes only still-valid pending entries.
 
-Deletion is logical and immediately removes API access. Physical space is reclaimed
-by the existing healthy checkpoint/rotation cycle (five minutes); older journal or
-checkpoint bytes may persist until then. Secure erasure of bytes/backups is not
-promised.
+Deletion immediately removes API access and retires SQL records/chunks. SQLite may
+reuse freed pages; checkpointing WAL does not promise to shrink the database file.
+Old bytes and immutable pre-upgrade backups may remain. Secure erasure is not promised.
 
 #### Webhook API and cursors
 
@@ -700,7 +841,7 @@ still bounded by quotas. No unexpired event is silently evicted. A retained
 duplicate passes the event/byte quota check without allocating space, but still
 requires an available/enabled connection, a valid signature and an ingress slot.
 Capacity/ingress-slot responses include `Retry-After: 5`; this does not schedule a
-GitHub retry. The engine holds state in memory and checkpoints it completely.
+GitHub retry. Retained payloads remain in SQL; reads do not hydrate the entire feed.
 
 Ingress errors use `{"error":"English message"}`: 400 invalid headers/JSON/UTF-8,
 401 signature, 404 absent/removed connection or project, 409 disabled/racing secret
@@ -757,9 +898,9 @@ The primary manual route is:
 transaction gate as ordinary sessions. It persists a session with role
 `general_agent`, an empty `projectId`, and an absolute `executionCwd` pointing to
 `workspaces/general-agent` under the engine data directory. No synthetic user
-project is created. The general conversation and its native child sessions are
-excluded from `/api/state` project inventory; observing their IDs through
-`/api/updates` uses normal summaries and bounded history deltas.
+project is created. `/api/state` includes only compact general metadata; native
+children and histories are acquired explicitly. Conversation-scoped `/api/updates`
+invalidates the observed windows, which clients reload through bounded reads.
 
 `harnessLocked` is durable metadata, set atomically with message acceptance and
 projected independently of paginated history. Removing queued input does not
@@ -808,12 +949,14 @@ Graph nodes and native subagents are not independent control/command destination
 Global reads/controls are exclusive to the general role; an argument cannot grant
 it. Replies to general consultations use its own execution directory and prompt.
 Only the general agent can initiate cross-project consultations, including after
-checkpoint/journal replay; ordinary conversations still require the same project.
+legacy import/restart; ordinary conversations still require the same project.
 
 List pages contain up to 50 items; message/event pages up to 20. Serialized tool
-content is capped at 64 KiB. Oversized records return UTF-8 JSON fragments with
-`encoding`, `fragment`, rune `offset` and `nextCursor`; concatenate fragments for
-that record before decoding. Use only returned cursors with unchanged filters.
+content is capped at 64 KiB. SQL history tools return oversized records as
+`encoding:"base64-json"` byte fragments; decode and concatenate the bytes before
+JSON decoding. Other tool envelopes may return UTF-8 fragments with rune offsets.
+Honor each envelope's `encoding`, `offset` and `nextCursor` rather than treating
+byte and rune positions interchangeably. Use returned cursors with unchanged filters.
 Changed inventories/snapshots require restarting pagination. Activity in unrelated
 chats does not invalidate normal history pages, which bind to the destination's
 event version. Event delta cursors
@@ -963,9 +1106,9 @@ prompts. `agent_prompt` is not a human `user` authorization event. Sending does 
 wait, yield, subscribe or resume the sender. `linked_ask`/`session_ask` are for
 information/clarification; use `session_send` for implementation/execution.
 
-Storage adds optional `sessionCommands` and optional origin `kind` fields through
-the ordinary transaction/journal/checkpoint path. Older data remains loadable;
-downgrade to binaries rejecting new fields is not promised. Strict decoding and
+Storage retains sender-scoped command receipts and origin `kind` in SQL records.
+Supported older data is imported; runtime never falls back after SQL authority.
+Downgrade of the fenced directory is unsupported. Strict decoding and
 receipt/consultation identity/scope validation remain enabled.
 
 `session_discover` accepts `{query?,cursor?,limit?,includeArchived?}` and returns
@@ -1340,7 +1483,7 @@ tokenizer, hardcoded model capacity, or usage inferred from visible text is used
 
 IDs are opaque strings, and timestamps
 are UTC RFC3339 with fractional seconds. Native harness identifiers and Pi's
-session path live in a separate private section of `state.json`.
+session path live in private SQL native-session records, separate from UI history.
 
 Validation and semantics:
 
@@ -1385,15 +1528,15 @@ Validation and semantics:
 - `topicSchema:1` records a durable migration after both journal segments replay.
   Each legacy folder gets a distinct project topic, retaining archive state; empty
   labels/Ungrouped remain no topic. Historical folder fields and spawn requests are
-  retained for compatibility. Generic transaction cloning/patches carry topics and
-  topicId through rollback, replay, checkpoint and HTTP/SSE summaries. Graph
+  retained for compatibility by the importer. Runtime SQL transactions carry topic
+  identity through mutations and scoped reads/notifications. Graph
   execution workspaces/directories are unrelated and unchanged.
 - The shared sidebar orders members newest-created first, with ID ties. Topics
   initially use newest-created persisted members (including archived ones), with
   topic-ID ties. Dragging topic headers saves `Project.topicOrder`; positioned
   topics stay in that order and new unpositioned topics precede it. Reorder validates
   active same-project source/target under the state lock and commits through the
-  normal journal/checkpoint path. Archived positions survive restore and removed
+  normal SQL transaction path. Archived positions survive restore and removed
   project re-registration.
 - Dragging a normal active session to another active same-project topic updates
   only its `topicId` and metadata timestamp. History, runtime, Library/settings,
@@ -1770,7 +1913,7 @@ requests disable remembered choices. Grant persistence succeeds before a request
 is released; delivery failures roll back the new grant. Pending requests are not
 replayed after restart. A permission audit entry is included in session events.
 
-Grants are stored in `state.json`'s permissionGrants field. They do not modify
+Grants are stored as SQL permission-grant records. They do not modify
 global harness settings. There is no grants-management UI in this first slice;
 session grants end when that logical session is no longer used, not at every turn.
 
@@ -1810,8 +1953,9 @@ or model output may retain/echo values; this is not end-to-end secret redaction.
 
 `Session.parentId` attaches exactly one side conversation to a main session in the
 same project. Creation is idempotent under the engine mutex, including concurrent
-clients. `/api/state` includes both; the client filters children out of its top-level
-list. Main and side have independent native IDs/files and harness/model settings.
+clients. Project pages list top-level chats; side conversations resolve through
+explicit creation/detail reads, without global history loading. Main and side have
+independent native IDs/files and harness/model settings.
 Switching a side harness is allowed only before any events or active execution.
 
 Side messages accept up to eight source references from the parent conversation,
@@ -1854,7 +1998,7 @@ The installed versions inspected for this feature were OpenCode 1.18.30 and Code
 0.153.4; Codex's generated local app-server schema confirms the status-list contract.
 Runtime readiness checks fail explicitly if an installed harness cannot expose the tools.
 
-Requests persist in `state.json.consultations`, with question, answer, topic, endpoint
+Requests persist as SQL consultation records, with question, answer, topic, endpoint
 IDs, timestamps, status (`queued`, `answering`, `completed`, `failed`, `cancelled`,
 `interrupted`), and delivery state. Both sessions receive atomically updated activity
 events. Background output and permission/question answer audits carry `consultationId`
@@ -1888,45 +2032,28 @@ execution, a full suite, or an adversarial review.
 
 ## Persistence And Recovery
 
-- `state.json` is the full checkpoint (v2, `journalFormat: 1`). Commands and stream
-  updates share one ordered `stream.journal`: each frame is a little-endian uint32
-  JSON length, uint32 CRC32, then JSON, capped at 256 MiB. Stream records retain
-  `{revision,session,updated,updates,usage?}`; command records use
-  `{format:1,revision,transaction:[{path,value?|length?|delete?}]}`. Paths are arrays
-  of field names (JSON tag, or Go name when untagged, including embedded containers),
-  slice indexes and map keys. Each command frame includes all
-  affected queue payloads, receipts, consultations, graph records and event edits.
-  A frame is synced before publishing state, SSE notifications or HTTP success.
-  Identical commands/stream updates need no new revision or write.
-- Command callbacks clone mutable metadata in memory, sharing immutable strings
-  and append-only event histories. Existing session events must be replaced through
-  `diskState.setEvent`, which stages indexed changes until persistence succeeds;
-  never mutate existing event payload maps in place. Activation event logs are
-  append-only. SSE changes are ordered by index. No per-command full JSON state
-  clone, global history diff or full-session event copy is performed. Metadata
-  traversal/validation still scales with the number of records; this is not an
-  O(1) database. Captured graph validation/compilation and event identity indexes
-  are reused rather than rereading source text or unrelated event histories.
-- Every five minutes the checkpoint worker serializes with other checkpoints,
-  rotates the active journal to `stream.sealed` under `app.mu`, then releases it.
-  It reconstructs an independent state from the previous checkpoint and sealed
-  segment, writes/syncs/replaces `state.json`, and removes only that sealed segment.
-  Commands and streaming continue into a new active journal during the expensive
-  replay/validation/serialization/write. Shutdown joins this worker before releasing
-  the data-directory lock. Small journal fsyncs remain serialized under `app.mu`.
-- Recovery reads checkpoint, sealed segment, then active segment, ignoring revisions
-  already in the checkpoint and requiring contiguous newer revisions. It truncates
-  and syncs an incomplete last frame; a complete corrupt frame, unsupported format
-  or revision gap is an error. Session reordering preserves histories by identity.
-  Versions 1/2 and the older stream-only journal remain readable. Before serving,
-  startup persists the `journalFormat` marker so older binaries refuse the data
-  instead of ignoring a journal. Downgrade is unsupported; a backup includes all
-  three storage files, not just `state.json`.
+- `engine.sqlite3` is authoritative after the verified cutover described above.
+  Commands, streamed events, usage, receipts and related domain changes commit in
+  explicit SQL write sets. There is no live global `diskState` hydration, JSON
+  checkpoint generation, JSON dual-write or journal fallback.
+- Legacy v1/v2 checkpoints and stream/transaction journals remain **import formats**.
+  Frames have a little-endian uint32 JSON length and CRC32, capped at 256 MiB.
+  Positional transaction replay occurs only in unpublished import staging, preserving
+  histories by session ID when sessions reorder. The importer validates contiguous
+  revisions and complete-frame integrity, retains incomplete source tails unchanged,
+  and drops positional staging before granting SQL authority.
+- Runtime uses SQLite WAL, passive checkpoints and a final truncate checkpoint
+  after HTTP handlers and owned writers/workers drain. It does not reconstruct or
+  serialize the entire retained state on a timer. Reader/export lifetimes can delay
+  WAL checkpoint progress; failures are reported, not described as successful sync.
+- Startup rolls forward durable filesystem outboxes, recovers unfinished SQL rows,
+  and leaves native identities/captured artifacts intact. Cold graph snapshots and
+  all historical session event indexes are not eagerly loaded at startup.
 - Windows replacement uses `MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH)`.
   Unix uses rename plus parent-directory sync. Use a local filesystem with normal
   atomic rename/sync semantics, not a network share or cloud-synced data directory.
-- In-memory state changes and SSE notifications happen only after persistence
-  succeeds. A write failure preserves the last published snapshot, cancels active
+- Client invalidations happen only after persistence succeeds. A write failure
+  preserves committed data, cancels active
   executions, blocks further mutations, and makes health return 503. Fix the
   underlying storage problem and restart; no automatic overwrite/retry is done.
 - `engine.lock` is held exclusively by an OS file lock/handle for the engine's
@@ -1936,7 +2063,7 @@ execution, a full suite, or an adversarial review.
 - Startup refuses malformed/unsupported state instead of resetting it. Sessions
   left running become `error` with a durable interruption event. Native harness
   transcripts remain owned/formatted by the harness itself; they are not part of
-  the engine JSON transaction, and a stopped turn may have partial native history.
+  the engine SQL transaction, and a stopped turn may have partial native history.
 - Stop cancels the turn before persistence and independently terminates the whole
   conversation runtime: Windows closes its owned Job Object, including native
   subagents and local tool descendants; Unix signals its owned process groups.
@@ -1957,10 +2084,12 @@ execution, a full suite, or an adversarial review.
   OpenCode retains its separate SSE-frame and HTTP-response bounds. Stderr is
   capped at 16 KiB and is never persisted, exposed, or logged. Exit failures
   report a bounded diagnostic instead. These are transport bounds, not history quotas.
-- Session history is durable and unbounded across turns. Full checkpoint/recovery
-  cost still grows with retained history, but is outside the live application mutex.
-  There is no history retention/deletion API yet. Back up the data directory with
-  the engine stopped. Measurements and recovery checks: [R4 result](../LATENCY_R4_RESULT.md).
+- Session history is durable across turns. One-time legacy import and explicit
+  export still scale with source size, while runtime reads/mutations target scoped
+  records/windows. There is no general chat-history retention/deletion API. Back up
+  the complete data directory with the engine stopped, retaining immutable originals
+  and referenced artifacts. [R4 results](../LATENCY_R4_RESULT.md) describe the older
+  pre-SQL implementation, not a performance claim for 0.6.0.
 
 ## Network and Private Control Boundaries
 
@@ -1976,8 +2105,10 @@ harness endpoints retain their local boundary. Engine shutdown, pairing-code
 issuance and local recovery use a named pipe whose ACL allows this Windows user
 and denies network logons. Grants, permissions and sandbox behavior remain unchanged.
 
-The engine never reads auth stores, prints environment values, or exposes binary
-paths/command lines through discovery. Harness-generated tool/message content
+Public discovery does not expose credentials, environment values or binary
+paths/command lines. Native provider configuration stays in its preparation channel;
+upstream MCP credentials stay engine-owned rather than being projected to harnesses.
+Harness-generated tool/message content
 can still contain sensitive project information and is shown/stored as content;
 this is not a general-purpose content redaction system. Protect the data directory
 with user-only OS permissions. State is plaintext, not encrypted.
@@ -2155,21 +2286,21 @@ repository root for integration contracts and actual verification evidence.
 
 ## Retired Tasks storage
 
-The abandoned Tasks prototype is not part of the current engine. At startup,
-while holding the data-directory lock, the engine removes its known checkpoint
+The abandoned Tasks prototype is not part of the current engine. During legacy
+import, after preserving originals, the engine excludes its known checkpoint
 fields (`taskSchema`, `tasks`, `taskRuns`, `githubBindings`, `githubReceipts`,
 `engineTime`) and task ownership metadata on sessions and graph records. Ordinary
 chat histories, native session identities, projects and authorized graph records
 remain intact; graph input `task` is unrelated and is preserved.
 
-Cleanup first replays both journal segments into an isolated copy, excluding only
+Import replays both journal segments into unpublished SQL staging, excluding only
 retired Tasks fields, and validates the result with the current storage rules.
 Unknown fields, corrupt journals and graph records without valid user authorization
-still fail rather than being silently discarded or reauthorized. Before replacing
-the checkpoint, original files are synced to `backup-before-tasks-removal-*` under
-the data directory. Journal segments are retired only after the clean checkpoint
-covers their revisions. Existing `state.pre-tasks-*` backups are never restored or
-deleted. No harness work is started by the cleanup.
+still fail rather than being silently discarded or reauthorized. Exact original
+files remain under `legacy-backups/<migration-id>/`; neither this transform nor
+normal startup rewrites those originals. Existing `state.pre-tasks-*` and
+`backup-before-tasks-removal-*` artifacts are not automatically restored or deleted.
+No harness work is started by the import transform.
 
 ## Queued messages and steering (issue #4)
 

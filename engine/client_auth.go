@@ -41,6 +41,7 @@ type clientAuthDisk struct {
 // state for authentication. Each admitted request durably records use; SSE output
 // never renews it. A failed write fails closed and leaves the previous state intact.
 type clientAuth struct {
+	store         *sqliteStore // Non-nil after SQL cutover; no legacy dual-writing.
 	mu            sync.Mutex
 	devOpenAccess bool // Only a dev-tag build can honor the explicit debug flag.
 	dir           string
@@ -57,12 +58,22 @@ type clientAuth struct {
 }
 
 func newClientAuth(dir string) (*clientAuth, error) {
+	return newClientAuthStorage(dir, nil)
+}
+
+func newClientAuthStorage(dir string, store *sqliteStore) (*clientAuth, error) {
 	s := &clientAuth{dir: dir, origins: map[string]bool{}, requests: map[string]map[*http.Request]context.CancelFunc{},
-		devOpenAccess: developmentBuild && os.Getenv("KLM_DEV_DISABLE_CLIENT_AUTH") == "1"}
+		devOpenAccess: developmentBuild && os.Getenv("KLM_DEV_DISABLE_CLIENT_AUTH") == "1", store: store}
 	for _, origin := range []string{"http://localhost:7332", "http://127.0.0.1:7332", "http://localhost:17332", "http://127.0.0.1:17332", "http://localhost:5173", "http://127.0.0.1:5173", "http://tauri.localhost", "https://tauri.localhost", "tauri://localhost"} {
 		s.origins[origin] = true
 	}
-	settings, err := loadEngineAccessSettings(dir)
+	var settings engineAccessSettings
+	var err error
+	if store != nil {
+		settings, err = store.loadEngineAccess(context.Background())
+	} else {
+		settings, err = loadEngineAccessSettings(dir)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -73,6 +84,13 @@ func newClientAuth(dir string) (*clientAuth, error) {
 	for _, value := range settings.TrustedTLSProxies {
 		prefix, _ := netip.ParsePrefix(value) // Validated before publishing the active policy.
 		s.proxies = append(s.proxies, prefix)
+	}
+	if store != nil {
+		s.disk, err = store.loadPairedClients(context.Background())
+		if err != nil {
+			return nil, errors.New("cannot read SQLite client authentication storage")
+		}
+		return s, nil
 	}
 	b, err := os.ReadFile(filepath.Join(dir, "client-auth.json"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -104,11 +122,24 @@ func authHash(secret string) string {
 }
 
 func (s *clientAuth) saveLocked(next clientAuthDisk) error {
-	if err := writeClientAuthJSON(s.dir, "client-auth.json", next); err != nil {
+	var err error
+	if s.store != nil {
+		err = s.store.savePairedClients(context.Background(), s.disk, next)
+	} else {
+		err = writeClientAuthJSON(s.dir, "client-auth.json", next)
+	}
+	if err != nil {
 		return errors.New("cannot persist client authentication")
 	}
 	s.disk = next
 	return nil
+}
+
+func (s *clientAuth) saveAccessLocked(next engineAccessSettings) error {
+	if s.store != nil {
+		return s.store.saveEngineAccess(context.Background(), next)
+	}
+	return writeClientAuthJSON(s.dir, "engine-access.json", next)
 }
 
 func writeClientAuthJSON(dir, filename string, value any) error {
@@ -450,7 +481,7 @@ func (s *clientAuth) protect(mux *http.ServeMux, next http.Handler) http.Handler
 				return
 			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, PATCH, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-KLM-CSRF, X-KLM-Native")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-KLM-CSRF, X-KLM-Native, X-KLM-Read-Contract, X-KLM-Engine-ID")
 			w.WriteHeader(204)
 			return
 		}

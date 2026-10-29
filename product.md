@@ -35,6 +35,44 @@ work and manages its execution with an agent. It is not just the language model.
 
 ## Current Definition Boundaries
 
+### 0.6.0 persistence and on-demand clients
+
+The engine's runtime authority is SQLite (`engine.sqlite3`), with separate records
+for growing histories, queues, receipts, graph/automation work and accounting.
+Clients negotiate storage contract 3, load compact bootstrap metadata, then acquire
+project, conversation and history pages on demand. Revisions are decimal strings;
+scoped live updates invalidate bounded windows rather than retransmitting global
+history. Hidden general chats and unopened native children do not load histories.
+Exact-ID navigation and embedded topic identity keep an unloaded page from being
+mistaken for unavailable content. Topic/Library search applies to the requested
+engine/project scope before pagination. Background execution does not depend on
+open clients or subscriptions.
+
+On the first upgrade, exact existing `state.json`, `stream.sealed`, `stream.journal`,
+`client-auth.json` and `engine-access.json` bytes are preserved under
+`<engine-data-dir>/legacy-backups/<migration-id>/`, with an absence/hash manifest.
+Those originals remain immutable and are never automatically deleted during 0.6.0.
+Verified import precedes SQL authority. The root `state.json` becomes a version-600
+downgrade fence naming the original backup; it is not a live checkpoint or the
+preserved original. Once committed, normal startup never falls back to JSON or
+automatically reverses authority. Older binaries must not use the fenced directory.
+Point-in-time recovery requires intentional separate copies and compatible referenced
+artifacts, and cannot preserve post-cutover changes by replaying the old JSON files.
+Existing paired-client records, saved empty access policy and native identities are
+preserved; the upgrade does not deliberately force re-pairing or replay interrupted work.
+
+The normal CLI and shared frontend have isolated runtime/browser evidence.
+Implementation and exactly two independent review rounds are complete; round 1's
+three findings were fixed and final round 2 requested no changes. A consistent copy
+of the actual 1.04 GiB checkpoint was migrated and inspected in the browser; a normal
+CLI stop/start on that migrated database measured 53.5/189.5 ms with warm OS caches.
+The installed source was not upgraded. Installer/LAN, Flutter/WebView, live provider/harness paths and the full
+planned history-scaling memory/latency measurements remain separate acceptance
+checks; compilation, bounded fixtures and reviews do not establish them. No
+installation was performed. Evidence and compatibility details
+are recorded in `SQLITE_0_6_0_IMPLEMENTATION_PROGRESS.md`, both review reports and
+`engine/README.md`.
+
 The first real slice is a separate Go engine with persistent projects and sessions,
 and a React client. A project has a name, directory, and icon. Ordinary sessions belong
 to one project and use Pi, OpenCode, or Codex headlessly. The client presents the

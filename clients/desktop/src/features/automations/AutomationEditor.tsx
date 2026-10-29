@@ -4,11 +4,13 @@ import { Button } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import { Select } from '../../design-system/Select';
 import { Toggle } from '../../design-system/Toggle';
-import { getAuthoringCatalog, request, type Project, type Session } from '../../engine';
+import { getAuthoringCatalog, request, type Project, type Session, type Topic } from '../../engine';
 import { CapabilitySelector } from '../library/CapabilitySelector';
 import { useModelCatalog } from '../chat/modelCatalog';
 import { topicColors } from '../workspace/topics';
 import { automationPath, type Automation, type AutomationList } from './api';
+import { useTopicPage } from '../workspace/useTopicPage';
+import { topicArchived } from '../workspace/topics';
 import { scheduledDate, sessionModes, triggerSummary, weekdays } from './presentation';
 
 const steps = ['Activation', 'Task', 'Configuration'];
@@ -28,6 +30,13 @@ export function AutomationEditor({ initial, project, sessions, topics, zone, bus
   const [topicMode, setTopicMode] = useState(initial.topicId ? 'existing' : 'new');
   const [topicName, setTopicName] = useState('');
   const [topicColor, setTopicColor] = useState('neutral');
+  const [topicSearch, setTopicSearch] = useState('');
+  const [sessionSearch, setSessionSearch] = useState('');
+  const [sessionQuery, setSessionQuery] = useState('');
+  const [sessionCursor, setSessionCursor] = useState('');
+  const [sessionPage, setSessionPage] = useState<{ items: Session[]; nextCursor?: string }>({ items: [] });
+  const [sessionLoadError, setSessionLoadError] = useState('');
+  const [exactDestination, setExactDestination] = useState<Session>();
   const [graphs, setGraphs] = useState<{ id: string; name: string }[]>([]);
   const [catalogError, setCatalogError] = useState('');
   const [catalogAttempt, setCatalogAttempt] = useState(0);
@@ -46,8 +55,31 @@ export function AutomationEditor({ initial, project, sessions, topics, zone, bus
   const usesSession = sessionMode === 'existing' || sessionMode === 'reuse_created' && !!draft.sessionId;
   const creating = !usesSession;
   const linked = !!initial.sessionId && (initial.sessionMode || 'new_per_run') !== 'new_per_run';
-  const destinations = sessions.filter(s => s.projectId === project.id && !s.role && !s.parentId && !s.archived && !topics.find(t => t.id === s.topicId)?.archived);
-  const destination = sessions.find(s => s.id === draft.sessionId);
+  const destinations = [...new Map([...sessionPage.items, ...(exactDestination ? [exactDestination] : [])].filter(s => s.projectId === project.id && !s.role && !s.parentId && !s.archived && !topicArchived(project,s)).map(s => [s.id,s])).values()];
+  const topicPage = useTopicPage(project.id, creating && step === 2, topicSearch);
+  const [pickedTopic, setPickedTopic] = useState(topics.find(t => t.id === initial.topicId));
+  const topicOptions = [...new Map([...topicPage.items, ...(pickedTopic ? [pickedTopic] : [])].filter(t => !t.archived).map(t => [t.id,t])).values()];
+  const destination = exactDestination?.id === draft.sessionId ? exactDestination : sessions.find(s => s.id === draft.sessionId);
+  useEffect(() => { const timer = setTimeout(() => { setSessionQuery(sessionSearch); setSessionCursor(''); }, 200); return () => clearTimeout(timer); }, [sessionSearch]);
+  useEffect(() => {
+    if (sessionMode !== 'existing') return;
+    const controller = new AbortController(); setSessionLoadError('');
+    const query = new URLSearchParams({ search: sessionQuery, limit: '100', ...(sessionCursor ? { cursor: sessionCursor } : {}) });
+    void request<{ items: Session[]; nextCursor?: string }>(`/api/projects/${encodeURIComponent(project.id)}/sessions?${query}`, 'GET', undefined, 15000, controller.signal).then(value => { if (!controller.signal.aborted) setSessionPage(value); }).catch(error => { if (!controller.signal.aborted) setSessionLoadError(failure(error)); });
+    return () => controller.abort();
+  }, [project.id, sessionMode, sessionQuery, sessionCursor]);
+  useEffect(() => {
+    if (!draft.sessionId) { setExactDestination(undefined); return; }
+    const controller = new AbortController();
+    void request<Session>(`/api/sessions/${encodeURIComponent(draft.sessionId)}`, 'GET', undefined, 15000, controller.signal).then(value => { if (!controller.signal.aborted) setExactDestination(value); }).catch(error => { if (!controller.signal.aborted) setSessionLoadError(failure(error)); });
+    return () => controller.abort();
+  }, [draft.sessionId]);
+  useEffect(() => {
+    if (!initial.topicId || topics.some(t => t.id === initial.topicId)) return;
+    const controller = new AbortController();
+    void request<Topic>(`/api/projects/${encodeURIComponent(project.id)}/topics/${encodeURIComponent(initial.topicId)}`, 'GET', undefined, 15000, controller.signal).then(value => { if (!controller.signal.aborted) setPickedTopic(value); }).catch(error => { if (!controller.signal.aborted) setValidation(failure(error)); });
+    return () => controller.abort();
+  }, [project.id, initial.topicId]);
   const { catalog, loading, error: modelError, refresh } = useModelCatalog(project.id, draft.harness, undefined, creating);
   const patch = (value: Partial<Automation>) => setDraft(current => ({ ...current, ...value }));
   const schedule = (value: Partial<Automation['schedule']>) => patch({ schedule: { ...draft.schedule, ...value, anchor: undefined } });
@@ -158,7 +190,7 @@ export function AutomationEditor({ initial, project, sessions, topics, zone, bus
 
         <div data-editor-step="1" hidden={step !== 1} className="automation-step-fields">
           <label className="automation-field">Session<Select label="Session mode" variant="field" disabled={linked} value={sessionMode} onChange={event => patch({ sessionMode: event.target.value as Automation['sessionMode'], sessionId: '', parallel: false })}>{sessionModes.map(mode => <option key={mode.value} value={mode.value}>{mode.name}</option>)}</Select><small>{linked ? 'This automation is linked to a fixed session.' : sessionModes.find(mode => mode.value === sessionMode)?.description}</small></label>
-          {sessionMode === 'existing' && <label className="automation-field">Destination<Select label="Existing session" variant="field" required disabled={linked} value={draft.sessionId || ''} onChange={event => patch({ sessionId: event.target.value })}><option value="">Choose a session</option>{destinations.map(s => <option key={s.id} value={s.id}>{s.title}{s.status === 'running' ? ' · Busy' : ''}</option>)}{draft.sessionId && !destinations.some(s => s.id === draft.sessionId) && <option value={draft.sessionId}>{destination?.title || 'Linked session'} · Unavailable</option>}</Select>{!destinations.length && !linked && <small>No available sessions in this project.</small>}</label>}
+          {sessionMode === 'existing' && <><label className="automation-field">Search sessions<Input aria-label="Search automation sessions" disabled={linked} value={sessionSearch} onChange={event => setSessionSearch(event.target.value)} /></label><label className="automation-field">Destination<Select label="Existing session" variant="field" required disabled={linked} value={draft.sessionId || ''} onChange={event => patch({ sessionId: event.target.value })}><option value="">Choose a session</option>{destinations.map(s => <option key={s.id} value={s.id}>{s.title}{s.status === 'running' ? ' · Busy' : ''}</option>)}{draft.sessionId && !destinations.some(s => s.id === draft.sessionId) && <option value={draft.sessionId}>{destination?.title || 'Linked session'} · Unavailable</option>}</Select></label><div>{sessionCursor && <Button size="sm" onClick={() => setSessionCursor('')}>First sessions</Button>}{sessionPage.nextCursor && <Button size="sm" onClick={() => setSessionCursor(sessionPage.nextCursor ?? '')}>Next sessions</Button>}{sessionLoadError && <p role="alert" className="form-error">{sessionLoadError}</p>}</div></>}
           {usesSession && <div className="automation-note"><Info aria-hidden="true" /><p>Runs use the linked session’s current settings and wait until it is free.</p></div>}
           {draft.mode === 'webhook' && <div className="automation-reference-bar"><span>Insert into {creating && sessionMode !== 'new_per_run' ? promptField === 'prompt' ? 'initial prompt' : 'follow-up prompt' : 'prompt'}</span><div>{references.map(ref => <Button key={ref.token} size="sm" title={`${ref.meaning} · Example: ${ref.example}`} onClick={() => insert(ref.token)}><Plus aria-hidden="true" />{ref.name}</Button>)}</div></div>}
           {creating && <label className="automation-field">Initial prompt<textarea className="input textarea" ref={prompt} required placeholder="Describe the task and what a successful result looks like." onFocus={() => setPromptField('prompt')} aria-invalid={initialReferences || undefined} aria-describedby={initialReferences ? 'automation-prompt-references-error' : undefined} value={draft.prompt} onChange={event => patch({ prompt: event.target.value })} rows={6} />{sessionMode !== 'new_per_run' && <small>Sent only when the session is created.</small>}</label>}
@@ -175,7 +207,9 @@ export function AutomationEditor({ initial, project, sessions, topics, zone, bus
             </div>
             <label className="automation-field">Model<Select label="Model" variant="field" value={draft.model} disabled={loading} onChange={event => patch({ model: event.target.value, effort: '' })}><option value="">{loading ? 'Loading models…' : `Harness default${catalog?.defaultModel ? ` · ${catalog.defaultModel}` : ''}`}</option>{draft.model && !catalog?.models.some(model => model.id === draft.model) && <option value={draft.model}>{draft.model} · Unavailable</option>}{catalog?.models.map(model => <option key={model.id} value={model.id}>{model.name || model.id}</option>)}</Select></label>
             {modelError && <div className="form-error" role="alert">{modelError}<Button size="sm" onClick={() => void refresh()}>Reload models</Button></div>}
-            <label className="automation-field">Topic<Select label="Topic" variant="field" value={topicMode === 'new' ? 'new' : draft.topicId} onChange={event => { if (event.target.value === 'new') setTopicMode('new'); else { setTopicMode('existing'); patch({ topicId: event.target.value }); } }}><option value="new">Create a new topic</option>{topics.filter(t => !t.archived).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}{topicMode === 'existing' && !topics.some(t => t.id === draft.topicId && !t.archived) && <option value={draft.topicId}>Unavailable topic</option>}</Select></label>
+            <label className="automation-field">Search topics<Input aria-label="Search automation topics" value={topicSearch} onChange={event => setTopicSearch(event.target.value)} /></label>
+            <label className="automation-field">Topic<Select label="Topic" variant="field" value={topicMode === 'new' ? 'new' : draft.topicId} onChange={event => { if (event.target.value === 'new') setTopicMode('new'); else { setTopicMode('existing'); setPickedTopic(topicOptions.find(t => t.id === event.target.value)); patch({ topicId: event.target.value }); } }}><option value="new">Create a new topic</option>{topicOptions.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}{topicMode === 'existing' && !topicOptions.some(t => t.id === draft.topicId) && <option value={draft.topicId}>Saved topic · {draft.topicId}</option>}</Select></label>
+            <div>{topicPage.older && <Button size="sm" onClick={topicPage.first}>First topics</Button>}{topicPage.nextCursor && <Button size="sm" disabled={topicPage.loading} onClick={topicPage.next}>Next topics</Button>}{topicPage.error && <p role="alert" className="form-error">{topicPage.error}<Button size="sm" onClick={topicPage.first}>Reload topics</Button></p>}</div>
             {topicMode === 'new' && <div className="automation-new-topic"><label className="automation-field">Topic name<Input required maxLength={60} placeholder="e.g. Code reviews" value={topicName} onChange={event => setTopicName(event.target.value)} /></label><div className="topic-color-picker" role="group" aria-label="Topic color">{topicColors.map(color => <Button key={color} size="sm" className={`topic-color-chip topic-color-${color}`} aria-pressed={topicColor === color} onClick={() => setTopicColor(color)}><span className="topic-color-swatch" aria-hidden="true" />{color[0].toUpperCase() + color.slice(1)}</Button>)}</div></div>}
             <div className="automation-setting"><Toggle label="YOLO mode" checked={draft.yolo} onCheckedChange={yolo => patch({ yolo })} /><p>Automatically approve tool permissions. Questions still require a reply.</p></div>
           </> : <div className="automation-note"><Info aria-hidden="true" /><div><strong>{destination?.title || 'Linked session'}</strong><p>{destination?.harness || draft.harness} · {destination?.model || 'Harness default'}{destination?.effort ? ` · ${destination.effort}` : ''}{destination?.yolo ? ' · YOLO' : ''}</p><p>Session settings and Library are managed in the conversation.</p></div></div>}

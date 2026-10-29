@@ -255,6 +255,18 @@ func piChildCapabilities(parent *CapabilitySnapshot) *CapabilitySnapshot {
 func (a *app) persistPiChildCapabilities(id string, snapshot *CapabilitySnapshot) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.store != nil {
+		if snapshot == nil {
+			return nil
+		}
+		return a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
+			cap := sqliteOwnedKey(id, "")
+			if err := st.putSingleChild("capability_selections", cap, copySelection(snapshot.Selection)); err != nil {
+				return err
+			}
+			return st.putSingleChild("capability_applied", cap, snapshot)
+		})
+	}
 	return a.commitLocked(func(d *diskState) {
 		if child := d.session(id); child != nil && snapshot != nil {
 			child.Capabilities = ConversationCapabilities{Desired: copySelection(snapshot.Selection), Applied: snapshot}

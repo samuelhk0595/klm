@@ -158,6 +158,18 @@ func validAuthoringID(id string) bool {
 func revision(data []byte) string { hash := sha256.Sum256(data); return hex.EncodeToString(hash[:]) }
 
 func (a *app) authoringProject(w http.ResponseWriter, r *http.Request) (Project, bool) {
+	if a.store != nil {
+		p, err := a.store.readProjectMeta(r.Context(), r.PathValue("id"))
+		if err != nil {
+			sqlHTTPError(w, err)
+			return Project{}, false
+		}
+		if p.Removed {
+			fail(w, 404, "Project not found.")
+			return Project{}, false
+		}
+		return p, true
+	}
 	a.mu.Lock()
 	p := a.state.project(r.PathValue("id"))
 	if p == nil || p.Removed {
@@ -492,6 +504,13 @@ func (a *app) saveAgent(w http.ResponseWriter, r *http.Request) {
 	oldID := r.PathValue("item")
 	a.mu.Lock()
 	recoveringLibrary := len(a.state.LibraryDeletions) > 0
+	if a.store != nil {
+		if err := a.store.readers.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM data_library_deletions)`).Scan(&recoveringLibrary); err != nil {
+			a.mu.Unlock()
+			sqlHTTPError(w, err)
+			return
+		}
+	}
 	a.mu.Unlock()
 	if recoveringLibrary {
 		fail(w, 409, "A library deletion needs recovery before editing agents.")

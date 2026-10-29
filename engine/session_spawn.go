@@ -54,6 +54,9 @@ func (p *adapter) spawnSession(ctx context.Context, args spawnArgs) (any, error)
 	stop := context.AfterFunc(p.turn.ctx, cancel)
 	defer cancel()
 	defer stop()
+	if p.app.store != nil {
+		return p.spawnSQLSession(ctx, args)
+	}
 	a := p.app
 	a.mu.Lock()
 	if !p.activeToolLocked() {
@@ -123,6 +126,9 @@ func (p *adapter) spawnOptionsForProject(ctx context.Context, projectID, harness
 	stop := context.AfterFunc(p.turn.ctx, cancel)
 	defer cancel()
 	defer stop()
+	if p.app.store != nil {
+		return p.sqlSpawnOptions(ctx, projectID, harness, cursor, limit)
+	}
 	a := p.app
 	a.mu.Lock()
 	from := a.state.automationSessionView(a.state.session(p.id))

@@ -117,7 +117,7 @@ func (a *app) updateEngineAccessSettings(w http.ResponseWriter, r *http.Request)
 	}
 	s := a.clientAuth
 	s.mu.Lock()
-	err = writeClientAuthJSON(s.dir, "engine-access.json", next)
+	err = s.saveAccessLocked(next)
 	if err == nil {
 		s.savedAccess = next
 	}
@@ -126,7 +126,7 @@ func (a *app) updateEngineAccessSettings(w http.ResponseWriter, r *http.Request)
 		fail(w, 503, "Cannot persist engine access settings.")
 		return
 	}
-	// Active policy is immutable for this process. Only restart applies the file.
+	// Active policy is immutable for this process. Only restart applies saved policy.
 	restartRequired := !slices.Equal(s.activeAccess.AllowedOrigins, next.AllowedOrigins) || !slices.Equal(s.activeAccess.TrustedTLSProxies, next.TrustedTLSProxies)
 	respond(w, 200, engineAccessSettingsView{engineAccessSettings: next, RestartRequired: restartRequired})
 }

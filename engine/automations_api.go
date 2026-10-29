@@ -11,6 +11,10 @@ import (
 )
 
 func (a *app) automationRoutes(mux *http.ServeMux) {
+	if a.store != nil {
+		a.sqlAutomationRoutes(mux)
+		return
+	}
 	mux.HandleFunc("GET /api/projects/{id}/automations", a.listAutomations)
 	mux.HandleFunc("POST /api/projects/{id}/automations", a.saveAutomation)
 	mux.HandleFunc("PATCH /api/projects/{id}/automations/{automationId}", a.saveAutomation)

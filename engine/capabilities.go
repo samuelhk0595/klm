@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -162,6 +163,16 @@ func (a *app) captureCapabilities(ctx context.Context, selection CapabilitySelec
 		}
 		a.mu.Lock()
 		connection, exists := a.state.MCPConnections[selected.ConnectionID]
+		if a.store != nil {
+			err := a.store.readSnapshot(ctx, func(tx *sql.Tx) error {
+				return decodeSQLiteRecord(ctx, tx, "mcp_connections", selected.ConnectionID, 16<<20, &connection)
+			})
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				a.mu.Unlock()
+				return nil, err
+			}
+			exists = err == nil
+		}
 		a.mu.Unlock()
 		if !exists {
 			return nil, fmt.Errorf("Selected MCP connection %s is missing.", selected.ConnectionID)
@@ -188,13 +199,24 @@ func (p *adapter) prepareCapabilities(s Session) error {
 	}()
 	p.app.mu.Lock()
 	recovering := len(p.app.state.LibraryDeletions) > 0
+	if p.app.store != nil {
+		if err := p.app.store.readers.QueryRowContext(p.turn.ctx, `SELECT EXISTS(SELECT 1 FROM data_library_deletions)`).Scan(&recovering); err != nil {
+			p.app.mu.Unlock()
+			return err
+		}
+	}
 	p.app.mu.Unlock()
 	if recovering {
 		return errors.New("Library deletion requires recovery before starting another turn.")
 	}
 	var snapshot *CapabilitySnapshot
 	var err error
-	if s.Role == "graph_node" {
+	if p.app.store != nil {
+		snapshot, err = p.selectSQLCapabilities(s)
+		if err != nil {
+			return err
+		}
+	} else if s.Role == "graph_node" {
 		p.app.mu.Lock()
 		run := p.app.state.graphRun(s.GraphRunID)
 		if run != nil {
@@ -264,7 +286,13 @@ func (p *adapter) prepareCapabilities(s Session) error {
 		preparing := &CapabilitySnapshot{}
 		_ = json.Unmarshal(encoded, preparing)
 		p.app.mu.Lock()
-		err = p.app.commitLocked(func(d *diskState) { d.session(p.id).Capabilities.Preparing = preparing })
+		if p.app.store != nil {
+			err = p.app.writeSQLLocked(p.turn.ctx, func(st *sqliteSessionTx) error {
+				return st.putSingleChild("capability_preparing", sqliteOwnedKey(p.id, ""), preparing)
+			})
+		} else {
+			err = p.app.commitLocked(func(d *diskState) { d.session(p.id).Capabilities.Preparing = preparing })
+		}
 		p.app.mu.Unlock()
 		if err != nil {
 			return err
@@ -286,6 +314,23 @@ func (p *adapter) markCapabilitiesApplied() error {
 	}
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
+	if p.app.store != nil {
+		return p.app.writeSQLLocked(p.turn.ctx, func(st *sqliteSessionTx) error {
+			key := sqliteOwnedKey(p.id, "")
+			if err := st.putSingleChild("capability_applied", key, p.capabilities); err != nil {
+				return err
+			}
+			if err := st.putSingleChild("capability_preparing", key, nil); err != nil {
+				return err
+			}
+			s, err := st.sessionMeta(p.id)
+			if err != nil {
+				return err
+			}
+			s.UpdatedAt = now()
+			return st.putSessionMeta(s)
+		})
+	}
 	return p.app.commitLocked(func(d *diskState) {
 		s := d.session(p.id)
 		s.Capabilities.Applied = p.capabilities
@@ -295,6 +340,10 @@ func (p *adapter) markCapabilitiesApplied() error {
 }
 
 func (a *app) conversationCapabilities(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.sqlConversationCapabilities(w, r)
+		return
+	}
 	a.mu.Lock()
 	s := a.state.session(r.PathValue("id"))
 	if s == nil || s.Role == sessionRoleSubagent || s.Role == "graph_node" {

@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"math"
 	"reflect"
 )
@@ -82,6 +85,9 @@ func (p *adapter) setUsageObservation(usage *SessionUsage, baseline, final bool)
 	}
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
+	if p.app.store != nil {
+		return p.setSQLUsageLocked(usage, baseline, final)
+	}
 	s := p.app.state.session(p.id)
 	if s == nil || (!p.subagent && p.app.runs[p.id] != p.turn) {
 		return nil
@@ -139,12 +145,16 @@ func (p *adapter) analyticsUsageLocked(usage *SessionUsage, baseline, final bool
 		return nil
 	}
 	c := a.Counters[p.analyticsNative]
+	return analyticsUsageFor(e, c, p.analyticsNative, usage, baseline, final)
+}
+
+func analyticsUsageFor(e AnalyticsExecution, c AnalyticsCounter, key string, usage *SessionUsage, baseline, final bool) *analyticsUsageMutation {
 	// A persisted high-water mark does not prove a new turn's starting total.
 	if c.ExecutionID != e.ID {
 		c.ExecutionID = e.ID
 		c.InputInvalid, c.OutputInvalid = false, false
 	}
-	m := &analyticsUsageMutation{ExecutionID: e.ID, Key: p.analyticsNative, Counter: c, Delta: AnalyticsUsageDelta{Sequence: e.Sequence + 1, At: now()}, InputBaseline: e.InputBaseline, OutputBaseline: e.OutputBaseline, InputFinal: e.InputFinal, OutputFinal: e.OutputFinal}
+	m := &analyticsUsageMutation{ExecutionID: e.ID, Key: key, Counter: c, Delta: AnalyticsUsageDelta{Sequence: e.Sequence + 1, At: now()}, InputBaseline: e.InputBaseline, OutputBaseline: e.OutputBaseline, InputFinal: e.InputFinal, OutputFinal: e.OutputFinal}
 	component := func(current *int64, previous **int64, ready *bool, invalid *bool, complete *bool) *int64 {
 		if current == nil {
 			if final {
@@ -191,6 +201,22 @@ func (p *adapter) analyticsUsageLocked(usage *SessionUsage, baseline, final bool
 }
 
 func (p *adapter) clearContextUsage() error {
+	if p.app.store != nil {
+		var usage *SessionUsage
+		err := p.app.store.readSnapshot(context.Background(), func(tx *sql.Tx) error {
+			return decodeSQLiteRecord(context.Background(), tx, "session_usage", sqliteOwnedKey(p.id, ""), 64<<10, &usage)
+		})
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if usage != nil && usage.Context != nil {
+			usage.Context = contextUsage(nil, usage.Context.Window)
+		}
+		return p.setUsage(usage)
+	}
 	p.app.mu.Lock()
 	s := p.app.state.session(p.id)
 	var next *SessionUsage

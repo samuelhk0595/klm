@@ -1,5 +1,5 @@
 import { Archive, ArchiveRestore, ArrowDown, ArrowUp, Bot, ChevronDown, ChevronRight, ListTodo, MoreHorizontal, PanelLeftClose, Pencil, Plus, Search, Settings, SquarePen, Workflow } from 'lucide-react';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
 import { Button, IconButton } from '../../design-system/Button';
 import { Menu, MenuItem } from '../../design-system/Menu';
 import { ENGINE_URL, type Session, type Project, type Topic } from '../../engine';
@@ -24,14 +24,15 @@ function readSidebarWidth() {
 
 function sessionRuntimeState(session: Session) {
   if (session.status === 'error') return { state: 'error', label: 'Runtime error' };
-  if ((session.permissions?.length ?? 0) > 0) return { state: 'waiting', label: 'Waiting for approval' };
-  if ((session.questions?.length ?? 0) > 0) return { state: 'waiting', label: 'Waiting for input' };
+  if ((session.permissionCount ?? session.permissions?.length ?? 0) > 0) return { state: 'waiting', label: 'Waiting for approval' };
+  if ((session.questionCount ?? session.questions?.length ?? 0) > 0) return { state: 'waiting', label: 'Waiting for input' };
   if (session.status === 'running') return { state: 'running', label: 'Turn running' };
   if (session.runtimeActive) return { state: 'active', label: 'Runtime active' };
   return { state: 'off', label: 'Runtime stopped' };
 }
 
-export function WorkspaceSidebar({ project, sessions, activeId, activeSection, collapsed, archivedCollapsed, onCollapsedChange, onArchivedCollapsedChange, onSelect, onNew, onRename, onEditTopic, onCreateTopic, onArchiveSession, onArchiveTopic, onMoveSession, onReorderTopic, onClose, onAgents, onGraphs, onProjectSettings, onActivityBoard, hasTaskProvider }: {
+export function WorkspaceSidebar({ project, sessions, activeId, activeSection, collapsed, archivedCollapsed, onCollapsedChange, onArchivedCollapsedChange, onSelect, onNew, onRename, onEditTopic, onCreateTopic, onArchiveSession, onArchiveTopic, onMoveSession, onReorderTopic, onClose, onAgents, onGraphs, onProjectSettings, onActivityBoard, hasTaskProvider, paging, onSearchChange }: {
+  paging?: ReactNode; onSearchChange?: (query: string) => void;
   project: Project; sessions: Session[]; activeId: string; collapsed: Record<string, boolean>; archivedCollapsed: boolean; onCollapsedChange: Dispatch<SetStateAction<Record<string, boolean>>>; onArchivedCollapsedChange: (collapsed: boolean) => void;
   onSelect: (id: string) => void; onNew: (topic?: Topic) => void; onRename: (session: Session) => void; onEditTopic: (topic: Topic) => void; onCreateTopic: () => void;
   onArchiveSession: (session: Session, archived: boolean) => Promise<boolean>; onArchiveTopic: (topic: Topic, archived: boolean) => Promise<boolean>;
@@ -70,6 +71,7 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, c
   const [sessionMenu, setSessionMenu] = useState('');
   const [topicMenu, setTopicMenu] = useState('');
   const [search, setSearch] = useState<string | null>(null);
+  useEffect(() => { const timer = setTimeout(() => onSearchChange?.(search ?? ''), 250); return () => clearTimeout(timer); }, [search, onSearchChange]);
   const [busyAction, setBusyAction] = useState('');
   const [actionError, setActionError] = useState('');
   const [dragging, setDragging] = useState<SidebarDrag | null>(null);
@@ -193,6 +195,7 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, c
         {(search !== null || !archivedCollapsed) && <div className="archived-topic-list">{groups.map(group => groupView(group, true))}{!sessions.some(session => session.archived) && !project.topics?.some(topic => topic.archived) && <p className="empty-workspace">No sessions</p>}</div>}
       </div>
       {actionError && <p role="alert" className="form-error sidebar-action-error">{actionError}</p>}
+      {paging}
     </div>
     {!IS_MOBILE_HOST && <div className="session-rail-resize" role="separator" aria-label="Resize sessions" aria-orientation="vertical" aria-controls={panelId} aria-valuemin={minimumSidebarWidth} aria-valuemax={Math.round(maximumWidth)} aria-valuenow={Math.round(width)} aria-valuetext={`${Math.round(width)} pixels`} tabIndex={0}
       onPointerDown={event => {

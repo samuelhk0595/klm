@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { ActivityPagingContext } from './activityPaging';
 import { createPortal } from 'react-dom';
 import { ArrowLeftRight, ArrowUp, ArrowUpRight, BarChart3, ChevronDown, Home, Maximize2, MessageSquare, Minimize2, Minus, PanelLeft, PanelsTopLeft, Radio, Search, Settings2, RefreshCw, X } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
@@ -77,12 +78,13 @@ function ProjectAvatar({ project, small = false }: { project: FeedProject; small
 function happeningStatus(session: Session) {
   // Keep the sessions rail's runtime precedence, including retained idle runtimes.
   if (session.status === 'error') return { state: 'error', label: 'Failed', tone: 'danger' };
-  if (session.permissions?.length || session.questions?.length) return { state: 'waiting', label: 'Needs attention', tone: 'warning' };
+  if (session.permissions?.length || session.questions?.length || session.permissionCount || session.questionCount) return { state: 'waiting', label: 'Needs attention', tone: 'warning' };
   if (session.status === 'running') return { state: 'running', label: 'Working', tone: 'success' };
   return { state: session.runtimeActive ? 'active' : 'off', label: 'Idle', tone: 'muted' };
 }
 
 export function HappeningNow({ projects, sessions, overlaySessionId, onOpenOverlay, onOpenProject, floating = false, rowTarget = floating ? 'main window' : 'overlay' }: { projects: Project[]; sessions: Session[]; floating?: boolean; rowTarget?: 'main window' | 'floating window' | 'overlay' } & SessionActions) {
+  const paging = useContext(ActivityPagingContext);
   const [showAll, setShowAll] = useState(false);
   const list = useRef<HTMLDivElement>(null);
   const listId = useId();
@@ -95,8 +97,8 @@ export function HappeningNow({ projects, sessions, overlaySessionId, onOpenOverl
   const projectsById = new Map(projects.map(project => [project.id, project]));
   const activeSessions = sessions.flatMap(session => {
     const project = projectsById.get(session.projectId);
-    if (!project || session.parentId || session.role || session.archived || topicArchived(project, session)) return [];
-    if (!session.runtimeActive && session.status !== 'running' && session.status !== 'error' && !session.permissions?.length && !session.questions?.length) return [];
+    if (!project || session.activityListed === false || session.parentId || session.role || session.archived || topicArchived(project, session)) return [];
+    if (!session.runtimeActive && session.status !== 'running' && session.status !== 'error' && !session.permissions?.length && !session.questions?.length && !session.permissionCount && !session.questionCount) return [];
     return [{ session, project }];
   // New arrivals precede the saved order, newest first. Streaming never reorders cards.
   }).sort((left, right) => (orderIndex.get(left.session.id) ?? -1) - (orderIndex.get(right.session.id) ?? -1) || Date.parse(right.session.createdAt) - Date.parse(left.session.createdAt));
@@ -163,6 +165,8 @@ export function HappeningNow({ projects, sessions, overlaySessionId, onOpenOverl
       })}
       {!activeSessions.length && <p className="activity-happening-empty">No active sessions.</p>}
     </div>
+    {paging.older && <Button size="sm" variant="ghost" onClick={paging.latest}>Latest activity</Button>}
+    {paging.hasMore && (showAll || floating || activeSessions.length <= 3) && <Button size="sm" variant="ghost" onClick={paging.next}>More active sessions</Button>}
     {!IS_MOBILE_HOST && !floating && (showAll || activeSessions.length > 3) && <Button variant="ghost" className="activity-show-more" aria-expanded={showAll} aria-controls={listId} onClick={() => {
       setShowAll(value => !value);
       list.current?.scrollTo({ top: 0, left: 0 });
@@ -263,9 +267,10 @@ export function ActivityFeed({ projects, sessions, visible, standalone = false, 
   </section>;
 }
 
-export function KlmAgentWorkspace({ enabled, visible = true, projects, sessions, children, onCloseOverlay, onOpenFloatingChat, openingFloatingChat = false, projectRailOpen, onToggleProjectRail, ...actions }: { enabled: boolean; visible?: boolean; projects: Project[]; sessions: Session[]; children: ReactNode; onCloseOverlay: () => void; onOpenFloatingChat?: () => void; openingFloatingChat?: boolean } & SessionActions & ProjectRailControl) {
+export function KlmAgentWorkspace({ enabled, visible = true, projects, sessions, children, onChatVisibility, onCloseOverlay, onOpenFloatingChat, openingFloatingChat = false, projectRailOpen, onToggleProjectRail, ...actions }: { enabled: boolean; visible?: boolean; projects: Project[]; sessions: Session[]; children: ReactNode; onChatVisibility?: (visible: boolean) => void; onCloseOverlay: () => void; onOpenFloatingChat?: () => void; openingFloatingChat?: boolean } & SessionActions & ProjectRailControl) {
   const [page, setPage] = useState<'home' | 'analytics'>('home');
   const [dock, setDock] = useState<'open' | 'minimized'>('minimized');
+  useEffect(() => { onChatVisibility?.(enabled && visible && dock === 'open'); }, [enabled, visible, dock, onChatVisibility]);
   const [expanded, setExpanded] = useState(false);
   const [discoveryWidth, setDiscoveryWidth] = useState(readDiscoveryWidth);
   const chatId = useId();
@@ -327,7 +332,7 @@ export function KlmAgentWorkspace({ enabled, visible = true, projects, sessions,
         <IconButton label="Minimize chat" onClick={hideChat}><Minus /></IconButton>
         <IconButton label="Close chat" onClick={hideChat}><X /></IconButton>
       </div></div>
-      {overlaid && <button type="button" className="klm-overlay-backdrop" aria-label="Dismiss session overlay" onClick={onCloseOverlay} />}{children}
+      {overlaid && <button type="button" className="klm-overlay-backdrop" aria-label="Dismiss session overlay" onClick={onCloseOverlay} />}{dock === 'open' ? children : null}
     </section>
     <button ref={reopen} type="button" className="agent-chat-launcher" hidden={dock === 'open'} aria-expanded={dock === 'open'} aria-controls={chatId} onClick={openChat}><MessageSquare /><span>KLM Agent</span>{dockStatus && <span className={`session-runtime-led is-${dockStatus.state}`} role="img" aria-label={dockStatus.label} title={dockStatus.label} />}<ChevronDown /></button>
     </div>

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"os/exec"
@@ -52,6 +53,9 @@ func (a *app) beginSessionRuntime(id string) (*sessionRuntime, error) {
 		r := a.runtimes[id]
 		if r == nil {
 			r = &sessionRuntime{app: a, id: id}
+			if a.runtimes == nil {
+				a.runtimes = map[string]*sessionRuntime{}
+			}
 			a.runtimes[id] = r
 		}
 		a.mu.Unlock()
@@ -434,6 +438,27 @@ func (r *sessionRuntime) publish() {
 }
 
 func (a *app) notifySessionLocked(id string) {
+	if a.store != nil {
+		active := a.runtimes[id] != nil && a.runtimes[id].active()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = a.persistSQLLocked(ctx, func(st *sqliteSessionTx) error {
+			var before bool
+			err := st.tx.QueryRowContext(ctx, `SELECT active FROM runtime_activity WHERE session_id=?`, id).Scan(&before)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if before == active {
+				return nil
+			}
+			if _, err := st.tx.ExecContext(ctx, `INSERT INTO runtime_activity(session_id,active) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET active=excluded.active`, id, active); err != nil {
+				return err
+			}
+			st.changes.Sessions[id] = nil
+			return nil
+		})
+		return
+	}
 	for ch := range a.listeners[id] {
 		select {
 		case ch <- struct{}{}:

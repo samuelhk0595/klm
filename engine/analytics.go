@@ -35,6 +35,7 @@ type analyticsGraphFact struct {
 	Unknown, Provisional                                            bool
 }
 type analyticsSnapshot struct {
+	sql               *sqlAnalyticsReport
 	Started, Revision string
 	AsOf              time.Time
 	Projects          []analyticsProject
@@ -318,6 +319,9 @@ func (a *app) analyticsSnapshotLocked(asOf time.Time) analyticsSnapshot {
 	return s
 }
 func (s analyticsSnapshot) matches(owner, project string, scope analyticsScope) bool {
+	if s.sql != nil {
+		return s.sql.matches(owner, project, scope)
+	}
 	if scope.ProjectID != "" && scope.ProjectID != project {
 		return false
 	}
@@ -342,12 +346,12 @@ func (s analyticsSnapshot) aggregate(b analyticsBounds, scope analyticsScope) An
 	childUnsupported, onlyDisabled, anyExecution := false, true, false
 	inputEvidence, outputEvidence, tokenExecution := false, false, false
 	graphTimeEvidence := false
-	for _, owner := range s.Owners {
+	for owner := range s.ownerRows(b, scope) {
 		if s.matches(owner.ID, owner.ProjectID, scope) && scope.Harness == "" && scope.GraphKey == "" && analyticsContains(analyticsTime(owner.Created), b) {
 			analyticsAdd(&t.SessionsCreated, 1)
 		}
 	}
-	for _, e := range s.Executions {
+	for e := range s.executionRows(b, scope) {
 		if !s.matches(e.OwnerID, e.ProjectID, scope) || scope.Harness != "" && e.Harness != scope.Harness || scope.GraphKey != "" {
 			continue
 		}
@@ -378,16 +382,22 @@ func (s analyticsSnapshot) aggregate(b analyticsBounds, scope analyticsScope) An
 			tokenExecution = true
 			inputEvidence = inputEvidence || e.InputBaseline && e.InputFinal
 			outputEvidence = outputEvidence || e.OutputBaseline && e.OutputFinal
-			if _, ok := s.Owners[e.OwnerID]; ok {
-				used[e.OwnerID] = true
+			if s.sql == nil {
+				if _, ok := s.Owners[e.OwnerID]; ok {
+					used[e.OwnerID] = true
+				}
 			}
 			anyExecution = true
 			if e.Role == sessionRoleSubagent {
-				children[e.SessionID] = true
+				if s.sql == nil {
+					children[e.SessionID] = true
+				}
 				t.WorkingMs = analyticsPartial(t.WorkingMs, "child_timing_unavailable")
 				t.BlockedMs = analyticsPartial(t.BlockedMs, "child_waits_unavailable")
 			} else {
-				agents[e.SessionID] = true
+				if s.sql == nil {
+					agents[e.SessionID] = true
+				}
 			}
 			if e.Harness != "codex" {
 				childUnsupported, onlyDisabled = true, false
@@ -417,7 +427,7 @@ func (s analyticsSnapshot) aggregate(b analyticsBounds, scope analyticsScope) An
 				t.WorkingMs = analyticsPartial(t.WorkingMs, "unobserved_tail")
 			}
 		}
-		for _, span := range e.Spans {
+		for span := range s.spanRows(e, b) {
 			duration := analyticsDuration(span.Start, span.End, b)
 			if span.Kind == "working" {
 				analyticsAdd(&t.WorkingMs, duration)
@@ -425,7 +435,7 @@ func (s analyticsSnapshot) aggregate(b analyticsBounds, scope analyticsScope) An
 				analyticsAdd(&t.BlockedMs, duration)
 			}
 		}
-		for _, delta := range e.Usage {
+		for delta := range s.usageRows(e, b) {
 			if analyticsContains(analyticsTime(delta.At), b) {
 				// Delayed receipts retain the same all-role coverage as the execution,
 				// even when its working spans fall outside this receipt-date bucket.
@@ -456,7 +466,7 @@ func (s analyticsSnapshot) aggregate(b analyticsBounds, scope analyticsScope) An
 			}
 		}
 	}
-	for _, g := range s.Graphs {
+	for g := range s.graphRows(b, scope) {
 		key := analyticsKey(g.ProjectID, g.GraphID)
 		if !s.matches(g.OwnerID, g.ProjectID, scope) || scope.Harness != "" || scope.GraphKey != "" && scope.GraphKey != key {
 			continue
@@ -469,9 +479,11 @@ func (s analyticsSnapshot) aggregate(b analyticsBounds, scope analyticsScope) An
 		if !analyticsOverlaps(g.Start, g.End, b) {
 			continue
 		}
-		runs[g.ID], graphs[key] = true, true
-		if _, ok := s.Owners[g.OwnerID]; ok {
-			used[g.OwnerID] = true
+		if s.sql == nil {
+			runs[g.ID], graphs[key] = true, true
+			if _, ok := s.Owners[g.OwnerID]; ok {
+				used[g.OwnerID] = true
+			}
 		}
 		duration := analyticsDuration(g.Start, g.End, b)
 		graphTimeEvidence = graphTimeEvidence || !g.Unknown || duration > 0
@@ -496,11 +508,15 @@ func (s analyticsSnapshot) aggregate(b analyticsBounds, scope analyticsScope) An
 		}
 		return m
 	}
-	t.SessionsUsed = setCount(t.SessionsUsed, len(used))
-	t.AgentsExecuted = setCount(t.AgentsExecuted, len(agents))
-	t.NativeSubagents = setCount(t.NativeSubagents, len(children))
+	usedCount, agentCount, childCount, runCount, graphCount := len(used), len(agents), len(children), len(runs), len(graphs)
+	if s.sql != nil {
+		usedCount, agentCount, childCount, runCount, graphCount = s.sql.counts(b, scope)
+	}
+	t.SessionsUsed = setCount(t.SessionsUsed, usedCount)
+	t.AgentsExecuted = setCount(t.AgentsExecuted, agentCount)
+	t.NativeSubagents = setCount(t.NativeSubagents, childCount)
 	if childUnsupported {
-		if len(children) == 0 {
+		if childCount == 0 {
 			t.NativeSubagents = analyticsMissing("native_children_unsupported")
 		} else {
 			t.NativeSubagents = analyticsPartial(t.NativeSubagents, "native_children_partial")
@@ -513,8 +529,8 @@ func (s analyticsSnapshot) aggregate(b analyticsBounds, scope analyticsScope) An
 		t.NativeSubagents.Coverage = "not_applicable"
 		t.NativeSubagents.Reasons = []string{"managed_delegation_disabled"}
 	}
-	t.GraphRuns = setCount(t.GraphRuns, len(runs))
-	t.GraphsUsed = setCount(t.GraphsUsed, len(graphs))
+	t.GraphRuns = setCount(t.GraphRuns, runCount)
+	t.GraphsUsed = setCount(t.GraphsUsed, graphCount)
 	if t.GraphWallMs.Coverage == "partial" && !graphTimeEvidence {
 		t.GraphWallMs = analyticsMissing("graph_end_unknown")
 	}
@@ -544,6 +560,11 @@ func (s analyticsSnapshot) response(location *time.Location, project, period str
 	}
 	if period == "all" {
 		start = analyticsTime(s.Started).In(location)
+		if s.sql != nil {
+			if earliest := s.sql.earliest(scope); !earliest.IsZero() && earliest.Before(start) {
+				start = earliest.In(location)
+			}
+		}
 		for _, o := range s.Owners {
 			t := analyticsTime(o.Created)
 			if s.matches(o.ID, o.ProjectID, scope) && !t.IsZero() && t.Before(start) {
@@ -627,11 +648,11 @@ func (s analyticsSnapshot) response(location *time.Location, project, period str
 		if future {
 			m = analyticsMissing("future")
 		}
-		for _, e := range s.Executions {
+		for e := range s.executionRows(b, scope) {
 			if !s.matches(e.OwnerID, e.ProjectID, scope) {
 				continue
 			}
-			for _, span := range e.Spans {
+			for span := range s.spanRows(e, b) {
 				if span.Kind != "working" {
 					continue
 				}

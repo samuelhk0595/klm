@@ -55,6 +55,14 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 	}()
 	p.app.mu.Lock()
 	native := p.app.state.Native[p.id]
+	if p.app.store != nil {
+		_, value, _, readErr := p.app.store.readTurnSession(p.turn.ctx, p.id)
+		if readErr != nil {
+			p.app.mu.Unlock()
+			return readErr
+		}
+		native = value
+	}
 	sessionModel := p.model
 	p.app.mu.Unlock()
 

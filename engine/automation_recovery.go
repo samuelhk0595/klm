@@ -85,6 +85,9 @@ func (p *adapter) callAutomationRecovery(name string, raw json.RawMessage) (any,
 	if p.role != sessionRoleGeneralAgent || p.subagent || !p.activeToolLocked() {
 		return nil, errors.New("Recovery is exclusive to the active general agent.")
 	}
+	if a.store != nil {
+		return p.callSQLAutomationRecovery(name, raw)
+	}
 	if name == "automation_recovery_read" {
 		var args struct {
 			TimeZone   string `json:"timeZone"`
@@ -245,6 +248,12 @@ func (p *adapter) callAutomationRecovery(name string, raw json.RawMessage) (any,
 }
 
 func (a *app) scheduleAutomationRecoveryLocked() {
+	if a.store != nil {
+		if err := a.scheduleSQLAutomationRecoveryLocked(); err != nil && a.ctx.Err() == nil {
+			a.failStorageLocked(err)
+		}
+		return
+	}
 	s := a.state.generalSession()
 	if s == nil || a.runs[s.ID] != nil {
 		return

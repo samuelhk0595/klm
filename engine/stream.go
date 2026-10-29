@@ -128,6 +128,9 @@ func (p *adapter) commitStreamUpdates(updates []streamUpdate) error {
 	if a.storageErr != nil {
 		return a.storageErr
 	}
+	if a.store != nil {
+		return p.commitSQLStreamLocked(updates)
+	}
 	s := a.state.session(p.id)
 	if s == nil {
 		return nil

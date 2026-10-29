@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,16 +46,40 @@ func (a *app) captureGraphSnapshot(ctx context.Context, projectID, graphID strin
 	a.libraryMu.Lock()
 	defer a.libraryMu.Unlock()
 	a.mu.Lock()
-	if len(a.state.LibraryDeletions) > 0 {
-		a.mu.Unlock()
-		return snapshot, nil, errors.New("A library deletion needs recovery before starting another graph run.")
+	var p Project
+	if a.store != nil {
+		err := a.store.readSnapshot(ctx, func(tx *sql.Tx) error {
+			st := &sqliteSessionTx{ctx: ctx, tx: tx}
+			var pending bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM data_library_deletions)`).Scan(&pending); err != nil {
+				return err
+			}
+			if pending {
+				return errors.New("A library deletion needs recovery before starting another graph run.")
+			}
+			var err error
+			p, err = st.project(projectID)
+			if err == nil && p.Removed {
+				err = errors.New("Project not found.")
+			}
+			return err
+		})
+		if err != nil {
+			a.mu.Unlock()
+			return snapshot, nil, err
+		}
+	} else {
+		if len(a.state.LibraryDeletions) > 0 {
+			a.mu.Unlock()
+			return snapshot, nil, errors.New("A library deletion needs recovery before starting another graph run.")
+		}
+		project := a.state.project(projectID)
+		if project == nil || project.Removed {
+			a.mu.Unlock()
+			return snapshot, nil, errors.New("Project not found.")
+		}
+		p = *project
 	}
-	project := a.state.project(projectID)
-	if project == nil || project.Removed {
-		a.mu.Unlock()
-		return snapshot, nil, errors.New("Project not found.")
-	}
-	p := *project
 	a.mu.Unlock()
 	if err := recoverAuthoring(p); err != nil {
 		return snapshot, nil, err
@@ -230,24 +255,62 @@ func compileGraphSnapshot(snapshot GraphSnapshot) (*CompiledGraph, error) {
 // with a removed/replaced credential or a superseded skill/configuration capture.
 func (a *app) revalidateGraphCapabilities(snapshot GraphSnapshot) error {
 	a.mu.Lock()
-	if len(a.state.LibraryDeletions) > 0 {
-		a.mu.Unlock()
-		return errors.New("A library deletion needs recovery before reserving this run.")
-	}
-	for _, captured := range snapshot.Capabilities {
-		if captured != nil {
-			for _, c := range captured.Connections {
-				current, exists := a.state.MCPConnections[c.ID]
-				catalogRevision, knownRevision := "", ""
-				if current.Catalog != nil {
-					catalogRevision = current.Catalog.Revision
+	if a.store != nil {
+		err := a.store.readSnapshot(a.ctx, func(tx *sql.Tx) error {
+			var pending bool
+			if err := tx.QueryRowContext(a.ctx, `SELECT EXISTS(SELECT 1 FROM data_library_deletions)`).Scan(&pending); err != nil {
+				return err
+			}
+			if pending {
+				return errors.New("A library deletion needs recovery before reserving this run.")
+			}
+			for _, captured := range snapshot.Capabilities {
+				if captured == nil {
+					continue
 				}
-				if c.Catalog != nil {
-					knownRevision = c.Catalog.Revision
+				for _, c := range captured.Connections {
+					var current MCPConnection
+					if err := decodeSQLiteRecord(a.ctx, tx, "mcp_connections", c.ID, 8<<20, &current); err != nil {
+						return err
+					}
+					currentCatalog, capturedCatalog := "", ""
+					if current.Catalog != nil {
+						currentCatalog = current.Catalog.Revision
+					}
+					if c.Catalog != nil {
+						capturedCatalog = c.Catalog.Revision
+					}
+					if current.Revision != c.Revision || current.CredentialID != c.CredentialID || currentCatalog != capturedCatalog {
+						return errors.New("MCP library configuration changed before execution could be reserved; retry with current definitions.")
+					}
 				}
-				if !exists || current.Revision != c.Revision || current.CredentialID != c.CredentialID || catalogRevision != knownRevision {
-					a.mu.Unlock()
-					return errors.New("MCP library configuration changed before execution could be reserved; retry with current definitions.")
+			}
+			return nil
+		})
+		if err != nil {
+			a.mu.Unlock()
+			return err
+		}
+	} else {
+		if len(a.state.LibraryDeletions) > 0 {
+			a.mu.Unlock()
+			return errors.New("A library deletion needs recovery before reserving this run.")
+		}
+		for _, captured := range snapshot.Capabilities {
+			if captured != nil {
+				for _, c := range captured.Connections {
+					current, exists := a.state.MCPConnections[c.ID]
+					catalogRevision, knownRevision := "", ""
+					if current.Catalog != nil {
+						catalogRevision = current.Catalog.Revision
+					}
+					if c.Catalog != nil {
+						knownRevision = c.Catalog.Revision
+					}
+					if !exists || current.Revision != c.Revision || current.CredentialID != c.CredentialID || catalogRevision != knownRevision {
+						a.mu.Unlock()
+						return errors.New("MCP library configuration changed before execution could be reserved; retry with current definitions.")
+					}
 				}
 			}
 		}
@@ -423,6 +486,9 @@ func applyGraphCatalogChange(d *diskState, change GraphCatalogChange) {
 func (a *app) commitGraphAuthoring(p Project, writes map[string][]byte, oldID, newGraphID string) error {
 	if oldID == newGraphID {
 		return commitAuthoring(p, writes)
+	}
+	if a.store != nil {
+		return a.commitSQLGraphAuthoring(a.ctx, p, writes, oldID, newGraphID)
 	}
 	change := GraphCatalogChange{ID: newID(), ProjectID: p.ID, OldID: oldID, NewID: newGraphID, Writes: writes}
 	a.mu.Lock()

@@ -1,13 +1,14 @@
 import { Button } from '../../design-system/Button';
 import { ENGINE_URL, type SourceReference } from '../../engine';
 import type { ComposerDraft, SendMode } from './MessageComposer';
+import { engineStorageKey } from '../../engineIdentity';
 
 export type LocalSubmission = { id: string; draft: ComposerDraft; sources: SourceReference[]; mode: SendMode; status: 'sending' | 'accepted' | 'uncertain' | 'failed' };
 
 const storageKey = `klm.pending-submissions.v1:${ENGINE_URL}`;
 export function readPendingSubmissions(): Record<string, LocalSubmission[]> {
   try {
-    const saved: unknown = JSON.parse(sessionStorage.getItem(storageKey) ?? '{}');
+    const saved: unknown = JSON.parse(sessionStorage.getItem(engineStorageKey(storageKey)) ?? '{}');
     if (!saved || typeof saved !== 'object' || Array.isArray(saved)) return {};
     const result: Record<string, LocalSubmission[]> = {};
     for (const [session, items] of Object.entries(saved)) {
@@ -21,7 +22,7 @@ export function readPendingSubmissions(): Record<string, LocalSubmission[]> {
 }
 
 export function savePendingSubmissions(items: Record<string, LocalSubmission[]>) {
-  try { sessionStorage.setItem(storageKey, JSON.stringify(items)); } catch { /* Still recoverable in memory if browser storage is full. */ }
+  try { sessionStorage.setItem(engineStorageKey(storageKey), JSON.stringify(items)); } catch { /* Still recoverable in memory if browser storage is full. */ }
 }
 
 export function PendingSubmission({ items, onRestore, onRetry }: { items: LocalSubmission[]; onRestore: (item: LocalSubmission) => void; onRetry: (item: LocalSubmission) => void }) {

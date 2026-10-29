@@ -26,16 +26,20 @@ export function AutomationsSettings({ project, sessions, onOpenSession, onBusyCh
   const [filter, setFilter] = useState('all');
   const heading = useRef<HTMLHeadingElement>(null);
   const requestSequence = useRef(0);
+  const [listOffset, setListOffset] = useState(0);
+  const [loadingList, setLoadingList] = useState(false);
   async function load() {
     const sequence = ++requestSequence.current;
-    try { const value = await request<AutomationList>(automationPath(project.id)); if (sequence === requestSequence.current) { setList(value); setLoadError(''); } }
+    setLoadingList(true);
+    try { const [value, topics] = await Promise.all([request<AutomationList>(`${automationPath(project.id)}?offset=${listOffset}`), request<{ items: import('../../engine').Topic[] }>(`/api/projects/${encodeURIComponent(project.id)}/topics?limit=200`)]); if (sequence === requestSequence.current) { setList({ ...value, topics: topics.items }); setLoadError(''); } }
     catch (error) { if (sequence === requestSequence.current) setLoadError(failure(error)); }
+    finally { if (sequence === requestSequence.current) setLoadingList(false); }
   }
   useEffect(() => {
     if (!busy && !editing) void load();
     const timer = window.setInterval(() => { if (!document.hidden && !busy && !editing) { setClock(Date.now()); void load(); } }, 15000);
     return () => { ++requestSequence.current; window.clearInterval(timer); };
-  }, [project.id, busy, editing]);
+  }, [project.id, busy, editing, listOffset]);
   useEffect(() => { onBusyChange(busy); return () => onBusyChange(false); }, [busy, onBusyChange]);
   useEffect(() => { heading.current?.focus(); }, [selected?.id, editing]);
   async function action(task: () => Promise<unknown>, success: string) {
@@ -90,6 +94,7 @@ export function AutomationsSettings({ project, sessions, onOpenSession, onBusyCh
           </article>)}
         </div>}
       </div>
+      <div>{listOffset > 0 && <Button size="sm" disabled={loadingList} onClick={() => setListOffset(0)}>First automations</Button>}{list.hasMore && <Button size="sm" disabled={loadingList} onClick={() => setListOffset(list.nextOffset ?? listOffset + list.items.length)}>Next automations</Button>}</div>
       {!!list.items.length && <p className="automation-timezone"><CalendarClock aria-hidden="true" />Schedule time zone · {list.timeZone}</p>}
     </>}
     {selected && editing && list && <AutomationEditor key={`${selected.id}/${selected.revision}`} initial={selected} project={project} sessions={sessions} topics={list.topics} zone={list.timeZone} busy={busy} onSave={save} onCancel={() => { setEditing(false); setError(''); if (!selected.id) setSelected(undefined); }} />}
