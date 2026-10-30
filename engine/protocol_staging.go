@@ -43,11 +43,19 @@ func prepareProtocolStaging(dir string) error {
 }
 
 type protocolFrame struct {
-	ctx    context.Context
-	dir    string
-	memory []byte
-	file   *os.File
-	size   int64
+	ctx                   context.Context
+	dir                   string
+	memory                []byte
+	file                  *os.File
+	size                  int64
+	retained              bool
+	scope                 *protocolContentScope
+	ownerRead             bool
+	lease                 bool
+	cacheRefs, scopeBytes int
+	validated             bool
+	nativeType            string
+	memoryReserved        int
 }
 
 func (f *protocolFrame) Write(data []byte) (int, error) {
@@ -73,6 +81,10 @@ func (f *protocolFrame) writeChunk(part []byte) error {
 	}
 	if f.file == nil && len(part) <= protocolChunkSize-len(f.memory) {
 		if f.memory == nil {
+			if err := reserveProtocolResident(protocolChunkSize); err != nil {
+				return err
+			}
+			f.memoryReserved = protocolChunkSize
 			f.memory = make([]byte, 0, protocolChunkSize)
 		}
 		f.memory = append(f.memory, part...)
@@ -98,6 +110,8 @@ func (f *protocolFrame) writeChunk(part []byte) error {
 				return errProtocolStagingIO
 			}
 			f.memory = nil
+			_ = reserveProtocolResident(-f.memoryReserved)
+			f.memoryReserved = 0
 		}
 		if _, err := f.file.Write(part); err != nil {
 			return errProtocolStagingIO
@@ -137,6 +151,8 @@ func (f *protocolFrame) Close() error {
 	}
 	protocolStagingBudget.Lock()
 	protocolStagingBudget.bytes -= release
+	_ = reserveProtocolResident(-f.memoryReserved)
+	f.memoryReserved = 0
 	protocolStagingBudget.Unlock()
 	f.memory, f.size = nil, 0
 	return err

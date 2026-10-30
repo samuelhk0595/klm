@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -211,5 +213,44 @@ func TestProtocolStagingCapacity(t *testing.T) {
 	f := &protocolFrame{ctx: context.Background(), dir: protocolTestDir(t)}
 	if _, err := f.Write([]byte("{}")); !errors.Is(err, errProtocolStaging) || f.size != 0 {
 		t.Fatalf("shared staging budget not enforced: %v", err)
+	}
+}
+
+func TestProtocolWideUsefulObject(t *testing.T) {
+	for _, duplicate := range []bool{false, true} {
+		dir := protocolTestDir(t)
+		ctx := context.Background()
+		scope := &protocolContentScope{dir: dir, ctx: ctx}
+		frame := &protocolFrame{ctx: ctx, dir: dir}
+		w := bufio.NewWriterSize(frame, protocolChunkSize)
+		_, _ = io.WriteString(w, `{"type":"tool_execution_end","toolCallId":"wide","toolName":"read","result":{`)
+		for index := 0; index < 20000; index++ {
+			if index > 0 {
+				_ = w.WriteByte(',')
+			}
+			_, _ = fmt.Fprintf(w, `"key%d":%d`, index, index)
+		}
+		if duplicate {
+			_, _ = io.WriteString(w, `,"key19999":true`)
+		}
+		_, _ = io.WriteString(w, `}}`)
+		if err := w.Flush(); err != nil {
+			t.Fatal(err)
+		}
+		value, err := frame.projectNative("pi", 4<<20, scope)
+		if duplicate {
+			if err == nil {
+				t.Fatal("duplicate key in spilled object accepted")
+			}
+		} else if err != nil {
+			t.Fatal(err)
+		} else if _, ok := value["result"].(*protocolContent); !ok {
+			t.Fatal("wide useful object was materialized")
+		}
+		_ = scope.Close()
+		if !frame.retained {
+			_ = frame.Close()
+		}
+		assertProtocolStagingEmpty(t, dir)
 	}
 }

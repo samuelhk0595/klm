@@ -156,7 +156,11 @@ func (p *adapter) finishSQLTurnLocked(runErr error) error {
 				return err
 			}
 		}
-		if err := st.eachMatching("session_events", `owner_id=? AND status IN ('running','pending')`, []any{p.id}, func(key string) error {
+		pendingWhere := `owner_id=? AND status IN ('running','pending')`
+		if p.eventMetadataErr != nil {
+			pendingWhere += ` AND payload_bytes<=65536`
+		}
+		if err := st.eachMatching("session_events", pendingWhere, []any{p.id}, func(key string) error {
 			return st.patchEventMetadata(p.id, key, func(e *Event) error {
 				e.Status = "cancelled"
 				if s.Status == "error" {

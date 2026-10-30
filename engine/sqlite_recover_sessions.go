@@ -193,7 +193,7 @@ func (st *sqliteSessionTx) interruptSubagentParent(child Session, stamp string) 
 		}
 		for _, r := range refs {
 			var e Event
-			if err := decodeSQLiteRecord(st.ctx, st.tx, "session_events", r.id, maxStreamRecordBytes, &e); err != nil {
+			if err := decodeSQLiteRecord(st.ctx, st.tx, "session_events", r.id, protocolChunkSize, &e); err != nil {
 				return err
 			}
 			e.Status = "interrupted"
@@ -216,6 +216,18 @@ func (st *sqliteSessionTx) interruptSubagentParent(child Session, stamp string) 
 // before readiness. Each session settles atomically; terminal states remove it
 // from the indexed eligibility query, making restart retries idempotent.
 func (s *sqliteStore) recoverSessionBatch(ctx context.Context, at time.Time) (int, sqliteSessionChanges, error) {
+	// Startup owns the data directory and has not admitted workers. Prepare large
+	// status changes before entering the recovery writer transaction.
+	owners, prepErr := sqliteQueryIDs(ctx, s.readers, `SELECT DISTINCT owner_id FROM data_session_events WHERE status IN ('running','pending','started') AND payload_bytes>65536 LIMIT 100`)
+	if prepErr != nil {
+		return 0, sqliteSessionChanges{}, prepErr
+	}
+	preparer := &app{store: s, dir: s.dir}
+	for _, owner := range owners {
+		if err := preparer.prepareSessionEventStatuses(ctx, owner, "interrupted"); err != nil {
+			return 0, sqliteSessionChanges{}, err
+		}
+	}
 	count := 0
 	stamp := at.UTC().Format(time.RFC3339Nano)
 	changes, err := s.sessionTransaction(ctx, func(st *sqliteSessionTx) error {

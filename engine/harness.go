@@ -164,13 +164,19 @@ func (b *cappedBuffer) String() string { return string(b.data) }
 // Bound each in-flight line, not the lifetime volume of a streaming RPC process.
 // Delivery to the bounded Frames channel supplies backpressure in startInteractive.
 type jsonLines struct {
-	mu         sync.Mutex
-	pending    []byte
-	err        error
-	consume    func([]byte) error
-	cancel     func()
-	projection *protocolLineInput
-	stage      *protocolFrame
+	mu            sync.Mutex
+	pending       []byte
+	err           error
+	consume       func([]byte) error
+	cancel        func()
+	projection    *protocolLineInput
+	stage         *protocolFrame
+	native        func(map[string]any) error
+	activeScope   atomic.Pointer[protocolContentScope]
+	lastNative    *protocolFrame
+	ingesting     atomic.Bool
+	inputIdle     *time.Timer
+	inputTimedOut atomic.Bool
 }
 
 func (l *jsonLines) Write(p []byte) (int, error) {
@@ -205,6 +211,11 @@ func (l *jsonLines) Write(p []byte) (int, error) {
 }
 
 func (l *jsonLines) reject(text string) error {
+	if l.inputIdle != nil {
+		l.inputIdle.Stop()
+		l.inputIdle = nil
+	}
+	l.ingesting.Store(false)
 	l.err = errors.New(text)
 	if l.stage != nil {
 		l.err = errors.Join(l.err, l.stage.Close())
@@ -240,6 +251,9 @@ func (l *jsonLines) flushLocked() error {
 func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd string, payload submission) {
 	defer a.wg.Done()
 	defer t.cancel()
+	t.ctx = protocolDirectoryContext(t.ctx, a.dir)
+	t.protocolScope = &protocolContentScope{dir: a.dir, ctx: t.ctx}
+	defer t.protocolScope.Close()
 	a.mu.Lock()
 	var reservationErr error
 	reasoningStart := 0
@@ -261,7 +275,7 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	}
 	a.mu.Unlock()
 	p := &adapter{app: a, turn: t, id: s.ID, harness: s.Harness, role: s.Role, yolo: s.YOLO, cwd: cwd,
-		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true}
+		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]any{}, processesDrained: true}
 	if s.Automation != nil && s.Automation.Status == "running" && s.Role == "" && s.ParentID == "" && s.GraphRunID == "" {
 		p.automationRunID = s.Automation.RunID
 	}
@@ -404,6 +418,17 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	err = errors.Join(err, p.closeSubagents(err != nil || p.failed, t.ctx.Err() != nil))
 	err = errors.Join(err, p.stream.close())
 	err = errors.Join(err, p.closeMCP()) // Drain gateway workers before graph settlement.
+	if a.store != nil {
+		_ = t.protocolScope.Close()
+		status := "cancelled"
+		if t.stopErr != nil || t.ctx.Err() == nil && (err != nil || p.failed || !p.completed) {
+			status = "error"
+		}
+		finalizeCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		p.eventMetadataErr = a.prepareSessionEventStatuses(finalizeCtx, p.id, status)
+		cancel()
+		err = errors.Join(err, p.eventMetadataErr)
+	}
 	graphResult := p.finishGraphAdapter(err)
 	if p.graphNode() && graphResult.Error != nil {
 		err = graphResult.Error
@@ -583,6 +608,8 @@ func (p *adapter) finishTurnStateLocked(err error) error {
 }
 
 type adapter struct {
+	eventMetadataErr     error
+	streamedContent      map[string]bool
 	automationRunID      string // Immutable owning run for this complete engine turn.
 	analyticsNative      string // Hashed native epoch, protected by app.mu.
 	openCodeLibraryEnv   []string
@@ -614,7 +641,7 @@ type adapter struct {
 	harness              string
 	keys                 map[string]string
 	toolNames            map[string]string
-	commands             map[string]string
+	commands             map[string]any
 	subagents            map[string]*adapter
 	subagent             bool
 	piMessage            int
@@ -640,6 +667,36 @@ func truth(m map[string]any, key string) bool {
 }
 
 func humanError(value any) string {
+	if content, ok := value.(*protocolContent); ok {
+		if content.kind == '"' {
+			r, err := content.text()
+			if err != nil {
+				return "Harness reported an unreadable error."
+			}
+			text, more, err := readRuneTextWindow(content.frame.ctx, r, 0, 1024)
+			if err != nil {
+				return "Harness reported an unreadable error."
+			}
+			if more {
+				text += " [truncated]"
+			}
+			return text
+		}
+		if content.kind == '{' {
+			for _, key := range []string{"message", "errorMessage", "error", "data", "name"} {
+				field, err := protocolField(content, key)
+				if err != nil {
+					return "Harness reported an unreadable error."
+				}
+				if field != nil {
+					if text := humanError(field); text != "" {
+						return text
+					}
+				}
+			}
+		}
+		return ""
+	}
 	if text, ok := value.(string); ok {
 		if len(text) > 4096 {
 			return strings.ToValidUTF8(text[:4096], "") + " [truncated]"
@@ -681,11 +738,23 @@ func contentText(value any) string {
 
 // Stable keys upsert harness items in first-observed order. Native deltas append
 // text; accumulated tool results and completed messages replace text.
-func (p *adapter) put(key, kind, title, text, status string, appendText bool, raw map[string]any) error {
+func (p *adapter) put(key, kind, title string, value any, status string, appendText bool, raw map[string]any) error {
+	text, plain := value.(string)
+	if p.app.store != nil && (!plain || len(text) > protocolChunkSize || protocolHasContent(raw) || protocolValueBytes(raw, map[*protocolFrame]bool{}) > protocolChunkSize || p.streamedContent[p.keys[key]]) {
+		return p.putStreamed(key, kind, title, value, status, appendText, raw)
+	}
+	if !plain {
+		return errors.New("Native content requires a streaming SQLite event.")
+	}
 	id := p.keys[key]
 	if key == "" || id == "" {
 		id = newID()
 		if key != "" {
+			if p.turn != nil {
+				if err := p.turn.protocolScope.cacheValue("event-key/"+p.id+"/"+key, id); err != nil {
+					return err
+				}
+			}
 			p.keys[key] = id
 		}
 	}
@@ -807,6 +876,13 @@ func (p *adapter) consume(line []byte) error {
 }
 
 func (p *adapter) pi(raw map[string]any) error {
+	if p.turn != nil && p.turn.protocolScope != nil {
+		release, err := acquireProtocolStage(p.turn.ctx, protocolNormalizeSlots)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
 	typ := str(raw, "type")
 	switch typ {
 	case "session":
@@ -832,7 +908,7 @@ func (p *adapter) pi(raw map[string]any) error {
 		}
 		key := fmt.Sprintf("message/%d/%d", p.piMessage, int(index))
 		// Keep delta metadata, not the repeatedly growing partial message copy.
-		return p.put(key, target, "", str(delta, "delta"), "running", true,
+		return p.put(key, target, "", displayNativeText(delta["delta"]), "running", true,
 			map[string]any{"type": typ, "contentIndex": index})
 	case "message_end":
 		message := object(raw["message"])
@@ -850,19 +926,24 @@ func (p *adapter) pi(raw map[string]any) error {
 		if (stop == "error" || stop == "aborted") && !choiceAbort {
 			status = "error"
 		}
-		parts, _ := message["content"].([]any)
-		for index, value := range parts {
+		index := 0
+		if err := protocolArrayEach(message["content"], func(value any) error {
+			currentIndex := index
+			index++
 			part := object(value)
-			kind, text := "assistant", str(part, "text")
+			kind, text := "assistant", displayNativeText(part["text"])
 			if str(part, "type") == "thinking" {
-				kind, text = "reasoning", str(part, "thinking")
+				kind, text = "reasoning", displayNativeText(part["thinking"])
 			} else if str(part, "type") != "text" {
-				continue
+				return nil
 			}
-			if err := p.put(fmt.Sprintf("message/%d/%d", p.piMessage, index), kind, "", text, status, false,
-				map[string]any{"type": typ, "contentIndex": index, "stopReason": stop, "model": message["model"], "usage": message["usage"]}); err != nil {
+			if err := p.put(fmt.Sprintf("message/%d/%d", p.piMessage, currentIndex), kind, "", text, status, false,
+				map[string]any{"type": typ, "contentIndex": currentIndex, "stopReason": stop, "model": message["model"], "usage": message["usage"]}); err != nil {
 				return err
 			}
+			return nil
+		}); err != nil {
+			return err
 		}
 		if status == "error" {
 			return p.failure(map[string]any{"type": typ, "message": message["errorMessage"]})
@@ -876,25 +957,33 @@ func (p *adapter) pi(raw map[string]any) error {
 		} else {
 			name = p.toolNames[key]
 		}
-		if args := object(raw["args"]); args != nil {
-			p.commands[key] = str(args, "command")
+		if raw["args"] != nil {
+			command, err := nativeField(raw["args"], "command")
+			if err != nil {
+				return err
+			}
+			p.commands[key] = command
+			if err := p.turn.protocolScope.cacheValue("pi-command/"+p.id+"/"+key, command); err != nil {
+				return err
+			}
 		}
-		kind, text, status := "tool", "", "running"
+		kind, status := "tool", "running"
+		var text any = ""
 		if name == "bash" {
 			kind = "command"
 		} else if strings.HasPrefix(name, "mcp") {
 			kind = "mcp"
 		}
 		if typ == "tool_execution_update" {
-			text = contentText(raw["partialResult"])
+			text = displayNativeText(raw["partialResult"])
 		} else if typ == "tool_execution_end" {
-			text, status = contentText(raw["result"]), "completed"
+			text, status = displayNativeText(raw["result"]), "completed"
 			if truth(raw, "isError") {
 				status = "error"
 			}
 		}
-		if command := p.commands[key]; command != "" {
-			text = command + "\n" + text
+		if command := p.commands[key]; nativeStringPresent(command) {
+			text = joinNativeValues(command, "\n", text)
 		}
 		if p.mcp != nil {
 			if route, exists := p.mcp.routes[name]; exists {
@@ -907,7 +996,12 @@ func (p *adapter) pi(raw map[string]any) error {
 				name = route.connection.Name + " / " + label
 			}
 		}
-		return p.put(key, kind, name, strings.TrimSuffix(text, "\n"), status, false, raw)
+		err := p.put(key, kind, name, trimNativeNewline(text), status, false, raw)
+		if err == nil && typ == "tool_execution_end" {
+			delete(p.commands, key)
+			err = p.turn.protocolScope.cacheValue("pi-command/"+p.id+"/"+key, nil)
+		}
+		return err
 	case "agent_settled":
 		p.completed = true
 		return p.put("", "status", "", "Agent settled.", "completed", false, raw)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	_ "embed"
@@ -67,21 +68,53 @@ func newPiChildChannel(p *adapter) (*piChildChannel, error) {
 		return nil, errors.New("Cannot start native Pi child channel.")
 	}
 	c := &piChildChannel{url: "http://" + l.Addr().String() + "/child", token: newID() + newID(), requests: make(chan *piChildRequest, 32), children: map[string]*adapter{}, finished: map[string]bool{}}
-	c.server = &http.Server{ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, BaseContext: func(net.Listener) context.Context { return p.turn.ctx }}
+	c.server = &http.Server{ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second, BaseContext: func(net.Listener) context.Context { return p.turn.ctx }}
 	c.server.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/child" || r.Method != http.MethodPost || !loopbackHost(r.Host) || !loopbackHost(r.RemoteAddr) || r.Header.Get("Origin") != "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+c.token)) != 1 {
 			fail(w, 403, "Invalid child capability.")
 			return
 		}
 		var req piChildRequest
-		r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
-		decoder := json.NewDecoder(r.Body)
+		frame := &protocolFrame{ctx: r.Context(), dir: p.app.dir}
+		defer func() {
+			if frame.retained && frame.scope != nil {
+				frame.scope.ack(frame)
+			} else {
+				_ = frame.Close()
+			}
+		}()
+		controller := http.NewResponseController(w)
+		stopRead := context.AfterFunc(r.Context(), func() { _ = controller.SetReadDeadline(time.Now()) })
+		defer stopRead()
+		body := &piChildBodyReader{reader: r.Body, controller: controller}
+		if _, err := io.CopyBuffer(frame, body, make([]byte, protocolChunkSize)); err != nil {
+			fail(w, 413, "Could not stage native child input.")
+			return
+		}
+		value, err := frame.projectNative("pi-child", 1<<20, p.turn.protocolScope)
+		if err != nil {
+			fail(w, 400, err.Error())
+			return
+		}
+		event := object(value["event"])
+		delete(value, "event")
+		if protocolHasContent(value) {
+			fail(w, 413, "Complete child interaction scope exceeds the supported envelope. No operation was authorized.")
+			return
+		}
+		metadata, err := json.Marshal(value)
+		if err != nil {
+			fail(w, 400, "Invalid child metadata.")
+			return
+		}
+		decoder := json.NewDecoder(bytes.NewReader(metadata))
 		decoder.UseNumber()
 		decoder.DisallowUnknownFields()
 		if decoder.Decode(&req) != nil || decoder.Decode(new(any)) != io.EOF || req.ChildID == "" || len(req.ChildID) > 128 || !piSamePath(req.Cwd, p.cwd) {
 			fail(w, 400, "Invalid child request.")
 			return
 		}
+		req.Event = event
 		req.ctx, req.reply = r.Context(), make(chan any, 1)
 		defer func() {
 			if req.ToolCallID != "" {
@@ -183,7 +216,7 @@ func (c *piChildChannel) handle(p *adapter, req *piChildRequest) error {
 			return reject("Unsupported native child event.")
 		}
 		if str(req.Event, "type") == "message_end" && str(object(req.Event["message"]), "role") == "user" {
-			text := contentText(object(req.Event["message"])["content"])
+			text := displayNativeText(object(req.Event["message"])["content"])
 			if err := child.put("assigned-task", "agent_prompt", "", text, "completed", false, map[string]any{"origin": map[string]any{"sessionId": p.id, "role": "agent"}}); err != nil {
 				return err
 			}
@@ -238,6 +271,18 @@ func (c *piChildChannel) handle(p *adapter, req *piChildRequest) error {
 	default:
 		return reject("Method not available to native children.")
 	}
+}
+
+type piChildBodyReader struct {
+	reader     io.Reader
+	controller *http.ResponseController
+}
+
+func (r *piChildBodyReader) Read(out []byte) (int, error) {
+	_ = r.controller.SetReadDeadline(time.Now().Add(30 * time.Second))
+	n, err := r.reader.Read(out)
+	_ = r.controller.SetReadDeadline(time.Time{})
+	return n, err
 }
 func piChildCapabilities(parent *CapabilitySnapshot) *CapabilitySnapshot {
 	if parent == nil {

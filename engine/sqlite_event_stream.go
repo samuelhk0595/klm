@@ -75,9 +75,6 @@ func (st *sqliteSessionTx) writeStreamMetadata(owner, key string, ordinal int64,
 		return err
 	}
 	delta := encoded[1 : len(encoded)-1]
-	if int64(len(prefix))+c.text+int64(len(delta))+2 > maxStreamRecordBytes {
-		return errors.New("Event exceeds supported record size.")
-	}
 	var hashState []byte
 	var total int64
 	var digest string
@@ -248,14 +245,35 @@ func (st *sqliteSessionTx) streamEvent(owner string, u streamUpdate) (Event, boo
 	return e, err == nil, err
 }
 func (st *sqliteSessionTx) patchEventMetadata(owner, key string, change func(*Event) error) error {
-	var ordinal int64
-	if err := st.tx.QueryRowContext(st.ctx, `SELECT position FROM data_session_events WHERE id=? AND owner_id=?`, key, owner).Scan(&ordinal); err != nil {
+	var ordinal, size int64
+	if err := st.tx.QueryRowContext(st.ctx, `SELECT position,payload_bytes FROM data_session_events WHERE id=? AND owner_id=?`, key, owner).Scan(&ordinal, &size); err != nil {
 		return err
+	}
+	if size > protocolChunkSize {
+		meta, err := readSQLiteEventMetadata(st.ctx, st.tx, key)
+		if err != nil {
+			return err
+		}
+		before, err := json.Marshal(meta)
+		if err != nil {
+			return err
+		}
+		if err := change(&meta); err != nil {
+			return err
+		}
+		after, err := json.Marshal(meta)
+		if err != nil {
+			return err
+		}
+		if bytes.Equal(before, after) {
+			return nil
+		}
+		return errors.New("Large event metadata must be prepared before publication.")
 	}
 	c, err := st.eventStreamState(key)
 	var e Event
 	if errors.Is(err, sql.ErrNoRows) {
-		if err := decodeSQLiteRecord(st.ctx, st.tx, "session_events", key, maxStreamRecordBytes, &e); err != nil {
+		if err := decodeSQLiteRecord(st.ctx, st.tx, "session_events", key, protocolChunkSize, &e); err != nil {
 			return err
 		}
 		if err := change(&e); err != nil {

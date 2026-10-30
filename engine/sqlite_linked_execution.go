@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type sqlLinkedArgs struct {
@@ -170,27 +172,32 @@ func (p *adapter) callSQLLinked(ctx context.Context, name string, args sqlLinked
 			}
 			items := []any{}
 			for _, key := range keys {
-				var e Event
-				if err := decodeSQLiteRecord(ctx, st.tx, "session_events", key, maxStreamRecordBytes, &e); err != nil {
+				e, err := readSQLiteEventMetadata(ctx, st.tx, key)
+				if err != nil {
 					return err
 				}
-				body := e.Text
+				body, err := readSQLiteEventText(ctx, st.tx, key)
+				if err != nil {
+					return err
+				}
+				suffix := ""
 				if e.Type == "consultation" {
-					body += "\n\nAnswer:\n" + str(e.Data, "answer")
+					suffix += "\n\nAnswer:\n" + str(e.Data, "answer")
 					if failure := str(e.Data, "error"); failure != "" {
-						body += "\n\nError: " + failure
+						suffix += "\n\nError: " + failure
 					}
 				}
 				if source := e.Data["sources"]; source != nil {
 					encoded, _ := json.Marshal(source)
-					body += "\n\nSelected reference context:\n" + string(encoded)
+					suffix += "\n\nSelected reference context:\n" + string(encoded)
 				}
-				text := []rune(body)
-				offset := min(args.Offset, len(text))
-				end := min(offset+4096, len(text))
-				item := map[string]any{"id": e.ID, "type": e.Type, "text": string(text[offset:end]), "title": boundedText(e.Title, 512), "status": e.Status, "consultationId": e.ConsultationID, "createdAt": e.CreatedAt}
-				if end < len(text) {
-					item["nextOffset"] = end
+				text, more, err := readRuneTextWindow(ctx, io.MultiReader(body, strings.NewReader(suffix)), args.Offset, 4096)
+				if err != nil {
+					return err
+				}
+				item := map[string]any{"id": e.ID, "type": e.Type, "text": text, "title": boundedText(e.Title, 512), "status": e.Status, "consultationId": e.ConsultationID, "createdAt": e.CreatedAt}
+				if more {
+					item["nextOffset"] = args.Offset + utf8.RuneCountInString(text)
 				}
 				if e.Type == "agent_prompt" || e.Type == "session_spawn" {
 					item["origin"] = e.Data["origin"]

@@ -20,9 +20,13 @@ type interactiveProcess struct {
 	mu     sync.Mutex
 	err    error
 	owner  *ownedProcess
+	lines  *jsonLines
 }
 
 func startInteractive(t *turn, b binary, args []string, cwd string, runtime *sessionRuntime, projection ...protocolLineInput) (*interactiveProcess, error) {
+	if len(projection) > 0 && projection[0].harness == "codex" && projection[0].scope == nil {
+		projection = nil
+	}
 	parent := t.ctx
 	if runtime != nil {
 		parent = runtime.app.ctx
@@ -76,7 +80,17 @@ func startInteractive(t *turn, b binary, args []string, cwd string, runtime *ses
 		input := projection[0]
 		input.ctx = ctx
 		lines.projection = &input
+		lines.activeScope.Store(input.scope)
+		lines.native = func(frame map[string]any) error {
+			select {
+			case frames <- frame:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 	}
+	p.lines = lines
 	cmd.Stdout = lines
 	cmd.Stderr = &cappedBuffer{}
 	started := time.Now()
@@ -149,3 +163,15 @@ func (p *interactiveProcess) Close() error {
 }
 
 func (p *interactiveProcess) Drained() bool { return p.owner.Drained() }
+
+func (p *interactiveProcess) bindProtocolScope(scope *protocolContentScope) {
+	// Do not wait for the stdout writer's mutex: it can be handing off a final
+	// small telemetry response from an idle retained process.
+	if p.lines != nil {
+		p.lines.activeScope.Store(scope)
+	}
+}
+
+func (p *interactiveProcess) ingestionInFlight() bool {
+	return p.lines != nil && p.lines.ingesting.Load()
+}

@@ -13,6 +13,7 @@ import (
 )
 
 type turn struct {
+	protocolScope         *protocolContentScope
 	automationRecoveryIDs []string
 	analyticsID           string
 	analyticsAnchor       time.Time           // Monotonic dispatch anchor; protected by app.mu.
@@ -36,6 +37,7 @@ type turn struct {
 }
 
 type app struct {
+	contentDownloads     contentDownloadTickets
 	store                *sqliteStore // Set only by the completed SQLite startup path.
 	sqlChanges           *sqliteChangeBus
 	clientAuth           *clientAuth

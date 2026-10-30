@@ -160,16 +160,7 @@ func (st *sqliteSessionTx) syncSubagentParent(child Session, status, parentEvent
 		where += ` AND status IN ('running','pending','started')`
 	}
 	return st.eachMatching("session_events", where, args, func(key string) error {
-		var e Event
-		if err := decodeSQLiteRecord(st.ctx, st.tx, "session_events", key, maxStreamRecordBytes, &e); err != nil {
-			return err
-		}
-		var ordinal int64
-		if err := st.tx.QueryRowContext(st.ctx, `SELECT position FROM data_session_events WHERE id=?`, key).Scan(&ordinal); err != nil {
-			return err
-		}
-		e.Status = status
-		if err := st.writeEvent(child.ParentID, ordinal, e, false); err != nil {
+		if err := st.patchEventMetadata(child.ParentID, key, func(e *Event) error { e.Status = status; return nil }); err != nil {
 			return err
 		}
 		parent, err := st.sessionMeta(child.ParentID)

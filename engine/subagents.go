@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"strings"
+	"time"
 )
 
 const (
@@ -33,7 +35,7 @@ func (p *adapter) ensureSubagent(nativeID, title, model, effort string) (*adapte
 		if err != nil || s == nil {
 			return nil, err
 		}
-		child := &adapter{app: p.app, turn: p.turn, id: s.ID, harness: p.harness, role: sessionRoleSubagent, subagent: true, yolo: p.yolo, cwd: p.cwd, keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true, model: s.Model, effort: s.Effort}
+		child := &adapter{app: p.app, turn: p.turn, id: s.ID, harness: p.harness, role: sessionRoleSubagent, subagent: true, yolo: p.yolo, cwd: p.cwd, keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]any{}, processesDrained: true, model: s.Model, effort: s.Effort}
 		child.stream = newStreamBatch(child)
 		if p.subagents == nil {
 			p.subagents = map[string]*adapter{}
@@ -82,7 +84,7 @@ func (p *adapter) ensureSubagent(nativeID, title, model, effort string) (*adapte
 	childID := childSession.ID
 	p.app.mu.Unlock()
 	child := &adapter{app: p.app, turn: p.turn, id: childID, harness: p.harness, role: sessionRoleSubagent, subagent: true, yolo: p.yolo, cwd: p.cwd,
-		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]string{}, processesDrained: true, model: model, effort: effort}
+		keys: map[string]string{}, toolNames: map[string]string{}, commands: map[string]any{}, processesDrained: true, model: model, effort: effort}
 	child.stream = newStreamBatch(child)
 	if p.subagents == nil {
 		p.subagents = map[string]*adapter{}
@@ -139,6 +141,30 @@ func (p *adapter) finishSubagentInvocation(child *adapter, status, parentEventID
 	if status == "error" || status == "failed" || status == "interrupted" {
 		sessionStatus = "error"
 	}
+	if child.app.store != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := child.app.prepareSessionEventStatuses(ctx, child.id, status); err != nil {
+			return err
+		}
+		meta, err := child.app.store.readSessionMeta(ctx, child.id)
+		if err != nil {
+			return err
+		}
+		parentStatus := status
+		if meta.Status == "error" && sessionStatus == "idle" {
+			parentStatus = "error"
+		}
+		where := `AND kind='subagent' AND x_data_childSessionId=?`
+		args := []any{child.id}
+		if parentEventID != "" {
+			where += ` AND record_id=?`
+			args = append(args, parentEventID)
+		}
+		if err := child.app.prepareSelectedEventStatuses(ctx, meta.ParentID, where, args, parentStatus, parentEventID != ""); err != nil {
+			return err
+		}
+	}
 	child.app.mu.Lock()
 	defer child.app.mu.Unlock()
 	if child.app.store != nil {
@@ -155,16 +181,7 @@ func (p *adapter) finishSubagentInvocation(child *adapter, status, parentEventID
 				return err
 			}
 			if err := st.eachMatching("session_events", `owner_id=? AND status IN ('running','pending')`, []any{child.id}, func(key string) error {
-				var e Event
-				if err := decodeSQLiteRecord(st.ctx, st.tx, "session_events", key, maxStreamRecordBytes, &e); err != nil {
-					return err
-				}
-				var ordinal int64
-				if err := st.tx.QueryRowContext(st.ctx, `SELECT position FROM data_session_events WHERE id=?`, key).Scan(&ordinal); err != nil {
-					return err
-				}
-				e.Status = status
-				return st.writeEvent(child.id, ordinal, e, false)
+				return st.patchEventMetadata(child.id, key, func(e *Event) error { e.Status = status; return nil })
 			}); err != nil {
 				return err
 			}

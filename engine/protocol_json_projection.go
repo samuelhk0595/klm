@@ -23,6 +23,7 @@ const (
 	projectionKeep projectionAction = iota
 	projectionDiscard
 	projectionDiffPreview
+	projectionSmallValue
 )
 
 // The policy sees decoded keys and exact paths, never substring matches.
@@ -45,16 +46,44 @@ func (b *projectionBuffer) Write(p []byte) (int, error) {
 // byte, not Decoder.Token/RawMessage/map values. The same validator handles kept
 // and discarded input. Live duplicate-key bookkeeping is independently bounded.
 type protocolJSONProjection struct {
-	ctx       context.Context
-	r         *bufio.Reader
-	policy    protocolFieldPolicy
-	tag       string
-	keyBytes  int
-	readBytes uint64
+	ctx         context.Context
+	r           *bufio.Reader
+	policy      protocolFieldPolicy
+	tag         string
+	keyBytes    int
+	readBytes   uint64
+	counter     *protocolCountingReader
+	observe     func([]string, int64, int64, byte)
+	captureType bool
+	keyIndex    *protocolKeyIndex
+	objectID    int64
+	objects     int
 }
 
-func projectProtocolJSON(ctx context.Context, input io.Reader, policy protocolFieldPolicy, limit int, limitErr error, classify bool) ([]byte, string, error) {
-	p := &protocolJSONProjection{ctx: ctx, r: bufio.NewReaderSize(input, protocolChunkSize), policy: policy}
+type protocolCountingReader struct {
+	input io.Reader
+	bytes int64
+}
+
+func (r *protocolCountingReader) Read(p []byte) (int, error) {
+	n, err := r.input.Read(p)
+	r.bytes += int64(n)
+	return n, err
+}
+
+func projectProtocolJSON(ctx context.Context, input io.Reader, policy protocolFieldPolicy, limit int, limitErr error, classify bool, observe ...func([]string, int64, int64, byte)) ([]byte, string, error) {
+	var observer func([]string, int64, int64, byte)
+	if len(observe) > 0 {
+		observer = observe[0]
+	}
+	return projectProtocolJSONUsing(ctx, input, policy, limit, limitErr, classify, observer, 0, true)
+}
+
+func projectProtocolJSONUsing(ctx context.Context, input io.Reader, policy protocolFieldPolicy, limit int, limitErr error, classify bool, observe func([]string, int64, int64, byte), origin int64, captureType bool) ([]byte, string, error) {
+	counter := &protocolCountingReader{input: input, bytes: origin}
+	p := &protocolJSONProjection{ctx: ctx, r: bufio.NewReaderSize(counter, protocolChunkSize), policy: policy, counter: counter}
+	p.observe = observe
+	p.captureType = captureType
 	// Match the existing JSONL BOM convention; an interior BOM is invalid JSON.
 	if prefix, _ := p.r.Peek(3); bytes.Equal(prefix, []byte{0xef, 0xbb, 0xbf}) {
 		_, _ = p.r.Discard(3)
@@ -188,13 +217,33 @@ func (p *protocolJSONProjection) smallString(limit int) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-func (p *protocolJSONProjection) value(path []string, depth int, w *bufio.Writer) error {
+func (p *protocolJSONProjection) value(path []string, depth int, w *bufio.Writer) (result error) {
 	if depth > 256 {
 		return errProtocolMetadata
 	}
 	action := projectionKeep
 	if p.policy != nil {
 		action = p.policy(path)
+	}
+	if action == projectionSmallValue && w != nil {
+		preview := &previewSink{limit: protocolChunkSize}
+		out := bufio.NewWriterSize(preview, 4096)
+		policy := p.policy
+		p.policy = nil
+		err := p.value(path, depth, out)
+		p.policy = policy
+		if err != nil {
+			return err
+		}
+		if err := out.Flush(); err != nil {
+			return err
+		}
+		if preview.omitted {
+			_, err = w.WriteString("null")
+		} else {
+			_, err = w.Write(preview.data)
+		}
+		return err
 	}
 	if action == projectionDiscard && w != nil {
 		if _, err := w.WriteString("null"); err != nil {
@@ -206,7 +255,15 @@ func (p *protocolJSONProjection) value(path []string, depth int, w *bufio.Writer
 	if err != nil {
 		return errProtocolJSON
 	}
-	if len(path) == 1 && path[0] == "type" {
+	start := p.counter.bytes - int64(p.r.Buffered()) - 1
+	if p.observe != nil {
+		defer func() {
+			if result == nil {
+				p.observe(path, start, p.counter.bytes-int64(p.r.Buffered()), b)
+			}
+		}()
+	}
+	if p.captureType && len(path) == 1 && path[0] == "type" {
 		if b != '"' {
 			return errProtocolJSON
 		}
@@ -265,7 +322,7 @@ func (p *protocolJSONProjection) value(path []string, depth int, w *bufio.Writer
 	}
 }
 
-func (p *protocolJSONProjection) collection(path []string, depth int, w *bufio.Writer, open byte) error {
+func (p *protocolJSONProjection) collection(path []string, depth int, w *bufio.Writer, open byte) (result error) {
 	if err := projectionByte(w, open); err != nil {
 		return err
 	}
@@ -284,6 +341,27 @@ func (p *protocolJSONProjection) collection(path []string, depth int, w *bufio.W
 	keys := map[string]bool{}
 	keyBytes := 0
 	defer func() { p.keyBytes -= keyBytes }()
+	objectID := int64(0)
+	spilled := false
+	if open == '{' {
+		p.objectID++
+		objectID = p.objectID
+		p.objects++
+		defer func() {
+			if spilled && p.keyIndex != nil {
+				if err := p.keyIndex.drop(objectID); result == nil && err != nil {
+					result = err
+				}
+			}
+			p.objects--
+			if p.objects == 0 && p.keyIndex != nil {
+				if err := p.keyIndex.Close(); result == nil && err != nil {
+					result = err
+				}
+				p.keyIndex = nil
+			}
+		}()
+	}
 	for {
 		key := "[]"
 		if open == '{' {
@@ -299,12 +377,33 @@ func (p *protocolJSONProjection) collection(path []string, depth int, w *bufio.W
 				return errProtocolJSON
 			}
 			cost := len(key) + 64
-			p.keyBytes += cost
-			keyBytes += cost
-			if p.keyBytes > 1<<20 {
-				return errProtocolMetadata
+			if !spilled && p.keyBytes+cost > 1<<20 {
+				if p.keyIndex == nil {
+					dir, _ := p.ctx.Value(protocolDirectoryKey{}).(string)
+					p.keyIndex, err = newProtocolKeyIndex(p.ctx, dir)
+					if err != nil {
+						return err
+					}
+				}
+				for existing := range keys {
+					if err := p.keyIndex.add(objectID, existing); err != nil {
+						return err
+					}
+				}
+				p.keyBytes -= keyBytes
+				keyBytes = 0
+				keys = nil
+				spilled = true
 			}
-			keys[key] = true
+			if spilled {
+				if err := p.keyIndex.add(objectID, key); err != nil {
+					return err
+				}
+			} else {
+				p.keyBytes += cost
+				keyBytes += cost
+				keys[key] = true
+			}
 			if w != nil {
 				if _, err := w.Write(raw); err != nil {
 					return err
@@ -427,6 +526,14 @@ func (s *previewSink) Write(p []byte) (int, error) {
 
 func liveProtocolPolicy(harness, typ string) protocolFieldPolicy {
 	return func(path []string) projectionAction {
+		if harness == "opencode-history" {
+			if slices.Equal(path, []string{"info", "summary", "diffs"}) {
+				return projectionDiscard
+			}
+			if openCodeDiffPreviewPath(append([]string{"[]"}, path...)) {
+				return projectionDiffPreview
+			}
+		}
 		if harness == "opencode" && typ == "message.updated" && slices.Equal(path, []string{"properties", "info", "summary", "diffs"}) {
 			return projectionDiscard
 		}

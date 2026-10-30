@@ -336,11 +336,15 @@ func (p *adapter) sqlSpawnOptions(ctx context.Context, projectID, harness, curso
 			return err
 		}
 		for _, id := range ids {
-			var e Event
-			if err := decodeSQLiteRecord(ctx, tx, "session_events", id, maxStreamRecordBytes, &e); err != nil {
+			e, err := readSQLiteEventMetadata(ctx, tx, id)
+			if err != nil {
 				return err
 			}
-			messages = append(messages, map[string]string{"id": e.ID, "text": boundedText(e.Text, 1024)})
+			text, _, err := sqliteEventTextWindow(ctx, tx, id, 0, 1024)
+			if err != nil {
+				return err
+			}
+			messages = append(messages, map[string]string{"id": e.ID, "text": text})
 		}
 		return nil
 	})

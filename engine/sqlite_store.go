@@ -10,13 +10,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	_ "modernc.org/sqlite"
 )
 
 const (
 	sqliteApplicationID = 0x4b4c4d31 // KLM1; independent of product version.
-	sqliteSchemaVersion = 1
+	sqliteSchemaVersion = 2
 	sqliteReaderLimit   = 4
 )
 
@@ -25,8 +26,12 @@ const (
 // inside a SQL transaction. No external effects or publication inside write().
 // A single writer connection serializes commits; readers have a separate budget.
 type sqliteStore struct {
-	writer  *sql.DB
-	readers *sql.DB
+	dir           string
+	contentMu     sync.Mutex
+	contentLive   map[string]bool
+	contentStaged map[string]int64
+	writer        *sql.DB
+	readers       *sql.DB
 }
 
 func sqliteDSN(path string, readOnly bool) string {
@@ -80,7 +85,7 @@ func createSQLiteStore(ctx context.Context, path, id string) (*sqliteStore, erro
 	if err != nil {
 		return nil, err
 	}
-	s := &sqliteStore{writer: db}
+	s := &sqliteStore{writer: db, dir: filepath.Dir(path)}
 	err = s.write(ctx, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, sqliteSchema); err != nil {
 			return err
@@ -90,6 +95,9 @@ func createSQLiteStore(ctx context.Context, path, id string) (*sqliteStore, erro
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, domainSchema); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, sqliteContentGenerationSchema); err != nil {
 			return err
 		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO store_meta(key,value) VALUES ('database_id',?),('cutover','building'),('revision','0')`, id)
@@ -112,12 +120,12 @@ func openSQLiteStore(ctx context.Context, path string) (*sqliteStore, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &sqliteStore{writer: db}
+	s := &sqliteStore{writer: db, dir: filepath.Dir(path)}
 	var appID, version int
 	if err = db.QueryRowContext(ctx, `PRAGMA application_id`).Scan(&appID); err == nil {
 		err = db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version)
 	}
-	if err == nil && (appID != sqliteApplicationID || version != sqliteSchemaVersion) {
+	if err == nil && (appID != sqliteApplicationID || version < 1 || version > sqliteSchemaVersion) {
 		err = fmt.Errorf("unsupported SQLite identity/schema (%x/%d); refusing startup", appID, version)
 	}
 	if err != nil {
@@ -141,6 +149,12 @@ func (s *sqliteStore) enableRuntime(ctx context.Context) error {
 	}
 	if mode != "wal" {
 		return fmt.Errorf("SQLite refused WAL: %s", mode)
+	}
+	if err := s.migrateContentGenerations(ctx); err != nil {
+		return err
+	}
+	if err := s.recoverEventGenerations(ctx); err != nil {
+		return err
 	}
 	return nil
 }

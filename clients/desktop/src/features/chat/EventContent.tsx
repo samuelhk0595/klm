@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../design-system/Button';
-import { request, type EngineEvent } from '../../engine';
+import { ENGINE_URL, request, type EngineEvent } from '../../engine';
+import { openContentDownload } from '../../platform';
 
 type ContentPage = { data: string; offset: number; nextOffset: number; hasMore: boolean; totalBytes: number; display?: string };
 const decode = (data: string) => Uint8Array.from(atob(data), c => c.charCodeAt(0));
@@ -38,14 +39,17 @@ export function EventContent({ event }: { event: EngineEvent }) {
   async function download() {
     controller.current?.abort(); const current = new AbortController(); controller.current = current; setBusy(true); setError('');
     try {
-      const parts: Uint8Array<ArrayBuffer>[] = []; let offset = 0;
-      for (;;) { const next = await request<ContentPage>(path(offset), 'GET', undefined, 15000, current.signal); parts.push(decode(next.data)); if (!next.hasMore) break; offset = next.nextOffset; }
+      const ticket = await request<{ path: string }>(`/api/sessions/${encodeURIComponent(content.sessionId)}/content-downloads`, 'POST', {
+        ordinal: content.ordinal, domain: content.domain, key: content.key, digest: content.digest,
+      }, 15000, current.signal);
       if (current.signal.aborted) return;
-      const url = URL.createObjectURL(new Blob(parts, { type: 'application/json' })); const link = document.createElement('a'); link.href = url; link.download = `event-${event.id}.json`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+      if (!/^\/api\/content-downloads\/[A-Za-z0-9_-]{43}\?contract=3$/.test(ticket.path)) throw new Error('Invalid download response.');
+      await openContentDownload(ENGINE_URL + ticket.path);
     } catch (error) { if (!current.signal.aborted) setError(error instanceof Error ? error.message : 'Could not download content.'); }
     finally { if (controller.current === current) setBusy(false); }
   }
-  return <section className="session-event"><strong>Message content</strong><div>
+  return <section className="session-event"><strong>{event.title || 'Message content'}</strong>
+    {event.previewText && <div><span>Preview</span><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{event.previewText}</pre></div>}<div>
     {!page && <Button size="sm" disabled={busy} onClick={() => void load(0)}>Open content</Button>}
     <Button size="sm" disabled={busy} onClick={() => void download()}>Download event</Button>
   </div>{page && <><pre style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{page.display ?? new TextDecoder().decode(decode(page.data))}</pre>
