@@ -7,9 +7,14 @@ const scopes = new Map<string, Set<Listener>>();
 let source: EventSource | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let delay = 1000;
+let stopped = false;
+
+export function stopScopedConnection() { stopped = true; clearTimeout(timer); source?.close(); source = undefined; }
+export function resumeScopedConnection() { stopped = false; if (scopes.size) changed(); }
 
 // All mounted scopes share one HTTP/1.1 connection, leaving API controls free.
 function open() {
+  if (stopped) return;
   timer = undefined;
   source?.close(); source = undefined;
   if (!scopes.size) return;
@@ -37,6 +42,7 @@ function open() {
 
 function changed() {
   clearTimeout(timer);
+  if (stopped) return;
   // Batch subscriptions mounted/removed in the same React commit.
   timer = setTimeout(open, 0);
 }

@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-const native = vi.hoisted(() => ({ invoke: vi.fn(), credentials: new Map<string, string>() }));
-vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true, invoke: native.invoke }));
+const native = vi.hoisted(() => ({ desktop: true, invoke: vi.fn(), credentials: new Map<string, string>() }));
+vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => native.desktop, invoke: native.invoke }));
 
 beforeEach(() => {
   vi.resetModules();
   localStorage.clear();
   native.credentials.clear();
+  native.desktop = true;
   vi.stubEnv('VITE_ENGINE_URL', '');
   native.invoke.mockImplementation(async (command, args) => {
     if (command === 'client_credential_get') return native.credentials.get(args.engine) ?? null;
@@ -22,16 +23,18 @@ it.each([
   ['https://127.0.0.1:443/prefix/', 'https://127.0.0.1/prefix'],
   ['http://127.0.0.1:80/prefix/', 'http://127.0.0.1/prefix'],
 ])('uses the same canonical identity for override, saved selection and repeated normalization: %s', async (input, canonical) => {
-  const platform = await import('./platform');
   vi.stubEnv('VITE_ENGINE_URL', input);
+  localStorage.setItem('klm.engine-url.v1', input);
+  const platform = await import('./platform');
   expect(platform.resolveEngineURL()).toBe(canonical);
   expect(platform.selectableEngineURL(canonical)).toBe(canonical);
   expect(platform.normalizeEngineURL(canonical)).toBe(canonical);
   vi.stubEnv('VITE_ENGINE_URL', '');
-  localStorage.setItem('klm.engine-url.v1', input);
   expect(platform.resolveEngineURL()).toBe(canonical);
   expect(platform.configureEngineURL(input)).toBe(canonical);
-  expect(localStorage.getItem('klm.engine-url.v1')).toBe(canonical);
+  const { readEngineRegistry } = await import('./features/engines/engineRegistry');
+  expect(readEngineRegistry()?.engines[0].url).toBe(canonical);
+  expect(localStorage.getItem('klm.engine-url.v1')).toBe(input); // Legacy preferences/credential keys are not rewritten.
   expect(platform.normalizeEngineURL('127.0.0.1')).toBe('http://127.0.0.1:7331');
 });
 
@@ -66,19 +69,60 @@ it('pairs once under a default-port override and uses the identical native key a
   expect(native.credentials.size).toBe(1);
   expect(fetch.mock.calls.filter(([url]) => url.endsWith('/api/auth/pair'))).toHaveLength(1);
   expect(fetch.mock.calls.every(([url]) => url.startsWith(`${canonical}/api/`))).toBe(true);
-  expect(() => platform.selectableEngineURL('https://different.example.test/engine')).toThrow('fixed by VITE_ENGINE_URL');
+  expect(platform.selectableEngineURL('https://different.example.test/engine')).toBe('https://different.example.test/engine');
+  expect(() => platform.configureEngineURL('https://different.example.test/engine')).toThrow('only supports the active engine');
   expect(fetch.mock.calls.filter(([url]) => url.endsWith('/api/auth/pair'))).toHaveLength(1);
 });
 
 it.each(['not a valid address', 'http://user:secret@localhost:7331', 'javascript:bad', 'http://192.168.1.2:7331'])(
-  'ignores invalid legacy saved configuration without breaking module initialization: %s', async saved => {
+  'fails closed on invalid desktop legacy data without overwriting it: %s', async saved => {
     localStorage.setItem('klm.engine-url.v1', saved);
     const platform = await import('./platform');
-    expect(platform.resolveEngineURL()).toBe('http://localhost:17331');
+    expect(platform.resolveEngineURL()).toBe('');
     const engine = await import('./engine');
-    expect(engine.ENGINE_URL).toBe('http://localhost:17331');
+    expect(engine.ENGINE_URL).toBe('');
     const auth = await import('./clientAuth');
-    await expect(auth.initializeClientAuth()).resolves.toBeUndefined();
-    expect(native.invoke).toHaveBeenCalledWith('client_credential_get', { engine: engine.ENGINE_URL });
+    await expect(auth.initializeClientAuth()).rejects.toThrow();
+    expect(native.invoke).not.toHaveBeenCalled();
+    expect(localStorage.getItem('klm.engine-url.v1')).toBe(saved);
   },
 );
+
+it('uses the override only as desktop seed and keeps the endpoint immutable until reload', async () => {
+  vi.stubEnv('VITE_ENGINE_URL', 'https://seed.example.test');
+  const platform = await import('./platform');
+  const { readEngineRegistry, saveEngineRegistry, createSavedEngine } = await import('./features/engines/engineRegistry');
+  const saved = readEngineRegistry()!;
+  const destination = createSavedEngine('Other', 'https://other.example.test');
+  saveEngineRegistry({ ...saved, engines: [...saved.engines, destination], activeEngineId: destination.id });
+  expect(platform.resolveEngineURL()).toBe('https://seed.example.test');
+  vi.resetModules();
+  expect((await import('./platform')).resolveEngineURL()).toBe(destination.url);
+});
+
+it.each([null, 'corrupt'])('does not seed or fetch a fallback for a removed selection or corrupt registry: %s', async selection => {
+  const { engineRegistryStorageKey } = await import('./features/engines/engineRegistry');
+  const value = selection === null ? JSON.stringify({ version: 1, engines: [], activeEngineId: null }) : '{broken';
+  localStorage.setItem(engineRegistryStorageKey, value);
+  const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+  const platform = await import('./platform');
+  const auth = await import('./clientAuth');
+  expect(platform.resolveEngineURL()).toBe('');
+  await expect(auth.clientFetch('/api/projects', { method: 'POST' })).rejects.toThrow();
+  expect(fetch).not.toHaveBeenCalled();
+  expect(native.invoke).not.toHaveBeenCalled();
+  expect(localStorage.getItem(engineRegistryStorageKey)).toBe(value);
+});
+
+it('keeps browser/mobile legacy resolution and fixed override policy without creating a registry', async () => {
+  native.desktop = false;
+  localStorage.setItem('klm.engine-url.v1', 'invalid address');
+  const platform = await import('./platform');
+  const { engineRegistryStorageKey } = await import('./features/engines/engineRegistry');
+  expect(platform.resolveEngineURL()).toBe('http://localhost:17331');
+  expect(platform.configureEngineURL('https://browser.example.test/')).toBe('https://browser.example.test');
+  vi.stubEnv('VITE_ENGINE_URL', 'https://override.example.test');
+  expect(platform.resolveEngineURL()).toBe('https://override.example.test');
+  expect(() => platform.selectableEngineURL('https://other.example.test')).toThrow('fixed by VITE_ENGINE_URL');
+  expect(localStorage.getItem(engineRegistryStorageKey)).toBeNull();
+});

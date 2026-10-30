@@ -8,6 +8,7 @@ import { ENGINE_URL, request, type Session, type SessionResponse } from '../../e
 import { IS_MOBILE_HOST } from '../../platform';
 import { SessionLibraryDialog } from '../library/SessionLibraryDialog';
 import { Button } from '../../design-system/Button';
+import { useEngineDraft } from '../drafts/draftStore';
 
 type YoloIntent = { value?: boolean; saving: boolean; error: string };
 const idleIntent: YoloIntent = { saving: false, error: '' };
@@ -23,7 +24,7 @@ export function SessionOptions({ session, disabled, onSnapshot, graphControl }: 
   graphControl?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useEngineDraft(`ui.sessionLibrary:${session.id}`, false);
   const key = `${ENGINE_URL}/${session.id}`;
   const subscribe = useCallback((listener: () => void) => {
     let set = listeners.get(key);

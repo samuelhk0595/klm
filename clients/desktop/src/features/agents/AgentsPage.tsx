@@ -12,11 +12,12 @@ import { request } from '../../engine';
 import { authoringPath, type AgentFile } from '../graphs/files';
 import { effortLabel } from '../graphs/agent-node';
 import './agents.css';
+import { useEngineDraft } from '../drafts/draftStore';
 
 export function AgentsPage({ projectId, agents, onChanged }: { projectId: string; agents: AgentFile[]; onChanged: () => Promise<void> }) {
   const [search, setSearch] = useState('');
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const [editing, setEditing] = useState<AgentFile | 'new' | null>(null);
+  const [editing, setEditing] = useEngineDraft<AgentFile | 'new' | null>(`ui.agents:${projectId}.editing`, null);
   const [deleting, setDeleting] = useState<AgentFile | null>(null);
   const [blocked, setBlocked] = useState<AgentFile | null>(null);
   const [blockedAction, setBlockedAction] = useState<'delete' | 'disable'>('disable');
@@ -47,9 +48,9 @@ export function AgentsPage({ projectId, agents, onChanged }: { projectId: string
           <MenuItem role="menuitem" className="agent-delete-action" onClick={() => { setOpenMenu(null); if (agent.graphReferences?.length) { setBlockedAction('delete'); setBlocked(agent); } else setDeleting(agent); }}><Trash2 />Delete</MenuItem>
         </Menu>} />
     </li>)}</ul> : <p className="agents-empty" role="status">{query ? 'No agents found' : 'No agents yet'}</p>}
-    {editing && <AgentEditorDialog agent={editing === 'new' ? undefined : editing} agents={agents} onClose={() => setEditing(null)} onSave={async draft => {
+    {editing && <AgentEditorDialog key={editing === 'new' ? 'new' : editing.id} agent={editing === 'new' ? undefined : editing} agents={agents} onClose={() => setEditing(null)} onSave={async (draft, revision) => {
       const old = editing === 'new' ? undefined : editing;
-      await request(`${base}/agents${old ? `/${encodeURIComponent(old.id)}` : ''}`, old ? 'PATCH' : 'POST', { agent: { ...draft, enabled: old?.enabled ?? true }, revision: old?.revision ?? '' });
+      await request(`${base}/agents${old ? `/${encodeURIComponent(old.id)}` : ''}`, old ? 'PATCH' : 'POST', { agent: { ...draft, enabled: old?.enabled ?? true }, revision: revision ?? old?.revision ?? '' });
       await onChanged(); setEditing(null); setSearch('');
     }} />}
     {deleting && <DeleteAgentDialog agentName={deleting.name} onClose={() => { if (!pending) setDeleting(null); }} onConfirm={() => {

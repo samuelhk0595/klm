@@ -1,8 +1,10 @@
 import type { AuthoringCatalog, GraphFile } from './features/graphs/files';
-import { resolveEngineURL } from './platform';
+import { IS_DESKTOP, resolveEngineURL } from './platform';
 import { clientFetch } from './clientAuth';
 import type { ConversationCapabilities } from './features/library/api';
 import { engineIdentityGeneration } from './engineIdentity';
+import { beginLocalActivity } from './features/engines/localActivities';
+import { draftStorageReady } from './features/drafts/draftStore';
 
 export const ENGINE_URL = resolveEngineURL();
 export type Revision = string | number; // Numeric values are accepted only for existing local fixtures.
@@ -225,6 +227,9 @@ export class EngineRequestError extends Error {
 }
 
 export async function request<T>(path: string, method = 'GET', body?: unknown, timeoutMs = 15000, signal?: AbortSignal): Promise<T> {
+  if (IS_DESKTOP && method.toUpperCase() !== 'GET' && !draftStorageReady()) throw new DOMException('Engine workspace identity is not ready.', 'AbortError');
+  const finished = IS_DESKTOP && method.toUpperCase() !== 'GET' ? beginLocalActivity('Engine request') : undefined;
+  try {
   const identityGeneration = engineIdentityGeneration();
   if (body && typeof body === 'object' && (/\/automations(?:\/|$)/.test(path) || path === '/api/settings/engine' || path.endsWith('/capabilities'))) {
     const value = { ...body } as Record<string, unknown>;
@@ -261,6 +266,11 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, t
   }
   if (result === null) throw new Error('The engine returned an invalid JSON response. Retry the request.');
   return normalizeEngineResponse(path, result) as T;
+  } finally {
+    // Callers finish their synchronous acceptance/update continuations first.
+    // Editable save handlers and local queues additionally hold their own lease.
+    if (finished) setTimeout(finished, 0);
+  }
 }
 
 export function sessionMetadata(value: Partial<Session>): Session {

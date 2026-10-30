@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Button } from '../../design-system/Button';
 import { Textarea } from '../../design-system/Textarea';
 import { request } from '../../engine';
+import { flushDrafts, forgetDrafts, hasEngineDraft, useEngineDraft } from '../drafts/draftStore';
+import { IS_DESKTOP } from '../../platform';
+import { beginLocalActivity } from '../engines/localActivities';
 
 type AccessSettings = {
   allowedOrigins: string[];
@@ -27,23 +30,27 @@ function RestartEngineDialog({ onDecision }: { onDecision: (confirmed: boolean) 
 
 export function EngineAccessSettings() {
   const [settings, setSettings] = useState<AccessSettings>();
-  const [origins, setOrigins] = useState('');
-  const [proxies, setProxies] = useState('');
+  const [origins, setOrigins, clearOrigins] = useEngineDraft('form.access.origins', '');
+  const [proxies, setProxies, clearProxies] = useEngineDraft('form.access.proxies', '');
+  const [base, setBase] = useEngineDraft<Pick<AccessSettings, 'allowedOrigins' | 'trustedTlsProxies'> | undefined>('form.access.base', undefined);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [restarting, setRestarting] = useState(false);
+  const [restarting, setRestarting] = useEngineDraft('form.access.restarting', false);
 
-  function receive(next: AccessSettings) {
+  function receive(next: AccessSettings, confirmed = false) {
     setSettings(next);
     if (next.restarting) setRestarting(true);
-    setOrigins(next.allowedOrigins.join('\n'));
-    setProxies(next.trustedTlsProxies.join('\n'));
+    if (confirmed || !hasEngineDraft('form.access.origins')) setOrigins(next.allowedOrigins.join('\n'));
+    if (confirmed || !hasEngineDraft('form.access.proxies')) setProxies(next.trustedTlsProxies.join('\n'));
+    if (confirmed || !hasEngineDraft('form.access.base')) setBase({ allowedOrigins: next.allowedOrigins, trustedTlsProxies: next.trustedTlsProxies });
+    if (confirmed) { clearOrigins(next.allowedOrigins.join('\n')); clearProxies(next.trustedTlsProxies.join('\n')); }
   }
 
-  async function load() {
+  async function load(discard = false) {
+    if (discard && IS_DESKTOP) forgetDrafts('form.access');
     setLoading(true); setError('');
     try { receive(await request<AccessSettings>('/api/settings/access')); }
     catch (error) { setError(failure(error)); }
@@ -80,25 +87,32 @@ export function EngineAccessSettings() {
   async function save(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
+    const finished = beginLocalActivity('Saving engine access settings');
     setSaving(true); setError(''); setSaved(false);
     try {
+      await flushDrafts();
+      if (base && hasEngineDraft('form.access.base')) {
+        const latest = await request<AccessSettings>('/api/settings/access');
+        if (JSON.stringify([base.allowedOrigins, base.trustedTlsProxies]) !== JSON.stringify([latest.allowedOrigins, latest.trustedTlsProxies])) throw new Error('Engine access settings changed. Reload settings before saving this draft.');
+      }
       receive(await request<AccessSettings>('/api/settings/access', 'PATCH', {
         allowedOrigins: entries(origins), trustedTlsProxies: entries(proxies),
-      }));
+      }), true);
       setSaved(true);
     } catch (error) { setError(failure(error)); }
-    finally { setSaving(false); }
+    finally { setSaving(false); finished(); }
   }
 
   async function restart(confirmed: boolean) {
     setConfirming(false);
     if (!confirmed || busy) return;
+    const finished = beginLocalActivity('Requesting engine restart');
     setSaving(true); setError('');
     try {
       await request('/api/engine/restart', 'POST', { confirmInterrupt: true });
       setRestarting(true);
     } catch (error) { setError(`${failure(error)} Restart delivery may be unconfirmed; reload settings before retrying.`); }
-    finally { setSaving(false); }
+    finally { setSaving(false); finished(); }
   }
 
   return <section aria-labelledby="engine-access-title">
@@ -111,7 +125,7 @@ export function EngineAccessSettings() {
         <Textarea id="engine-trusted-proxies" rows={4} maxLength={8192} placeholder="192.168.1.10/32" value={proxies} disabled={busy || !settings} autoCapitalize="none" autoCorrect="off" spellCheck={false} onChange={event => { setProxies(event.target.value); setSaved(false); }} />
       </div>
       <p className="muted">One entry per line. Saved changes take effect after restarting the engine.</p>
-      {error && <p className="form-error" role="alert">{error} <Button size="sm" disabled={busy} onClick={() => void load()}>Reload settings</Button></p>}
+      {error && <p className="form-error" role="alert">{error} <Button size="sm" disabled={busy} onClick={() => void load(true)}>{IS_DESKTOP ? 'Discard and reload' : 'Reload settings'}</Button></p>}
       {saved && <p className="settings-saved" role="status">Saved</p>}
       {settings?.restartRequired && !restarting && <p role="status">Restart required</p>}
       {restarting && <p role="status">Restarting engine...</p>}

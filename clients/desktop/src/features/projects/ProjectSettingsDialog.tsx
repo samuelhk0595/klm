@@ -8,6 +8,7 @@ import { WebhooksSettings } from '../webhooks/WebhooksSettings';
 import { ProjectTaskConnections } from '../activity-board/ProjectTaskConnections';
 import type { ActivityBoardState } from '../activity-board/useActivityBoard';
 import './project-settings.css';
+import { useEngineDraft } from '../drafts/draftStore';
 
 export type ProjectSettingsSection = 'general' | 'webhooks' | 'tasks' | 'automations';
 
@@ -23,7 +24,7 @@ export function ProjectSettingsDialog({ project, sessions, onSave, onRemove, onC
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
-  const [section, setSection] = useState<ProjectSettingsSection>(initialSection);
+  const [section, setSection] = useEngineDraft<ProjectSettingsSection>(`ui.projectSettingsSection:${project.id}`, initialSection);
   const [busy, setBusy] = useState(false);
   const [sessionError, setSessionError] = useState('');
   async function openSession(id: string) {

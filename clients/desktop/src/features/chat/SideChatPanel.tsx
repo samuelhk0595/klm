@@ -12,6 +12,7 @@ import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { SessionStatusBar } from './SessionStatusBar';
 import { PendingSubmission, type LocalSubmission } from './PendingSubmission';
+import { IS_DESKTOP } from '../../platform';
 
 const minimumSideWidth = 304;
 const minimumMainWidth = 400;
@@ -116,7 +117,7 @@ export function SideChatPanel({ session, project, harnesses, draft, sources, sub
         </fieldset>}
         <PendingSubmission items={submissions} onRestore={onRestoreSubmission} onRetry={onRetrySubmission} />
         <MessageQueue key={`queue/${session.id}`} session={session} disabled={disconnected || pending} onSnapshot={onSnapshot} onInterrupt={onInterrupt} />
-        <MessageComposer key={session.id} projectId={session.projectId} placeholder="Message the side agent" draft={draft} onDraftChange={onDraftChange} onSend={onSend} onStop={onStop} disabled={disconnected || pending} running={running}
+        <MessageComposer key={session.id} clearOnSend={!IS_DESKTOP} projectId={session.projectId} placeholder="Message the side agent" draft={draft} onDraftChange={onDraftChange} onSend={onSend} onStop={onStop} disabled={disconnected || pending} running={running}
           modelControl={<ModelPicker key={`${session.id}/${session.harness}`} session={session} disabled={disabled} optionsDisabled={disconnected || pending} onSave={onModel} onSnapshot={onSnapshot} />} />
         <SessionStatusBar session={session} side />
       </div>}

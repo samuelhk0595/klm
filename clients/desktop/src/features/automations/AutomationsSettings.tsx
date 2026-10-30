@@ -3,20 +3,27 @@ import { AlertCircle, ArrowLeft, ArrowUpRight, CalendarClock, Check, ChevronRigh
 import { Button } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import { Select } from '../../design-system/Select';
-import { request, type Project, type Session } from '../../engine';
+import { EngineRequestError, request, type Project, type Session } from '../../engine';
 import { AutomationEditor } from './AutomationEditor';
 import { automationPath, relativeNextRun, type Automation, type AutomationList, type AutomationRunLink } from './api';
 import { scheduledDate, sessionSummary, triggerSummary } from './presentation';
 import './automations.css';
+import { bindDraftDiscard, flushDrafts, useEngineDraft } from '../drafts/draftStore';
+import { IS_DESKTOP } from '../../platform';
+import { releaseRunNowAttempt } from './runNowAttempt';
+import { beginLocalActivity } from '../engines/localActivities';
 
 const failure = (error: unknown) => error instanceof Error ? error.message : 'Could not update automations.';
 const empty = (projectId: string): Automation => ({ id: '', projectId, revision: 0, operationId: crypto.randomUUID(), name: '', prompt: '', mode: 'schedule', enabled: true, parallel: false, harness: 'opencode', model: '', effort: '', yolo: false, graphs: [], selection: { skills: [], mcpConnections: [] }, topicId: '', schedule: { time: '09:00', recurrence: 'daily', everyDays: 2, weekdays: [1], monthDay: 1 }, afterSequence: 0 });
 
 export function AutomationsSettings({ project, sessions, onOpenSession, onBusyChange }: { project: Project; sessions: Session[]; onOpenSession: (id: string) => void; onBusyChange: (busy: boolean) => void }) {
+  const forgetDrafts = bindDraftDiscard();
   const [list, setList] = useState<AutomationList>();
-  const [selected, setSelected] = useState<Automation>();
-  const [editing, setEditing] = useState(false);
-  const [error, setError] = useState('');
+  const [selected, setSelected] = useEngineDraft<Automation | undefined>(`ui.automation:${project.id}.selected`, undefined);
+  const [editing, setEditing] = useEngineDraft(`ui.automation:${project.id}.editing`, false);
+  const [error, setError] = useEngineDraft(`form.automationError:${project.id}`, '');
+  const runKey = `form.automationRun:${project.id}`;
+  const [runOperation, setRunOperation] = useEngineDraft<{ id: string; revision: Automation['revision']; operationId: string } | undefined>(runKey, undefined);
   const [loadError, setLoadError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
@@ -36,7 +43,7 @@ export function AutomationsSettings({ project, sessions, onOpenSession, onBusyCh
     finally { if (sequence === requestSequence.current) setLoadingList(false); }
   }
   useEffect(() => {
-    if (!busy && !editing) void load();
+    if (!busy && (!editing || !list)) void load();
     const timer = window.setInterval(() => { if (!document.hidden && !busy && !editing) { setClock(Date.now()); void load(); } }, 15000);
     return () => { ++requestSequence.current; window.clearInterval(timer); };
   }, [project.id, busy, editing, listOffset]);
@@ -44,20 +51,23 @@ export function AutomationsSettings({ project, sessions, onOpenSession, onBusyCh
   useEffect(() => { heading.current?.focus(); }, [selected?.id, editing]);
   async function action(task: () => Promise<unknown>, success: string) {
     if (busy) return;
+    const finished = beginLocalActivity('Updating automation');
     setBusy(true); setError(''); setNotice('');
     try { await task(); setNotice(success); }
     catch (error) { setError(failure(error)); }
-    finally { setBusy(false); }
+    finally { setBusy(false); finished(); }
   }
   async function save(v: Automation, newTopic?: { name: string; color: string }) {
     if (busy) return false;
+    const finished = beginLocalActivity('Saving automation');
     setBusy(true); setError(''); setNotice('');
     try {
+      await flushDrafts();
       const saved = await request<Automation>(automationPath(project.id, v.id), v.id ? 'PATCH' : 'POST', { automation: v, ...(newTopic ? { newTopic } : {}) }, 65000);
       setList(current => current ? { ...current, items: current.items.map(row => row.automation.id === saved.id ? { ...row, automation: saved } : row) } : current);
       setSelected(saved); setEditing(false); setNotice(v.id ? 'Changes saved.' : 'Automation created.'); return true;
     } catch (error) { setError(failure(error)); return false; }
-    finally { setBusy(false); }
+    finally { setBusy(false); finished(); }
   }
   function add() { setSelected(empty(project.id)); setEditing(true); setError(''); setNotice(''); }
   function back() { setSelected(undefined); setEditing(false); setConfirmDelete(false); setError(''); setNotice(''); }
@@ -67,7 +77,22 @@ export function AutomationsSettings({ project, sessions, onOpenSession, onBusyCh
   const currentSession = sessions.find(session => session.id === current?.sessionId);
   const issue = error || loadError;
   const toggle = (v: Automation) => void action(() => request(automationPath(project.id, v.id), 'PATCH', { enabled: !v.enabled, revision: v.revision }), `${v.name} ${v.enabled ? 'paused' : 'activated'}.`);
-  const run = (v: Automation) => void action(() => request(`${automationPath(project.id, v.id)}/run-now`, 'POST', { revision: v.revision, operationId: crypto.randomUUID() }), `Run requested for ${v.name}.`);
+  const run = (v: Automation) => void action(async () => {
+    const pending = IS_DESKTOP ? runOperation : undefined;
+    if (pending && pending.id !== v.id) throw new Error('Resolve the previous run request before requesting another run.');
+    const operation = pending ?? { id: v.id, revision: v.revision, operationId: crypto.randomUUID() };
+    let dispatched = false;
+    const release = () => { setRunOperation(undefined); forgetDrafts(runKey); };
+    try {
+      setRunOperation(operation); await flushDrafts();
+      dispatched = true;
+      await request(`${automationPath(project.id, operation.id)}/run-now`, 'POST', { revision: operation.revision, operationId: operation.operationId });
+      release();
+    } catch (error) {
+      if (releaseRunNowAttempt(!!pending, dispatched, error instanceof EngineRequestError ? error.status : undefined, error instanceof EngineRequestError ? error.message : undefined)) release();
+      throw error;
+    }
+  }, `Run requested for ${v.name}.`);
 
   return <section className={`automations-settings${editing ? ' is-editing' : ''}`}>
     <header className="automation-page-heading">
