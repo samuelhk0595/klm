@@ -10,9 +10,9 @@ load, and a full reload when switching. The approved feature plan is
 - CP1 approved after the coordinator's static inspection; no runtime acceptance implied.
 - CP2a, including R1, approved by the coordinator's static inspection.
 - CP2b and its R1/R2 corrections approved by coordinator static inspection.
-- CP3 approved by coordinator static inspection; PR #40 remains OPEN DRAFT.
+- CP3 approved by coordinator static inspection; PR #40 review readiness authorized after directed CP4 completion.
 - First independent CP4 native Playwright round completed on `72a959f9`, with explicit coverage limits and one locator defect, CP4-01.
-- CP4-01 correction implemented; coordinator review and retest of the new commit are pending. This is not final acceptance.
+- CP4-01 corrected and reviewed; focused native retest PASS on `d2519de1`. Directed CP4 is concluded with documented coverage limits, not final human acceptance.
 - Worktree: `C:\Users\Samuel\Documents\Projects\Personal\klm-multi-engine`.
 - Branch: `feat/desktop-multi-engine`.
 - Base: `952ff2bffae89d9b646ea9202b0187b65c0b5069`, head of PR #39,
@@ -467,14 +467,16 @@ automatic rebase, deployment or installer is authorized by publication.
 ## CP4 — Independent native round and correction CP4-01
 
 The coordinator approved CP3 by static inspection, then released the independent
-tester. `MULTI_ENGINE_PLAYWRIGHT_VALIDATION.md` is that tester's preserved report
-for source **`72a959f9f31b87ceac6134e7eadc4d0999dad4ca` only**. It records real
-Windows/Tauri/WebView2 Local DEV/VPS pairing, switching, stream teardown, native
-reopen, representative DPAPI/form data and selected failure/recovery observations.
+tester. `MULTI_ENGINE_PLAYWRIGHT_VALIDATION.md` preserves the initial round for
+**`72a959f9f31b87ceac6134e7eadc4d0999dad4ca`** and the separate focused retest for
+**`d2519de1451d14e86c628b5e9e93ad425c04c8ff`**. It records real Windows/Tauri/
+WebView2 Local DEV/VPS pairing, switching, stream teardown, native reopen,
+representative DPAPI/form data and selected failure/recovery observations.
 Its limits remain explicit: actual lost-message ACK/provider work, recording/OS
 picker/transcription guards, several form variants/revisions/database replacement
 and broad client regressions were not passed by inference. No new-SHA acceptance
-is claimed by including the report in a later commit.
+or complete-feature acceptance is claimed by including the report in a later
+documentation commit.
 
 One confirmed defect was forwarded as CP4-01: generic Project settings opening
 from the sidebar always wrote General over the project's saved section. Field
@@ -488,9 +490,25 @@ Connections explicitly passes `'tasks'`. Web/mobile generic opening still starts
 General, matching their existing behavior. No form field/draft/base/API behavior
 was changed.
 
-`npx tsc --noEmit` and `git diff --check` passed for this correction. Verification
-is limited to TypeScript/diff inspection. The same tester
-must be released by the coordinator to repeat the corrected scenario; the
-implementation session has not run app/runtime/Playwright or contacted the tester.
+`npx tsc --noEmit` and `git diff --check` passed for the correction. After coordinator
+code review, the same tester was expressly released to run its focused native
+retest at `d2519de1`. Tasks/Webhooks/Automations after real Local DEV -> VPS ->
+Local DEV, generic reopen without switching, explicit Tasks Connections override
+and General with no saved preference all passed. CP4-01 is resolved for those
+exercised paths; no further product correction was reported. The initial failure
+and its source linkage remain historical evidence, not rewritten as a pass.
+
+Both directed rounds are concluded and the tester stopped its owned processes.
+The implementation session did not run app/runtime/Playwright or contact the
+tester. Final consolidation changes documents only and does not expand the
+tested scenarios: lost message ACK, real remote-work continuity, audio/native
+pickers/transcription, remaining editor variants, revision/missing-entity/database
+replacement/migration and broad browser/mobile/installer/LAN acceptance remain
+unverified as listed in the report. Human acceptance is pending. PR review-ready
+status does not authorize merge, deployment, installation or release.
+
+No typecheck/build/test was repeated for the documentation-only consolidation;
+diff/whitespace inspection is the finalization check. The tested product source
+is unchanged from `d2519de1`.
 The native build's reported Cargo.toml EOL-only status artifact is left untouched
-and is not part of this correction's staging/commit.
+and is not part of the correction or documentation-finalization staging/commits.

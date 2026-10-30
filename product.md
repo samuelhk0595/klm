@@ -572,8 +572,16 @@ On native desktop, `VITE_ENGINE_URL` seeds a genuinely absent registry; a saved
 selection takes precedence afterward. Browser/mobile retain the fixed override
 semantics. Dev/release app identities and credentials remain separate. Implementation
 and lightweight checks are tracked in `MULTI_ENGINE_SWITCHING_IMPLEMENTATION_PROGRESS.md`
-and `MULTI_ENGINE_DRAFTS_COVERAGE.md`; real native/Playwright and human acceptance
-remain pending. `MULTI_ENGINE_DEV_VALIDATION.md` describes an isolated DEV-only probe.
+and `MULTI_ENGINE_DRAFTS_COVERAGE.md`. Directed real Windows/Tauri/WebView2 Playwright
+exercised authenticated Local DEV ↔ VPS switching, keyring/DPAPI retention with
+representative drafts, transport teardown and selected failure/recovery paths.
+The Project Settings locator defect was corrected and passed a focused native
+retest. [MULTI_ENGINE_PLAYWRIGHT_VALIDATION.md](MULTI_ENGINE_PLAYWRIGHT_VALIDATION.md)
+preserves both tested SHAs and limits:
+actual lost-message ACK/work continuity, audio/native pickers/transcription,
+remaining variants and broad client/installation acceptance are not inferred to
+pass. Human acceptance remains pending. `MULTI_ENGINE_DEV_VALIDATION.md` describes
+the isolated DEV-only procedure.
 
 The engine and Tauri 2 desktop client are installed separately. `klm start` starts
 the engine in the background and returns after readiness; `klm stop` requests

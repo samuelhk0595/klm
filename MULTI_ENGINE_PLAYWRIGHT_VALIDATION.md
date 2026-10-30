@@ -3,6 +3,12 @@
 Date: 2026-10-30. Tester session: `2f206511d102aa6338998a076e337d96`.
 Coordinator: `bd8d7990868ce6bf1b3d22bab9187734`.
 
+**Current CP4-01 status: PASS on focused native retest at
+`d2519de1451d14e86c628b5e9e93ad425c04c8ff`.** The initial-round findings and
+coverage below remain historical evidence for `72a959f9`; the separate retest
+section at the end records the correction. Previously unverified scenarios remain
+unverified.
+
 ## Result
 
 **Directed validation completed, with one UI locator defect and explicit coverage
@@ -225,3 +231,75 @@ coordinator must release any corrected commit before the tester retests it.
   `1ed087fc858962dbda36d85ce2c3c98509cabe99`. No Cargo dependency/feature/content
   change or staged change was introduced. This status artifact is reported rather
   than hidden by staging or changing Git configuration.
+
+## Focused CP4-01 retest — d2519de1451d14e86c628b5e9e93ad425c04c8ff
+
+Date: 2026-10-30. Same independent tester and coordinator as above. Coordinator
+expressly released this focused retest after reviewing the correction. No matrix
+rerun, product fix, full suite, additional agent, commit/push or PR-ready action.
+
+**Result: PASS. CP4-01 is resolved for the exercised native UI paths.** There were
+no product failures in this focused round. This updates the defect's current
+status without changing the initial failure or claiming broader feature acceptance.
+
+### Environment / current frontend proof
+
+- Worktree/branch unchanged; HEAD checked before and after scenarios:
+  `d2519de1451d14e86c628b5e9e93ad425c04c8ff`.
+- Same dedicated native app `dev.klm.desktop.multi-engine-probe`, WebView2 profile,
+  native keyring/DPAPI and isolated engine data from the initial round.
+- All four probe ports were free before restarting. Only owned processes were
+  started: DEV engine PID **19552** on 17331; Vite PID **18964** on loopback 5173;
+  native PID **18652** / Focus 17332; its WebView2 CDP owner **44016** on loopback
+  9222. Ownership/executable paths were checked before cleanup.
+- Reused the existing DEV engine/native executables because this correction changed
+  frontend `App.tsx`, not Go/Rust. The native page used Vite's current source modules,
+  **not the old bundled `dist`**. Native app/path IPC and `__TAURI_INTERNALS__` were
+  checked again.
+- Loaded app module URL: `http://127.0.0.1:5173/src/App.tsx`. Both raw current source
+  and the served transformed app module contained the new optional-section and
+  saved-preference handling. Source file SHA-256:
+  `f0b6a0fffcd13e6ad8fe8ad5bffcbd560ac99821ed8acfc92cf3a00cf96e3338`.
+- Existing credentials authenticated both real endpoints; no new pairing, SSH,
+  VPS deployment/configuration/service change or auth bypass was needed.
+- Local database identity remained `3f9136a9da08becfde15669bf096d948`; VPS identity
+  remained `a966288835000cc591796081871f8fd3`. The six engine switches recorded
+  authenticated state responses with HTTP 200 and the correct destination identity.
+
+Evidence directory remains `<probe>` as specified above. New artifacts are
+prefixed `focused-`; initial-round JSON/screenshots were not overwritten.
+
+### Directed steps and outcomes
+
+| Check | Steps | Result / new evidence |
+| --- | --- | --- |
+| Exact CP4-01 reproduction | Local fixture Project settings → Tasks; retained connection name, repository and synthetic PAT; X; real Local → VPS → Local; open Project settings using sidebar. Did **not** click Tasks after reopening. | **PASS:** Tasks was already selected and all three fields exactly matched. `focused-sections.json`, `focused-tasks-after-roundtrip.png`. |
+| Generic entry without switch | Close with X and reopen using sidebar. Also repeated after selecting Webhooks and Automations. | **PASS:** each last section was retained. `focused-sections.json`. |
+| Not hardcoded to Tasks | Independently select Webhooks and Automations, close, real Local → VPS → Local, reopen using sidebar. | **PASS:** each respective section and its existing name draft returned. Six total document reloads across the three roundtrips. `focused-webhooks-after-roundtrip.png`, `focused-automations-after-roundtrip.png`, `focused-sections.json`. |
+| Explicit section entry still overrides | Confirm saved section was `automations`; KLM Agent → Open tasks → select CP4 Native Fixture → Connections. | **PASS:** Project settings opened Tasks with the existing connection draft; subsequent generic sidebar entry also respected that intentional Tasks selection. `focused-explicit-entry.json`, `focused-explicit-connections.png`. |
+| No saved preference defaults to General | Register a fresh disposable **local** `CP4 General Fallback` project under the probe directory. Assert its section-preference key was absent before opening. Select it and open Project settings via sidebar. | **PASS:** General selected, correct project name. `focused-general-fallback.json`, `focused-general-fallback.png`. No existing project's preference/data was deleted or corrupted. |
+
+New fallback fixture ID: `3a05903e8c4dc9027007e98d17189e06`, directory
+`<probe>\project-general-fallback`. Registration used the authenticated isolated
+Local API; no session/job/provider was created. It remains as disposable evidence.
+The original local fixture drafts remained intact. The last selected engine was
+Local DEV, and the selected project was restored to CP4 Native Fixture.
+
+No form save/discovery/Apply/answer/OAuth/execution or VPS mutation was made by these
+checks. Local existing-side bootstrap POSTs were recorded separately from the one
+explicit local fallback-project registration. Historical untested ACK-loss, running
+job, native picker/audio, other editor variants and broader acceptance limits above
+are unchanged; they were not inferred to pass from this fix.
+
+### Retest cleanup
+
+All focused scenarios have stopped. The absolute DEV binary, with the same explicit
+isolated data/skills/prompts environment and no auth-bypass flag, reported
+`KLM engine stopped.` Only owned native PID 18652 and its WebView2 descendants and
+Vite PID 18964 and its children were terminated. The installed/principal local
+engine and VPS were untouched. Evidence/profile/DPAPI and local fixture data remain
+for reproduction. No native/browser simulation was substituted for this retest.
+Final query found no remaining PIDs 19552/18964/18652 or listeners on
+17331/17332/5173/9222. HEAD remained the exact retest SHA. The report-only
+`git diff --check` passed (normal LF/CRLF notice); the pre-existing Cargo.toml
+status artifact remains content-diff-empty. No product-source diff was added.

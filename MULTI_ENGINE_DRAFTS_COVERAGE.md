@@ -1,8 +1,11 @@
 # Native editable-state coverage
 
 CP2b implementation matrix, 2026-10-30, approved by coordinator static inspection
-including its corrections. CP3 additions await inspection and later runtime/human
-acceptance. Paths below are relative to `clients/desktop/src/`.
+including its corrections. CP3 passed coordinator static inspection. Independent
+directed native validation and CP4-01 retest are recorded with their actual subset
+and limits in `MULTI_ENGINE_PLAYWRIGHT_VALIDATION.md`; they do not establish every
+field/variant or final human acceptance. Paths below are relative to
+`clients/desktop/src/`.
 
 All keys are inside the same DPAPI document scoped to desktop profile/app ID,
 canonical endpoint and confirmed database identity. They are not web-storage keys.
@@ -76,8 +79,9 @@ another. No historical-version log is stored.
 
 ## Boundaries and pending work
 
-- CP3 is implemented and awaiting static inspection; independent native/runtime
-  validation is still pending. Pre-auth forms never hydrate entity drafts before
+- CP3 is implemented and statically approved. Directed native rounds concluded
+  with CP4-01 corrected/retested; unexercised paths and human acceptance remain
+  pending. Pre-auth forms never hydrate entity drafts before
   auth/DB confirmation and do not replace the active entity namespace.
 - Mutation/audio/layout guards now coordinate the global transition. They do not
   introduce universal server timeouts, replay or a receipt API. Native credential
@@ -100,9 +104,12 @@ another. No historical-version log is stored.
 
 ## Evidence
 
-`npx tsc --noEmit` and `git diff --check` passed. No application,
-Playwright, live engine, VPS, native storage call or full test suite was run.
-This matrix records implementation coverage, not runtime acceptance.
+Implementation checks `npx tsc --noEmit` and `git diff --check` passed. The independent
+tester subsequently exercised real native/live paths at `72a959f9` and focused
+CP4-01 retest paths at `d2519de1`. See `MULTI_ENGINE_PLAYWRIGHT_VALIDATION.md` for
+outcomes, environment and explicit unverified rows. This matrix is implementation
+coverage, not a claim that every field/variant passed runtime acceptance. No full
+suite or installation acceptance is claimed.
 
 CP2b correction R1/R2 additionally passed the two focused pure-function files
 `draftShape.test.ts` / `runNowAttempt.test.ts` (nine cases). They cover valid
