@@ -1027,10 +1027,16 @@ export function App() {
     navigation.current += 1;
     setEditingProject(IS_DESKTOP ? { id: target.id, name: target.name, folder: target.folder, icon: target.icon, folders: [], archivedFolders: [] } : target); setSidebarOpen(false);
   }
-  function openProjectSettings(target: Project, section: ProjectSettingsSection = 'general') {
+  function openProjectSettings(target: Project, section?: ProjectSettingsSection) {
     navigation.current += 1;
-    if (IS_DESKTOP) setDraftValues({ [`ui.projectSettingsSection:${target.id}`]: section });
-    setProjectSettingsSection(section); setProjectSettingsId(target.id); setSidebarOpen(false);
+    let nextSection = section ?? 'general';
+    if (IS_DESKTOP) {
+      const key = `ui.projectSettingsSection:${target.id}`;
+      const saved = readDraftValue<unknown>(key, undefined);
+      if (section === undefined && (saved === 'general' || saved === 'webhooks' || saved === 'tasks' || saved === 'automations')) nextSection = saved;
+      else setDraftValues({ [key]: nextSection });
+    }
+    setProjectSettingsSection(nextSection); setProjectSettingsId(target.id); setSidebarOpen(false);
   }
   function openProjectPicker() {
     navigation.current += 1;

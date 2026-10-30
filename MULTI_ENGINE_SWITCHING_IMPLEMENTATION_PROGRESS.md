@@ -10,7 +10,9 @@ load, and a full reload when switching. The approved feature plan is
 - CP1 approved after the coordinator's static inspection; no runtime acceptance implied.
 - CP2a, including R1, approved by the coordinator's static inspection.
 - CP2b and its R1/R2 corrections approved by coordinator static inspection.
-- CP3 UI/transition/recovery implemented; awaiting coordinator inspection and later independent runtime validation.
+- CP3 approved by coordinator static inspection; PR #40 remains OPEN DRAFT.
+- First independent CP4 native Playwright round completed on `72a959f9`, with explicit coverage limits and one locator defect, CP4-01.
+- CP4-01 correction implemented; coordinator review and retest of the new commit are pending. This is not final acceptance.
 - Worktree: `C:\Users\Samuel\Documents\Projects\Personal\klm-multi-engine`.
 - Branch: `feat/desktop-multi-engine`.
 - Base: `952ff2bffae89d9b646ea9202b0187b65c0b5069`, head of PR #39,
@@ -461,3 +463,34 @@ XDG and Git config remain unchanged. No hosts.yml/token/keyring content is read 
 copied. The coordinator confirmed account `samuelhk0595` and the same sole PR #39.
 Feature commit/DRAFT PR references belong to the checkpoint report. No merge,
 automatic rebase, deployment or installer is authorized by publication.
+
+## CP4 — Independent native round and correction CP4-01
+
+The coordinator approved CP3 by static inspection, then released the independent
+tester. `MULTI_ENGINE_PLAYWRIGHT_VALIDATION.md` is that tester's preserved report
+for source **`72a959f9f31b87ceac6134e7eadc4d0999dad4ca` only**. It records real
+Windows/Tauri/WebView2 Local DEV/VPS pairing, switching, stream teardown, native
+reopen, representative DPAPI/form data and selected failure/recovery observations.
+Its limits remain explicit: actual lost-message ACK/provider work, recording/OS
+picker/transcription guards, several form variants/revisions/database replacement
+and broad client regressions were not passed by inference. No new-SHA acceptance
+is claimed by including the report in a later commit.
+
+One confirmed defect was forwarded as CP4-01: generic Project settings opening
+from the sidebar always wrote General over the project's saved section. Field
+content remained stored and accessible by explicitly opening the right section.
+
+The correction changes only `App.tsx.openProjectSettings`: its section argument
+is now optional. Generic native opening reuses a valid per-project section, with
+General only when no valid preference exists. An explicit section still writes
+and opens that requested section. The sidebar passes only the project; Tasks
+Connections explicitly passes `'tasks'`. Web/mobile generic opening still starts
+General, matching their existing behavior. No form field/draft/base/API behavior
+was changed.
+
+`npx tsc --noEmit` and `git diff --check` passed for this correction. Verification
+is limited to TypeScript/diff inspection. The same tester
+must be released by the coordinator to repeat the corrected scenario; the
+implementation session has not run app/runtime/Playwright or contacted the tester.
+The native build's reported Cargo.toml EOL-only status artifact is left untouched
+and is not part of this correction's staging/commit.
