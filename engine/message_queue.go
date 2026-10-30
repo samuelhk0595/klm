@@ -407,6 +407,9 @@ func (p *adapter) finishSteering(id, failure string) error {
 
 // Called under app.mu, sharing the same one-turn reservation as ordinary sends.
 func (a *app) scheduleMessagesLocked() {
+	if a.harnessInstalling {
+		return
+	}
 	if a.store != nil {
 		a.scheduleSQLMessagesLocked()
 		return

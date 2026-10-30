@@ -71,6 +71,9 @@ func serveSQLiteEngine(dir string, listener net.Listener) (result error) {
 		}
 	}
 	a.harnesses, a.binaries = discoverHarnesses()
+	if err := a.startHarnessInstaller(); err != nil {
+		return err
+	}
 	auth, err := newClientAuthStorage(dir, store)
 	if err != nil {
 		return err

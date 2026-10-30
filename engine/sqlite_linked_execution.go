@@ -366,8 +366,11 @@ func (p *adapter) waitSQLConsultation(ctx context.Context, id string, reciprocal
 }
 
 func (a *app) scheduleSQLConsultationsLocked() {
+	if a.closing || a.storageErr != nil || a.harnessInstalling {
+		return
+	}
 	ids, err := sqliteQueryIDs(a.ctx, a.store.readers, `SELECT c.id FROM data_consultations c JOIN data_sessions s ON s.id=CASE WHEN c.status IN ('completed','failed','cancelled','interrupted') AND c.x_delivery='pending' THEN c.x_from ELSE c.x_to END LEFT JOIN data_projects p ON p.id=s.project_id LEFT JOIN data_sessions parent ON parent.id=s.parent_id LEFT JOIN data_topics t ON t.owner_id=s.project_id AND t.record_id=CASE WHEN s.role='side_agent' THEN parent.x_topicId ELSE s.x_topicId END
- WHERE (c.status='queued' OR c.status IN ('completed','failed','cancelled','interrupted') AND c.x_delivery='pending') AND (c.status<>'queued' OR c.created_at>=?) AND s.status<>'running' AND s.x_archived<>'true' AND coalesce(t.x_archived,'')<>'true' AND (s.role<>'side_agent' OR parent.x_archived<>'true') AND (s.role='general_agent' OR p.x_removed<>'true') ORDER BY c.position LIMIT 100`, sqliteTimeKey(time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339Nano)))
+ WHERE (c.status='queued' OR c.status IN ('completed','failed','cancelled','interrupted') AND c.x_delivery='pending') AND s.status<>'running' AND s.x_archived<>'true' AND coalesce(t.x_archived,'')<>'true' AND (s.role<>'side_agent' OR parent.x_archived<>'true') AND (s.role='general_agent' OR p.x_removed<>'true') ORDER BY c.position LIMIT 100`)
 	if err != nil {
 		a.failStorageLocked(err)
 		return
@@ -384,6 +387,10 @@ func (a *app) scheduleSQLConsultationsLocked() {
 			st := &sqliteSessionTx{ctx: a.ctx, tx: tx}
 			if err := decodeSQLiteRecord(a.ctx, tx, "consultations", key, 1<<20, &c); err != nil {
 				return err
+			}
+			if c.Status == "queued" && a.consultationExpiredLocked(c, time.Now()) {
+				skip = true
+				return nil
 			}
 			id := c.To
 			delivery = consultationTerminal(c.Status) && c.Delivery == "pending"

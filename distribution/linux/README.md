@@ -5,7 +5,11 @@ Release Linux amd64 supports the existing `klm start`, `stop`, `pair`, and
 control uses a same-UID Unix socket, not HTTP or a PID file. Other non-Windows
 platforms remain unsupported. This is engine/API delivery only: **no frontend
 server, harness installation, provider login, Linux graph containment or ai-jail**.
-Existing Linux execution and protected-secret-storage gates remain in place.
+Ordinary managed chats now have a nonroot subreaper/pidfd lifetime implementation;
+its focused native/runtime and real messaging acceptance remains pending. Graph
+execution and protected MCP secret storage remain unavailable on Linux. This adds
+no cgroup delegation, syscall filter, namespace or host privilege. See
+`../../LINUX_ORDINARY_TURN_SUPPORT_HANDOFF.md` before publishing the candidate.
 
 ## Install privately first
 
@@ -16,7 +20,14 @@ route until protected local startup succeeds and API binding has been inspected.
 
 1. Verify the uploaded binary's SHA-256 against the implementer's final artifact.
    Install that release (not a dev-tag build) as root-owned `/opt/klm/bin/klm`,
-   mode 0755. No Go/Node installation is needed on the VPS.
+   mode 0755. Internal `engine/prompts/*.md` are embedded during `go build`
+   (including `-trimpath`), so the binary needs no source checkout or prompts
+   directory. Optional editable prompts go in `/opt/klm/bin/prompts`; an explicit
+   `KLM_PROMPTS_DIR` is authoritative and must contain every required prompt.
+   Empty/unreadable prompt files fail preparation, never omit the guidance.
+   Embedding covers prompts only: the general agent's internal skill still needs
+   `engine/skills` packaged as `/opt/klm/bin/skills`, or an absolute `KLM_SKILLS_DIR`.
+   No Go/Node installation is needed for the engine itself on the VPS.
 2. If absent, create a dedicated system account:
    `useradd --system --user-group --home-dir /var/lib/klm --shell /usr/sbin/nologin klm`.
    Inspect an existing `klm` account for compatibility instead of changing it blindly.

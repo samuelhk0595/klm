@@ -143,7 +143,7 @@ func (st *sqliteSessionTx) prepareInterrupt(id, messageID string, running bool) 
 }
 
 func (a *app) scheduleSQLMessagesLocked() {
-	if a.closing || a.storageErr != nil {
+	if a.closing || a.storageErr != nil || a.harnessInstalling {
 		return
 	}
 	ids, err := sqliteQueryIDs(a.ctx, a.store.readers, `SELECT s.id FROM data_sessions s LEFT JOIN data_projects p ON p.id=s.project_id LEFT JOIN data_sessions parent ON parent.id=s.parent_id

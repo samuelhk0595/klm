@@ -325,7 +325,7 @@ func syncConsultation(d *diskState, c *Consultation) {
 
 // Every background turn uses the same native session and normal execution adapters.
 func (a *app) scheduleLinkedLocked() {
-	if a.closing || a.storageErr != nil {
+	if a.closing || a.storageErr != nil || a.harnessInstalling {
 		return
 	}
 	if a.store != nil {
@@ -339,6 +339,9 @@ func (a *app) scheduleLinkedLocked() {
 	a.scheduleGraphActivitiesLocked()
 	a.scheduleGraphNotificationsLocked()
 	for _, request := range a.state.Consultations {
+		if request.Status == "queued" && a.consultationExpiredLocked(request, time.Now()) {
+			continue
+		}
 		id, delivery := request.To, false
 		if consultationTerminal(request.Status) && request.Delivery == "pending" {
 			id, delivery = request.From, true
@@ -486,6 +489,10 @@ func (a *app) expireConsultations() {
 			return
 		case <-ticker.C:
 			a.mu.Lock()
+			if a.harnessInstalling {
+				a.mu.Unlock()
+				continue
+			}
 			if a.store != nil {
 				_ = a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
 					ids, err := sqliteQueryIDs(st.ctx, st.tx, `SELECT id FROM data_consultations WHERE status IN ('queued','answering') AND created_at<? ORDER BY created_at LIMIT 100`, sqliteTimeKey(time.Now().Add(-10*time.Minute).UTC().Format(time.RFC3339Nano)))
@@ -496,6 +503,9 @@ func (a *app) expireConsultations() {
 						var c Consultation
 						if err := decodeSQLiteRecord(st.ctx, st.tx, "consultations", id, 1<<20, &c); err != nil {
 							return err
+						}
+						if !a.consultationExpiredLocked(c, time.Now()) {
+							continue
 						}
 						c.Status, c.Error, c.UpdatedAt = "failed", "Consultation timed out after ten minutes.", now()
 						if err := st.putRoot("consultations", id, c); err != nil {
@@ -521,8 +531,7 @@ func (a *app) expireConsultations() {
 				continue
 			}
 			for _, c := range a.state.Consultations {
-				created, _ := time.Parse(time.RFC3339Nano, c.CreatedAt)
-				if !consultationTerminal(c.Status) && time.Since(created) > 10*time.Minute {
+				if !consultationTerminal(c.Status) && a.consultationExpiredLocked(c, time.Now()) {
 					_ = a.commitLocked(func(d *diskState) {
 						next := d.consultation(c.ID)
 						next.Status = "failed"

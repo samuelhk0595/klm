@@ -85,7 +85,7 @@ func (r *sessionRuntime) beginTurn() (bool, error) {
 		// infrastructure, even if the idle watcher has not run between turns.
 		if err := r.group.BeginTurn(); err != nil {
 			r.mu.Unlock()
-			return false, err
+			return false, errors.Join(err, r.shutdown())
 		}
 	}
 	if r.cancel != nil {
@@ -97,10 +97,10 @@ func (r *sessionRuntime) beginTurn() (bool, error) {
 		// Rotate only turn-scoped transports/profiles. The session Job also owns
 		// user workloads (browsers, servers, etc.) and must survive this boundary.
 		resources := runtimeShutdown{bridge: r.bridge, interactive: r.interactive, openCode: r.openCode}
-		_ = closeRuntimeResources(resources)
-		if resources.openCode != nil && resources.openCode.Alive() {
+		retireErr := closeRuntimeResources(resources)
+		if retireErr != nil || resources.openCode != nil && resources.openCode.Alive() {
 			r.mu.Unlock()
-			return false, errors.Join(errors.New("Could not retire the previous OpenCode server."), r.shutdown())
+			return false, errors.Join(errors.New("Could not confirm retirement of the previous managed profile."), retireErr, r.shutdown())
 		}
 		r.bridge, r.interactive, r.openCode = nil, nil, nil
 		r.openCodeKey = ""
@@ -112,6 +112,7 @@ func (r *sessionRuntime) beginTurn() (bool, error) {
 
 func (r *sessionRuntime) prepare(cmd *exec.Cmd) (*ownedProcess, error) {
 	r.mu.Lock()
+	created := false
 	if r.closed {
 		r.mu.Unlock()
 		return nil, context.Canceled
@@ -128,14 +129,69 @@ func (r *sessionRuntime) prepare(cmd *exec.Cmd) (*ownedProcess, error) {
 			return nil, err
 		}
 		r.group = group
+		created = true
 	}
 	group := r.group
 	r.mu.Unlock()
+	if created {
+		watchRuntimeGroup(group, r.supervisionFailed)
+	}
 	owner, err := prepareSessionOwnedProcess(cmd, group)
 	if err == nil {
 		r.publish()
 	}
 	return owner, err
+}
+
+// Loss of an idle supervisor is an observable failure too, not an indefinitely
+// retained "idle" runtime. Active adapters record their own native/teardown error.
+func (r *sessionRuntime) supervisionFailed(cause error) {
+	shutdownErr := r.shutdown()
+	a := r.app
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.runs[r.id] != nil {
+		return
+	}
+	message := errors.Join(cause, shutdownErr).Error()
+	if a.store != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = a.writeSQLLocked(ctx, func(st *sqliteSessionTx) error {
+			s, err := st.sessionMeta(r.id)
+			if err != nil {
+				return err
+			}
+			s.Status, s.UpdatedAt = "error", now()
+			if _, err := st.appendEvent(r.id, event("error", message)); err != nil {
+				return err
+			}
+			return st.putSessionMeta(s)
+		})
+	} else if a.state.session(r.id) != nil {
+		_ = a.commitLocked(func(d *diskState) {
+			s := d.session(r.id)
+			s.Status, s.UpdatedAt = "error", now()
+			s.Events = append(s.Events, event("error", message))
+		})
+	}
+}
+
+func (r *sessionRuntime) checkHealth() error {
+	r.mu.Lock()
+	group, closed, done := r.group, r.closed, r.shutdownDone
+	r.mu.Unlock()
+	if group != nil {
+		return runtimeGroupHealth(group)
+	}
+	if closed && done != nil {
+		<-done
+		r.mu.Lock()
+		err := r.shutdownErr
+		r.mu.Unlock()
+		return err
+	}
+	return nil
 }
 
 func (r *sessionRuntime) markInfrastructure() {
@@ -261,7 +317,7 @@ func (r *sessionRuntime) discardOpenCode(server *openCodeServer) {
 	server.Close()
 }
 
-func closeRuntimeInteractive(current *runtimeInteractive) {
+func closeRuntimeInteractive(current *runtimeInteractive) error {
 	_ = current.process.EndInput()
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
@@ -279,9 +335,13 @@ draining:
 		}
 	}
 	_ = current.process.Close()
+	// Deliberate native termination can have a nonzero exit status. Ownership
+	// confirmation is separate and must not be discarded with that exit metadata.
+	ownedErr := current.process.owner.Close()
 	if current.cleanup != nil {
 		current.cleanup()
 	}
+	return ownedErr
 }
 
 func (r *sessionRuntime) finishTurn() {
@@ -399,10 +459,11 @@ func closeRuntimeResources(resources runtimeShutdown) error {
 		err = resources.group.Close()
 	}
 	if resources.interactive != nil {
-		closeRuntimeInteractive(resources.interactive)
+		err = errors.Join(err, closeRuntimeInteractive(resources.interactive))
 	}
 	if resources.openCode != nil {
 		resources.openCode.Close()
+		err = errors.Join(err, resources.openCode.owner.Close())
 	}
 	if resources.bridge != nil {
 		resources.bridge.close()

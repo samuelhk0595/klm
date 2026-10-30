@@ -25,6 +25,9 @@ func (a *app) automationWorker() {
 }
 
 func (a *app) startAutomationTurnLocked(r *AutomationRun, text string) {
+	if a.harnessInstalling {
+		return
+	}
 	s := a.state.session(r.SessionID)
 	if s == nil || a.runs[s.ID] != nil || a.state.conversationArchived(s) {
 		return
@@ -93,7 +96,7 @@ func (a *app) scheduleAutomationsLocked() {
 			if current.Schedule.Recurrence == "once" {
 				current.OnceTriggeredAt = current.NextScheduledAt
 			}
-			next := nextAutomationOccurrence(current.Schedule, d.engineZone(), at)
+			next := nextAutomationOccurrence(current.Schedule, d.engineZone(), due)
 			current.NextScheduledAt = ""
 			if !next.IsZero() {
 				current.NextScheduledAt = next.Format(time.RFC3339Nano)
@@ -101,6 +104,11 @@ func (a *app) scheduleAutomationsLocked() {
 		}); err != nil {
 			return
 		}
+	}
+	// Continue harvesting due occurrences while installation suspends execution.
+	// Do not consume a trigger, continuation reminder or delivery receipt yet.
+	if a.harnessInstalling {
+		return
 	}
 	// A continuation is admitted only after correlated graph/consultation results.
 	for _, run := range a.state.AutomationRuns {

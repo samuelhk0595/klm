@@ -108,7 +108,7 @@ func (a *app) getSQLState(w http.ResponseWriter, r *http.Request) {
 		Projects  []sqlProjectView `json:"projects"`
 		Harnesses []Harness        `json:"harnesses"`
 		General   *sqlSessionView  `json:"general,omitempty"`
-	}{sqliteReadContract, engineID, revision, projects, a.harnesses, general})
+	}{sqliteReadContract, engineID, revision, projects, a.harnessSnapshot(), general})
 }
 
 type sqlPageCursor struct {

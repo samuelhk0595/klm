@@ -100,7 +100,7 @@ export function ModelPicker({ session, disabled, optionsDisabled = disabled, onS
         {filtered.map(option => <MenuItem key={option.id} className="model-menu-option" selected={chosenModel === option.id} disabled={locked} title={option.id} onClick={() => chooseModel(option.id)}>
           <span><span className="model-menu-option-name">{option.name || option.id}</span><small>{option.providerName}</small></span>{chosenModel === option.id && <Check />}
         </MenuItem>)}
-        {!filtered.length && <p className="menu-feedback muted">{search ? 'No matching models.' : 'No connected models available.'}</p>}
+        {!filtered.length && !error && catalog && <p className="menu-feedback muted">{search ? 'No matching models.' : connected.size ? 'Connected providers returned no models. Check their configuration, then refresh.' : "No connected providers found. Sign in to this harness using the engine's OS account, then refresh."}</p>}
       </div>}
       <div className="model-menu-footer"><MenuItem selected={!chosenModel} disabled={locked || !catalog} onClick={() => chooseModel('')}>Harness default{!chosenModel && <Check />}</MenuItem></div>
       {saveError && <p className="form-error menu-feedback" role="alert">{saveError}</p>}

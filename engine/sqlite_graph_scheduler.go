@@ -56,7 +56,7 @@ func (st *sqliteSessionTx) graphStoredAuthorization(activity GraphActivity) erro
 	})
 }
 func (a *app) scheduleSQLGraphActivitiesLocked() error {
-	if a.closing || a.storageErr != nil {
+	if a.closing || a.storageErr != nil || a.harnessInstalling {
 		return nil
 	}
 	if a.graphStarting == nil {
