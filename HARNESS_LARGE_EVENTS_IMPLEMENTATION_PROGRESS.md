@@ -313,5 +313,21 @@ production-data rewrite, full test suite or review agent has been run implicitly
   the approved temporary directory, not installed or run against production data.
 - `git diff --check` — no whitespace errors.
 
-The implementation is ready for the plan's human/runtime acceptance gate. This
-record does not mark that gate or installer/release rollout complete.
+## Isolated browser findings and follow-up (2026-10-30)
+
+Detailed evidence: `HARNESS_LARGE_EVENTS_PLAYWRIGHT_VALIDATION.md`.
+
+- The isolated browser run verified bounded assistant previews/pages at 25/256 MiB,
+  canonical event-download integrity and streaming conversation export. It also
+  found missing content controls in grouped tool/command/file-change details.
+- The follow-up correction reuses EventContent inside EventDetails and keeps
+  content-backed reasoning visible, with its bounded preview in the thought row.
+- `npm run build` passed after the correction (TypeScript/Vite, existing chunk-size
+  warning). The correction has **not** been revalidated in the browser: the user
+  stopped the repeated background-command workflow after another return hang.
+- Follow-up test processes were stopped; test ports were released and installed
+  engine/desktop listeners remained running. Temporary evidence is retained.
+- Canonical fixtures still duplicate some useful tool data between text and native
+  details. Neither storage deduplication nor full E acceptance is established.
+
+The human/runtime acceptance gate and installer/release rollout remain incomplete.

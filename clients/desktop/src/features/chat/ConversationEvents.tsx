@@ -13,7 +13,7 @@ type TimelineItem = { kind: 'event'; event: EngineEvent } | {
 };
 
 function isWorkEvent(event: EngineEvent): event is WorkEvent {
-  if (event.type === 'reasoning') return !!event.text.trim();
+  if (event.type === 'reasoning') return !!event.content || !!event.text.trim();
   return event.type === 'command' || event.type === 'mcp' || event.type === 'tool';
 }
 
@@ -45,7 +45,7 @@ function projectTimeline(events: EngineEvent[], sessionStatus: Session['status']
   };
 
   for (const event of events) {
-    if (isHiddenStatus(event) || (event.type === 'reasoning' && !event.text.trim())) continue;
+    if (isHiddenStatus(event) || (event.type === 'reasoning' && !event.content && !event.text.trim())) continue;
     if (isWorkEvent(event)) {
       if (!pending.length) pendingStartedAt = lastBoundaryAt || event.createdAt;
       pending.push(event);
@@ -133,6 +133,7 @@ function activityDetail(event: WorkEvent) {
 }
 
 function EventDetails({ event }: { event: WorkEvent }) {
+  if (event.content) return <EventContent event={event} />;
   return <>
     {event.text.trim() ? event.type === 'reasoning' ? <MarkdownContent text={event.text} className="agent-work__reasoning-markdown" /> : <pre>{cleanDisplayValue(event.text)}</pre> : null}
     {event.data && Object.keys(event.data).length > 0 ? <details className="agent-work__native-details"><summary>Event details</summary><pre>{JSON.stringify(event.data, null, 2)}</pre></details> : null}
@@ -155,8 +156,8 @@ const ConversationWork = memo(function ConversationWork({ item }: { item: Extrac
   const thoughts: AgentWorkThought[] = item.events.filter(event => event.type === 'reasoning').map(event => ({
     id: event.id,
     status: itemStatus(event, item.status) === 'running' ? 'running' : 'completed',
-    text: event.text,
-    preview: <InlineMarkdownContent text={event.text} />,
+    text: event.previewText ?? event.text,
+    preview: <InlineMarkdownContent text={event.previewText ?? event.text} />,
     details: <EventDetails event={event} />,
   }));
   const activities: AgentWorkActivity[] = item.events.filter(event => event.type !== 'reasoning').map(event => {
