@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -54,21 +55,35 @@ func (p *adapter) openCodePermissionGate(ctx context.Context, raw json.RawMessag
 	if p.graphSealed() {
 		return false, errors.New("Graph activation is sealed.")
 	}
-	if p.capabilities != nil && strings.HasPrefix(call.Tool, "klm_linked_") {
+	nativeID := ""
+	if p.capabilities != nil && (strings.HasPrefix(call.Tool, "klm_linked_") || call.Tool == "skill") {
 		p.app.mu.Lock()
-		root := p.app.state.Native[p.id].ID
+		var err error
+		if p.app.store != nil {
+			// SQLite owns native identity; the legacy in-memory map is not updated.
+			err = p.app.store.readSnapshot(ctx, func(tx *sql.Tx) error {
+				st := &sqliteSessionTx{ctx: ctx, tx: tx}
+				native, err := st.native(p.id)
+				nativeID = native.ID
+				return err
+			})
+		} else {
+			nativeID = p.app.state.Native[p.id].ID
+		}
 		p.app.mu.Unlock()
-		if call.SessionID != root {
+		if err != nil {
+			return false, err
+		}
+	}
+	if p.capabilities != nil && strings.HasPrefix(call.Tool, "klm_linked_") {
+		if call.SessionID != nativeID {
 			return false, errors.New("Conversation-role tools are not delegated to native subagents.")
 		}
 	}
 	if p.capabilities != nil && call.Tool == "skill" {
 		allowed := false
-		p.app.mu.Lock()
-		native := p.app.state.Native[p.id].ID
-		p.app.mu.Unlock()
 		for _, skill := range p.capabilities.Skills {
-			if skill.Name == str(call.Input, "name") && (!skill.Internal || call.SessionID == native) {
+			if skill.Name == str(call.Input, "name") && (!skill.Internal || call.SessionID == nativeID) {
 				allowed = true
 				break
 			}

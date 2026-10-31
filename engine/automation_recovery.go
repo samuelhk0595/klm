@@ -248,6 +248,9 @@ func (p *adapter) callAutomationRecovery(name string, raw json.RawMessage) (any,
 }
 
 func (a *app) scheduleAutomationRecoveryLocked() {
+	if a.harnessInstalling {
+		return
+	}
 	if a.store != nil {
 		if err := a.scheduleSQLAutomationRecoveryLocked(); err != nil && a.ctx.Err() == nil {
 			a.failStorageLocked(err)

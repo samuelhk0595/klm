@@ -717,8 +717,8 @@ reading:
 }
 
 func validatePiLibraryBinary(b binary) error {
-	if runtime.GOOS != "windows" {
-		return errors.New("Managed Pi library execution has only been validated on Windows.")
+	if err := validateManagedChatPlatform(); err != nil {
+		return err
 	}
 	// This is a compatibility gate for the installation actually probed, not a
 	// claim about future versions or graph-adapter capabilities.
@@ -729,7 +729,8 @@ func validatePiLibraryBinary(b binary) error {
 	var metadata struct {
 		Version string `json:"version"`
 	}
-	if err != nil || json.Unmarshal(data, &metadata) != nil || metadata.Version != "0.85.1" {
+	recipe, _ := harnessRecipeFor("pi")
+	if err != nil || json.Unmarshal(data, &metadata) != nil || metadata.Version != recipe.Version {
 		return errors.New("Pi library exclusivity is validated for version 0.85.1 only; this installation is not supported by the managed adapter.")
 	}
 	return nil

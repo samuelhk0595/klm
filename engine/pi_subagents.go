@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -359,6 +360,9 @@ func (p *adapter) preparePiSubagents(dir string, channel *piChildChannel, b bina
 	metadata, err := os.ReadFile(filepath.Join(packageRoot, "package.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return "", nil
+	}
+	if runtime.GOOS == "linux" {
+		return "", errors.New("An installed pi-subagents package requires separate Linux compatibility validation. Native delegation was not loaded; the managed turn was refused.")
 	}
 	var pkg struct {
 		Name    string `json:"name"`

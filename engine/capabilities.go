@@ -116,7 +116,8 @@ func (a *app) captureCapabilities(ctx context.Context, selection CapabilitySelec
 		}
 		return nil, nil // Explicit legacy execution, never advertised as an empty effective catalog.
 	}
-	if b, installed := a.binaries["pi"]; installed {
+	bs := a.binarySnapshot()
+	if b, installed := bs["pi"]; installed {
 		if harness == "pi" {
 			if err := validatePiLibraryBinary(b); err != nil {
 				return nil, err
@@ -124,14 +125,14 @@ func (a *app) captureCapabilities(ctx context.Context, selection CapabilitySelec
 		}
 	}
 	if harness == "opencode" {
-		if b, installed := a.binaries[harness]; installed {
+		if b, installed := bs[harness]; installed {
 			if err := validateOpenCodeLibraryBinary(b); err != nil {
 				return nil, err
 			}
 		}
 	}
 	if harness == "codex" {
-		if b, installed := a.binaries[harness]; installed {
+		if b, installed := bs[harness]; installed {
 			if err := validateCodexLibraryBinary(b); err != nil {
 				return nil, err
 			}
@@ -309,6 +310,11 @@ func (p *adapter) prepareCapabilities(s Session) error {
 // Applied only after the adapter has confirmed its effective inventory, before
 // the first native prompt. Edits made during startup remain desired/pending.
 func (p *adapter) markCapabilitiesApplied() error {
+	if p.runtime != nil {
+		if err := p.runtime.checkHealth(); err != nil {
+			return err
+		}
+	}
 	if p.capabilities == nil {
 		return nil
 	}

@@ -18,6 +18,7 @@ import (
 )
 
 const modelCatalogTimeout = 45 * time.Second
+const modelCatalogLoadError = "Could not discover harness models. Check the installation and provider configuration for the engine's OS account, then refresh."
 
 type ModelOption struct {
 	ID            string   `json:"id"`
@@ -126,6 +127,11 @@ func (a *app) catalog(ctx context.Context, s Session, cwd string, refresh bool) 
 }
 
 func (a *app) discoverCatalog(ctx context.Context, s Session, cwd string) (*ModelCatalog, error) {
+	release, admissionErr := a.acquireHarnessConsumer()
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+	defer release()
 	a.mu.Lock()
 	b, installed := a.binaries[s.Harness]
 	a.mu.Unlock()
@@ -205,7 +211,7 @@ func (a *app) getModels(w http.ResponseWriter, r *http.Request) {
 	}
 	catalog, err := a.catalog(r.Context(), s, cwd, r.URL.Query().Get("refresh") == "true")
 	if err != nil {
-		fail(w, 502, "Could not load harness models. Check the harness configuration and retry.")
+		fail(w, 502, modelCatalogLoadError)
 		return
 	}
 	respond(w, 200, catalog)
@@ -303,7 +309,10 @@ func codexCatalog(ctx context.Context, b binary, cwd string) (*ModelCatalog, err
 	authType := "configured"
 	if provider == "openai" {
 		account, accountErr := rpc.call("account/read", map[string]any{"refreshToken": false})
-		if accountErr != nil || object(account["account"]) == nil {
+		if accountErr != nil {
+			return nil, accountErr
+		}
+		if object(account["account"]) == nil {
 			return c, nil
 		}
 		switch str(object(account["account"]), "type") {
@@ -383,6 +392,7 @@ func piCatalog(ctx context.Context, b binary, cwd string) (*ModelCatalog, error)
 	const script = `import {pathToFileURL} from 'node:url'; const lib=await import(import.meta.resolve('@earendil-works/pi-ai',pathToFileURL(process.argv[1]).href)); let input=''; for await(const chunk of process.stdin) input+=chunk; console.log(JSON.stringify(JSON.parse(input).map(m=>lib.getSupportedThinkingLevels(m))));`
 	data, _ := json.Marshal(items)
 	cmd := exec.CommandContext(ctx, b.path, "--experimental-import-meta-resolve", "--input-type=module", "-e", script, b.args[0])
+	cmd.Env = runtimeEnvironment(os.Environ(), b.node)
 	cmd.Dir = cwd
 	cmd.Stdin = bytes.NewReader(data)
 	cmd.Stderr = &cappedBuffer{}
@@ -442,7 +452,7 @@ func (b *limitedOutput) Write(p []byte) (int, error) {
 
 // Short-lived authenticated loopback server used only for catalog/config reads.
 func openCodeCatalog(ctx context.Context, b binary, cwd string) (*ModelCatalog, error) {
-	if err := validateOpenCodeLibraryBinary(b); err != nil {
+	if err := validateOpenCodeCatalogBinary(b); err != nil {
 		return nil, err
 	}
 	dir, err := os.MkdirTemp("", "klm-opencode-catalog-")
@@ -466,7 +476,7 @@ func openCodeCatalog(ctx context.Context, b binary, cwd string) (*ModelCatalog, 
 	h.client = &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("Redirect refused.") }}
 	cmd := exec.CommandContext(ctx, b.path, append(append([]string{}, b.args...), "serve", "--hostname", "127.0.0.1", "--port", "0", "--mdns=false")...)
 	cmd.Dir = cwd
-	for _, entry := range os.Environ() {
+	for _, entry := range runtimeEnvironment(os.Environ(), b.node) {
 		key, _, _ := strings.Cut(entry, "=")
 		if strings.HasPrefix(strings.ToUpper(key), "OPENCODE_") || strings.EqualFold(key, "XDG_CONFIG_HOME") {
 			continue

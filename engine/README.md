@@ -1229,10 +1229,14 @@ assignment, `session-topic-assigned.md` for an existing topic, and
 `session-topic-side.md` for side chats. The assigned-topic prompt substitutes
 `{{topicId}}` with the current session's topic ID. These files use the same loader
 and are appended to collaboration guidance according to the conversation role/state.
-`KLM_PROMPTS_DIR` overrides both. The Windows engine packaging copies all
-`engine/prompts/*.md` into the installer's prompts directory. Changes take effect
-on the next turn; missing or empty prompt files surface an error instead of
-silently reverting to hardcoded guidance. Consultations from other agents are
+`KLM_PROMPTS_DIR` is authoritative: missing, unreadable or empty files there fail
+explicitly. The Windows engine packaging still copies all `engine/prompts/*.md`
+into the installer's prompts directory. Without that override, lookup uses sibling
+`prompts/`, then an absolute development source path, then the same Markdown files
+embedded at build time. `-trimpath` module-relative source paths are never resolved
+against the working directory. Missing optional disk files use the packaged copy;
+unreadable or empty disk files and missing/empty packaged prompts fail explicitly.
+Disk edits take effect on the next turn; updating embedded defaults requires a rebuild. Consultations from other agents are
 attributed context, not new user messages or permission grants. Creation and
 consultation still use the private authenticated loopback bridge.
 
@@ -1292,6 +1296,13 @@ type Harness = {
   name: string
   available: boolean
   error?: string
+  installedVersion?: string
+  requiredVersion?: string
+  path?: string
+  source?: string
+  compatible: boolean
+  executionSupported: boolean
+  executionReason?: string
 }
 ```
 
@@ -1882,18 +1893,101 @@ Compilation/probe evidence and the human acceptance route are in
 
 ## Harness Adapters
 
-Discovery runs at engine startup without sending any prompts or reading auth
-files. Executable overrides are optional: `KLM_PI_BIN`, `KLM_OPENCODE_BIN`, and
+Discovery runs at engine startup, on explicit Harnesses refresh and after a global
+installation, without sending prompts or reading provider auth files. Executable overrides are optional: `KLM_PI_BIN`, `KLM_OPENCODE_BIN`, and
 `KLM_CODEX_BIN`. Each is a single executable path/name, not a shell command or
 argument string. A Pi override can instead point to `cli.js`, requiring Node.js
-on PATH. Invalid overrides make that adapter unavailable; they do not fall back.
+available through PATH or a conventional Node installation. Invalid overrides make that adapter unavailable; they do not fall back.
 
-On Windows, discovery checks `%APPDATA%\npm\node_modules`, npm package locations
-adjacent to discovered PATH shims, native `.exe` files on PATH, and Codex's
+Discovery resolves npm's actual global prefix, canonical package symlinks and
+native platform packages on Windows/Linux. On Windows it also checks
+`%APPDATA%\npm\node_modules`, npm package locations adjacent to discovered PATH
+shims, native `.exe` files on PATH, and Codex's
 `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin\codex.exe`. Pi's installed package is
 `@earendil-works/pi-coding-agent/dist/cli.js`; OpenCode's is
 `opencode-ai/bin/opencode.exe`. No user-specific absolute installation paths are
 hardcoded. `.cmd`, `.bat`, and `.ps1` shims are never executed or parsed.
+
+### Global installation from Settings
+
+Settings → Harnesses installs one selected package on the **engine computer**:
+
+| Harness | Global package/version |
+| --- | --- |
+| Pi | `@earendil-works/pi-coding-agent@0.85.1` |
+| OpenCode | `opencode-ai@1.18.35` |
+| Codex | `@openai/codex@0.153.4` |
+
+The paired-client API uses the existing authentication/origin/CSRF contract:
+
+| Method | Endpoint | Result |
+| --- | --- | --- |
+| GET | `/api/harnesses` | Probed inventory, server-bound plans, retained jobs, host/platform and active job ID. `?cached=true` avoids repeated subprocess probes when a snapshot exists. |
+| POST | `/api/harnesses/{harnessId}/install` | Strict `{operationId,planToken,confirmGlobal,confirmReplacement,confirmPrerequisites}`; 202 with a stable job receipt, including duplicate accepted requests. |
+| GET | `/api/harness-installations/{jobId}` | Exact receipt/status lookup, or 404; never another job as fallback. |
+| GET | `/api/harness-installations?operationId=...` | Reconcile an uncertain POST using its exact operation ID. No automatic POST replay. |
+
+All package names, exact versions, registry and argv come from engine code. Normal
+user npm configuration (including its global prefix/proxy settings) remains in
+place; installation uses a neutral cwd, absolute Node/npm CLI paths and fixed flags
+enabling required lifecycle scripts and optional platform packages. No private npm
+prefix, alternate provider HOME, skill or optional `pi-subagents` install is created.
+An effective override/standalone copy masking the destination must be resolved
+explicitly before installation. Different global versions require replacement
+consent; correct versions require no mutation.
+
+Bootstrap supports Windows amd64 and glibc >=2.28 Linux amd64 using the official
+**Node.js 22.22.0** distribution with **npm 10.9.4** and embedded SHA-256 hashes.
+Windows publishes the official zip under `%ProgramFiles%\nodejs` and adds that
+directory to the engine user's persisted PATH. Without a custom prefix, npm's
+ordinary official-zip default is that Node directory. Linux publishes only the
+absent Node/npm-owned paths in `/usr/local/bin` and `/usr/local/lib/node_modules/npm`;
+its default npm global prefix is `/usr/local`. Missing npm beside a compatible
+Node can be supplied separately without replacing Node. Existing compatible
+prerequisites are reused; broken/incompatible prerequisites are blocked for repair
+using their original installer/version manager.
+
+The installer uses existing OS permissions and performs an exclusive temporary
+write-access check after confirmation, before downloads/global changes. It does
+not request UAC, invoke sudo, capture passwords or change sudoers. Denied access
+produces **Needs permission** with directory-specific recovery. Do not run the whole
+engine as root as a substitute for choosing appropriate directory permissions.
+No real provisioning or provider execution has been validated by compilation.
+
+One mutation is allowed per engine, with a shared engine-user lock across dev and
+release installers. Admission conservatively blocks while **any** harness consumer,
+active/idle retained runtime or graph worker is in use; new consumers share that
+gate. Other engines' active runtimes and unrelated terminal processes are not
+controlled by this lock: stop those before replacing shared packages. Interrupted
+jobs are retained and never replayed automatically. SQLite retains at most 128
+receipts (further requests fail before mutation), each with at most 24 curated log
+entries; raw npm output is captured with bounds but withheld from clients/storage
+because scripts/network configuration may print credentials.
+
+Installation temporarily suspends execution admission, not durable pending work.
+Scheduled occurrences continue to enter their normal trigger queue; messages,
+consultations/results, automation continuations and recovery notices retain their
+pending state. Their existing eligibility arbiters resume after release. Successful
+verification, terminal receipt publication and admission release share one boundary;
+there is no deferred successful re-probe after the client sees completion.
+
+The engine's latched storage-read-only state blocks new reservations, preflight
+probes and further phase/terminal receipt writes even when SQLite itself remains
+writable. It cancels owned installer work and retains unfinished/uncertain jobs
+for explicit restart recovery; it never clears the latch to continue installation.
+Exact receipt reads remain available.
+
+After verification, executable/environment snapshots, catalog flights/caches,
+version gates and global update notices are refreshed. The shared frontend's
+selectors update without engine restart or page reload. Installation/selection
+does not imply provider authentication or runtime validation. Linux amd64 ordinary
+managed chats use the nonroot subreaper/pidfd supervisor; profile/version checks
+remain mandatory and failed/lost supervision cannot be reported as confirmed Stop.
+Graph execution and protected MCP credential storage remain unavailable on Linux.
+The integrated path awaits Linux native/runtime and real UI messaging acceptance;
+see `../LINUX_ORDINARY_TURN_SUPPORT_HANDOFF.md` for the exact candidate and checks.
+See `../HARNESS_INSTALLATION_IMPLEMENTATION_PROGRESS.md` for checks, unresolved
+limitations and the pending human acceptance/review route.
 
 All prompts are supplied verbatim through stdin and EOF, never shell-interpolated
 or placed in command arguments. Model and native session identifiers are separate
@@ -2371,9 +2465,14 @@ does not claim a new build, test or restart. The principal coordinates the reque
 restart after the build, then the user reloads the tab and retests. See
 `GRAPH_ENGINE_PROGRESS_EXTERNAL_MCP_DOCS.md` at the repository root.
 
-Internal instructions live in `engine/prompts/` and are reread for every send.
-Development uses that source directory. Packaged engines can include a sibling
-`prompts/` directory or set `KLM_PROMPTS_DIR`. Missing/empty prompts fail explicitly.
+Internal instructions live in `engine/prompts/` and are resolved for every send.
+Development uses that source directory when its compiled path is absolute. Release
+binaries embed all `prompts/*.md`, including collaboration and role guidance, so a
+binary-only Linux distribution works with `-trimpath` and no source checkout.
+Editable sibling `prompts/` files take precedence; `KLM_PROMPTS_DIR` is an
+authoritative override. Missing optional disk copies use embedded defaults, but
+missing override files, empty/unreadable disk files and absent/empty embedded
+prompts fail explicitly; mandatory guidance is never omitted.
 With `go -C engine build`, the resulting `engine/engine.exe` also has the existing
 `engine/prompts/` as its sibling resource directory. Neither default lookup relies
 on the server's working directory. For an explicit development override, from the

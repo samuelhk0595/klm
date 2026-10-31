@@ -430,7 +430,7 @@ func (a *app) projectModels(w http.ResponseWriter, r *http.Request) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(55 * time.Second))
 	c, err := a.catalog(r.Context(), Session{ProjectID: p.ID, Harness: r.PathValue("harness")}, p.Folder, r.URL.Query().Get("refresh") == "true")
 	if err != nil {
-		fail(w, 502, "Could not load harness models. Check the harness configuration and retry.")
+		fail(w, 502, modelCatalogLoadError)
 		return
 	}
 	respond(w, 200, c)

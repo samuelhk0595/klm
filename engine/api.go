@@ -75,6 +75,7 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /api/settings/access", a.getEngineAccessSettings)
 	mux.HandleFunc("PATCH /api/settings/access", a.updateEngineAccessSettings)
 	mux.HandleFunc("POST /api/engine/restart", a.restartEngineHTTP)
+	a.harnessRoutes(mux)
 	a.libraryRoutes(mux)
 	a.automationRoutes(mux)
 	a.activityBoardRoutes(mux)

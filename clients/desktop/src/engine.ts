@@ -28,7 +28,35 @@ export type Harness = {
   name: string;
   available: boolean;
   error?: string;
+  installedVersion?: string;
+  requiredVersion?: string;
+  path?: string;
+  source?: string;
+  compatible?: boolean;
+  executionSupported?: boolean;
+  executionReason?: string;
 };
+
+export type HarnessInstallPlan = {
+  token: string; harnessId: Harness['id']; package: string; version: string; currentVersion: string;
+  destination: string; replace: boolean; noop: boolean; blocked?: string;
+  prerequisites: { node: string; npm: string; version: string; npmVersion: string; prefix: string; root: string; bootstrap: boolean; error?: string };
+};
+export type HarnessInstallJob = {
+  id: string; operationId: string; harnessId: Harness['id']; planToken: string;
+  state: 'checking' | 'installing_prerequisites' | 'installing_harness' | 'verifying' | 'completed' | 'failed' | 'interrupted' | 'needs_permission';
+  step: string; log: string[]; error?: string; createdAt: string; updatedAt: string;
+};
+export type HarnessInventory = { harnesses: Harness[]; plans: HarnessInstallPlan[]; jobs: HarnessInstallJob[]; activeJobId: string; host: string; platform: string };
+export type HarnessInstallRequest = { operationId: string; planToken: string; confirmGlobal: boolean; confirmReplacement: boolean; confirmPrerequisites: boolean };
+export async function getHarnessInventory(cached = false, signal?: AbortSignal): Promise<HarnessInventory> {
+  const result = await request<HarnessInventory>(`/api/harnesses${cached ? '?cached=true' : ''}`, 'GET', undefined, 65000, signal);
+  if (!Array.isArray(result.harnesses)) throw new Error('The engine returned an invalid harness inventory. Refresh and retry.');
+  if (result.jobs != null && !Array.isArray(result.jobs) || result.plans != null && !Array.isArray(result.plans)) throw new Error('The engine returned invalid installation history. Refresh and retry.');
+  return { ...result, jobs: result.jobs ?? [], plans: result.plans ?? [] };
+}
+export const installHarness = (id: Harness['id'], body: HarnessInstallRequest) => request<HarnessInstallJob>(`/api/harnesses/${id}/install`, 'POST', body, 75000, AbortSignal.timeout(75000));
+export const findHarnessInstallation = (operationId: string) => request<HarnessInstallJob>(`/api/harness-installations?operationId=${encodeURIComponent(operationId)}`);
 
 export type EngineEvent = {
 	previewText?: string;
@@ -293,7 +321,13 @@ function normalizeEngineResponse(path: string, value: unknown): unknown {
     if (object.contract !== '3') throw new Error('This client requires engine storage contract 3.');
     return { ...object, projects: object.projects.map((p: Project) => ({ ...p, folders: [], archivedFolders: [] })), sessions: object.general ? [sessionMetadata(object.general)] : [] };
   }
-  if (object.session && typeof object.eventCount === 'string') return { ...sessionMetadata(object.session), detailLoaded: true, permissionCount: object.session.permissions?.length ?? 0, questionCount: object.session.questions?.length ?? 0, pendingMore: object.more };
+  if (object.session && typeof object.eventCount === 'string') {
+    // Full detail responses omit empty request lists. Make those authoritative
+    // empties explicit so metadata merges cannot retain already resolved cards.
+    const permissions = object.session.permissions ?? [];
+    const questions = object.session.questions ?? [];
+    return { ...sessionMetadata(object.session), permissions, questions, detailLoaded: true, permissionCount: permissions.length, questionCount: questions.length, pendingMore: object.more };
+  }
   if (/^\/api\/projects(?:\/[^/?]+)?$/.test(path.split('?')[0]) && typeof object.folder === 'string') return { ...object, folders: [], archivedFolders: [] };
   if (typeof object.sessionId === 'string' && typeof object.count === 'string' && Array.isArray(object.events)) {
     const events: EngineEvent[] = object.events.map((row: any) => row.event ?? ({ id: row.id, type: row.preview?.type ?? 'status', title: row.preview?.title, status: row.preview?.status, consultationId: row.preview?.consultationId, previewText: row.preview?.textPreview, text: '', createdAt: row.preview?.createdAt ?? '', content: { sessionId: object.sessionId, ordinal: row.ordinal, digest: row.content.digest, bytes: row.content.bytes } }));

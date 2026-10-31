@@ -294,7 +294,7 @@ func (p *adapter) readSQLAutomationRecovery(raw json.RawMessage) (any, error) {
 }
 
 func (a *app) scheduleSQLAutomationRecoveryLocked() error {
-	if a.closing || a.storageErr != nil {
+	if a.closing || a.storageErr != nil || a.harnessInstalling {
 		return nil
 	}
 	var id string

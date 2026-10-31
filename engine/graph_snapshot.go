@@ -38,6 +38,11 @@ type GraphSnapshot struct {
 // multi-file filesystem transaction. Layout errors never invalidate execution.
 func (a *app) captureGraphSnapshot(ctx context.Context, projectID, graphID string) (GraphSnapshot, *CompiledGraph, error) {
 	var snapshot GraphSnapshot
+	release, admissionErr := a.acquireHarnessConsumer()
+	if admissionErr != nil {
+		return snapshot, nil, admissionErr
+	}
+	defer release()
 	if !validAuthoringID(graphID) {
 		return snapshot, nil, errors.New("Invalid graph identifier.")
 	}
@@ -133,6 +138,7 @@ func (a *app) captureGraphSnapshot(ctx context.Context, projectID, graphID strin
 		snapshot.Agents = append(snapshot.Agents, AgentRecord{AgentDefinition: agent, ID: id, Revision: revision(data), GraphReferences: []string{}})
 	}
 	validated := map[string]bool{}
+	bs := a.binarySnapshot()
 	compiled, err := compileGraph(g, snapshot.Agents, func(agent EffectiveGraphAgent) error {
 		for _, definition := range snapshot.Agents {
 			if definition.ID == agent.AgentID {
@@ -146,21 +152,21 @@ func (a *app) captureGraphSnapshot(ctx context.Context, projectID, graphID strin
 			}
 		}
 		if agent.Harness == "pi" {
-			if b, installed := a.binaries["pi"]; installed {
+			if b, installed := bs["pi"]; installed {
 				if err := validatePiLibraryBinary(b); err != nil {
 					return err
 				}
 			}
 		}
 		if agent.Harness == "opencode" {
-			if b, installed := a.binaries[agent.Harness]; installed {
+			if b, installed := bs[agent.Harness]; installed {
 				if err := validateOpenCodeLibraryBinary(b); err != nil {
 					return err
 				}
 			}
 		}
 		if agent.Harness == "codex" {
-			if b, installed := a.binaries[agent.Harness]; installed {
+			if b, installed := bs[agent.Harness]; installed {
 				if err := validateCodexLibraryBinary(b); err != nil {
 					return err
 				}

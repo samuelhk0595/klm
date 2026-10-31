@@ -737,6 +737,31 @@ remote pairing, harness/provider execution, Linux graph containment and ai-jail
 remain unvalidated/unimplemented as applicable. Detailed evidence and operational
 limits are in `LINUX_VPS_IMPLEMENTATION_PROGRESS.md`.
 
+### Global harness installation
+
+Settings → **Harnesses** shows Pi, OpenCode and Codex versions and effective
+executable paths, with individual confirmed global Install actions on the engine
+computer. Targets are `@earendil-works/pi-coding-agent@0.85.1`,
+`opencode-ai@1.18.35` and `@openai/codex@0.153.4`. Ordinary npm global installations
+and the engine user's native provider/auth configuration are retained. Installation
+does not select a harness or create/start a conversation.
+
+On Windows amd64 and glibc Linux amd64, missing Node/npm can be bootstrapped from
+verified official Node.js 22.22.0 artifacts using the process's existing OS write
+permissions. Missing permission is explicit; existing broken/incompatible Node/npm
+requires repair through its original installer rather than implicit replacement.
+Durable, serialized jobs survive client disconnects; interrupted jobs are not
+replayed. Verified inventory changes refresh connected selectors without restarting
+the engine. Global packages are shared by dev/release engines. Linux ordinary
+managed chats now have a nonroot subreaper/pidfd ownership path, with explicit
+failure when teardown cannot be confirmed. Version pins, exclusive profiles and
+role/Library controls remain mandatory; graph execution and protected MCP
+credential storage remain unsupported on Linux. Focused Linux runtime and real
+messaging acceptance are still required; installation/discovery alone is not acceptance.
+Runtime/manual acceptance remains pending and the originating-assistant review/
+correction workflow is in progress; scope, limitations and checks are in
+`HARNESS_INSTALLATION_IMPLEMENTATION_PROGRESS.md`.
+
 ### Skills and MCP Library
 
 Settings → **Library** manages engine-shared user skills and MCP connections. User

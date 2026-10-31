@@ -393,6 +393,9 @@ func (a *app) commitLocked(change func(*diskState)) error {
 func (a *app) failStorageLocked(err error) error {
 	log.Printf("state persistence failed: %v", err)
 	a.storageErr = errors.New("state persistence failed; engine is read-only until restarted")
+	if a.harnessInstallCancel != nil {
+		a.harnessInstallCancel()
+	}
 	for _, r := range a.runs {
 		r.cancel()
 	}

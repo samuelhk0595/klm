@@ -440,9 +440,10 @@ export function App() {
   useEffect(() => {
     let active = true;
     let refreshing = false;
+    let refreshAgain = false;
     if (!pageVisible) return;
     async function refresh() {
-      if (refreshing) return;
+      if (refreshing) { refreshAgain = true; return; }
       refreshing = true;
       const revision = projectRevision.current;
       try {
@@ -507,6 +508,7 @@ export function App() {
         if (active && !loaded) setConnectionError(errorMessage(error));
       } finally {
         refreshing = false;
+        if (active && refreshAgain) { refreshAgain = false; void refresh(); }
       }
     }
     void refresh();

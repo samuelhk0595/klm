@@ -66,7 +66,11 @@ func (a *app) scheduleSQLAutomationsLocked() error {
 			if v.Schedule.Recurrence == "once" {
 				v.OnceTriggeredAt = v.NextScheduledAt
 			}
-			next := nextAutomationOccurrence(v.Schedule, settings.TimeZone, at)
+			due, err := time.Parse(time.RFC3339Nano, v.NextScheduledAt)
+			if err != nil {
+				return err
+			}
+			next := nextAutomationOccurrence(v.Schedule, settings.TimeZone, due)
 			v.NextScheduledAt = ""
 			if !next.IsZero() {
 				v.NextScheduledAt = next.Format(time.RFC3339Nano)
@@ -76,6 +80,9 @@ func (a *app) scheduleSQLAutomationsLocked() error {
 	})
 	if err != nil {
 		return err
+	}
+	if a.harnessInstalling {
+		return nil
 	}
 	if err := a.sqlAutomationCandidates(`SELECT id FROM data_automation_runs WHERE status='running' AND x_needsContinuation='true' AND id>? ORDER BY id LIMIT 100`, nil, a.continueSQLAutomationLocked); err != nil {
 		return err
@@ -162,6 +169,9 @@ func (a *app) sqlAutomationSessionBlocked(st *sqliteSessionTx, project, id strin
 }
 
 func (a *app) admitSQLAutomationLocked(id string) (*AutomationRun, bool, error) {
+	if a.harnessInstalling {
+		return nil, false, nil
+	}
 	var admitted *AutomationRun
 	parallel := false
 	err := a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
@@ -302,6 +312,9 @@ func (a *app) admitSQLAutomationLocked(id string) (*AutomationRun, bool, error) 
 }
 
 func (a *app) startSQLAutomationTurnLocked(run AutomationRun, text string) error {
+	if a.harnessInstalling {
+		return nil
+	}
 	if a.runs[run.SessionID] != nil {
 		return nil
 	}
@@ -343,6 +356,9 @@ func (a *app) startSQLAutomationTurnLocked(run AutomationRun, text string) error
 }
 
 func (a *app) continueSQLAutomationLocked(id string) error {
+	if a.harnessInstalling {
+		return nil
+	}
 	var start *AutomationRun
 	err := a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
 		var r AutomationRun

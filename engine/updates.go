@@ -79,6 +79,7 @@ func (a *app) updates(w http.ResponseWriter, r *http.Request) {
 	seen := cursors
 	var knownProjects []Project
 	var knownIDs []string
+	var knownHarnesses []Harness
 	flush := func(initial bool) error {
 		a.mu.Lock()
 		allDirty, dirty := subscription.all, subscription.dirty
@@ -109,7 +110,7 @@ func (a *app) updates(w http.ResponseWriter, r *http.Request) {
 			}
 			known[s.ID] = summary
 		}
-		inventoryChanged := initial || !reflect.DeepEqual(knownProjects, projects) || !reflect.DeepEqual(knownIDs, ids)
+		inventoryChanged := initial || !reflect.DeepEqual(knownProjects, projects) || !reflect.DeepEqual(knownIDs, ids) || !reflect.DeepEqual(knownHarnesses, a.harnesses)
 		all := []SessionSummary{}
 		if inventoryChanged {
 			for _, id := range ids {
@@ -128,7 +129,7 @@ func (a *app) updates(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		revision := a.state.GraphRevision
-		harnesses := a.harnesses
+		harnesses := append([]Harness(nil), a.harnesses...)
 		a.mu.Unlock()
 		if inventoryChanged {
 			if err := send(map[string]any{"kind": "inventory", "projects": projects, "sessions": all, "harnesses": harnesses, "revision": revision}); err != nil {
@@ -150,6 +151,7 @@ func (a *app) updates(w http.ResponseWriter, r *http.Request) {
 			seen[update.Summary.ID] = update.Revision
 		}
 		knownProjects, knownIDs = projects, ids
+		knownHarnesses = harnesses
 		return nil
 	}
 	if flush(true) != nil {

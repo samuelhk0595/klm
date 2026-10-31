@@ -8,7 +8,7 @@ import (
 )
 
 func (a *app) scheduleSQLGraphNotificationsLocked() error {
-	if a.closing || a.storageErr != nil {
+	if a.closing || a.storageErr != nil || a.harnessInstalling {
 		return nil
 	}
 	after := ""

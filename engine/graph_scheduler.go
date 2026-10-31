@@ -47,6 +47,9 @@ func (a *app) graphFirstReadyLocked(owner string) string {
 	return first.ID
 }
 func (a *app) scheduleGraphActivitiesLocked() {
+	if a.harnessInstalling {
+		return
+	}
 	if a.store != nil {
 		if err := a.scheduleSQLGraphActivitiesLocked(); err != nil && a.ctx.Err() == nil {
 			a.failStorageLocked(err)
@@ -81,6 +84,10 @@ func (a *app) scheduleGraphActivitiesLocked() {
 
 func (a *app) startGraphActivity(ctx context.Context, id string) error {
 	a.mu.Lock()
+	if a.harnessInstalling {
+		a.mu.Unlock()
+		return errors.New("A global harness installation is in progress.")
+	}
 	activity := a.state.graphActivity(id)
 	if activity == nil {
 		a.mu.Unlock()
@@ -249,6 +256,9 @@ func (d *diskState) graphNotification(id string) *RunNotification {
 // Called by the existing linked arbiter under app.mu. Its native turn reservation
 // is shared with ordinary user turns and linked consultations.
 func (a *app) scheduleGraphNotificationsLocked() {
+	if a.harnessInstalling {
+		return
+	}
 	if a.store != nil {
 		if err := a.scheduleSQLGraphNotificationsLocked(); err != nil && a.ctx.Err() == nil {
 			a.failStorageLocked(err)

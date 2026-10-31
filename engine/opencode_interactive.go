@@ -411,6 +411,16 @@ func openCodeEvents(ctx context.Context, body io.Reader, dir string, events chan
 }
 
 func (p *adapter) startOpenCodeServer(b binary, cwd string, ctx context.Context) (_ *openCodeServer, err error) {
+	release, admissionErr := b.use()
+	if admissionErr != nil {
+		return nil, admissionErr
+	}
+	retained := false
+	defer func() {
+		if !retained {
+			release()
+		}
+	}()
 	var secret [32]byte
 	if _, err := rand.Read(secret[:]); err != nil {
 		return nil, errors.New("Could not generate OpenCode server credentials.")
@@ -438,7 +448,7 @@ func (p *adapter) startOpenCodeServer(b binary, cwd string, ctx context.Context)
 	args := append(append([]string{}, b.args...), "serve", "--hostname", "127.0.0.1", "--port", "0", "--mdns=false")
 	cmd := exec.Command(b.path, args...)
 	cmd.Dir = cwd
-	for _, entry := range os.Environ() {
+	for _, entry := range runtimeEnvironment(os.Environ(), b.node) {
 		key, _, _ := strings.Cut(entry, "=")
 		if len(p.openCodeLibraryEnv) > 0 && (strings.HasPrefix(strings.ToUpper(key), "OPENCODE_") || strings.EqualFold(key, "XDG_CONFIG_HOME")) {
 			continue
@@ -512,7 +522,8 @@ func (p *adapter) startOpenCodeServer(b binary, cwd string, ctx context.Context)
 		_ = cmd.Wait()
 		close(processDone)
 	}()
-	server := &openCodeServer{h: h, transport: transport, owner: owner, processDone: processDone, outputFailed: outputFailed, cleanup: cleanup}
+	server := &openCodeServer{h: h, transport: transport, owner: owner, processDone: processDone, outputFailed: outputFailed, cleanup: func() { cleanup(); release() }}
+	retained = true
 	failed := func(err error) (*openCodeServer, error) {
 		server.Close()
 		return nil, err

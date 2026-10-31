@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -18,15 +17,26 @@ import (
 )
 
 type Harness struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Available bool   `json:"available"`
-	Error     string `json:"error,omitempty"`
+	ID                      string `json:"id"`
+	Name                    string `json:"name"`
+	Available               bool   `json:"available"`
+	Error                   string `json:"error,omitempty"`
+	InstalledVersion        string `json:"installedVersion,omitempty"`
+	RequiredVersion         string `json:"requiredVersion,omitempty"`
+	Path                    string `json:"path,omitempty"`
+	Source                  string `json:"source,omitempty"`
+	Compatible              bool   `json:"compatible"`
+	ExecutionSupported      bool   `json:"executionSupported"`
+	ChatExecutionSupported  bool   `json:"chatExecutionSupported"`
+	GraphExecutionSupported bool   `json:"graphExecutionSupported"`
+	ExecutionReason         string `json:"executionReason,omitempty"`
 }
 
 type binary struct {
 	path string
 	args []string
+	node string
+	app  *app
 }
 
 func executable(path string) (string, bool) {
@@ -40,76 +50,6 @@ func executable(path string) (string, bool) {
 	}
 	resolved, err = filepath.Abs(resolved)
 	return resolved, err == nil
-}
-
-func discoverHarnesses() ([]Harness, map[string]binary) {
-	harnesses := []Harness{{ID: "pi", Name: "Pi"}, {ID: "opencode", Name: "OpenCode"}, {ID: "codex", Name: "Codex"}}
-	binaries := map[string]binary{}
-	npmRoots := []string{}
-	if appdata := os.Getenv("APPDATA"); appdata != "" {
-		npmRoots = append(npmRoots, filepath.Join(appdata, "npm", "node_modules"))
-	}
-	for _, shim := range []string{"pi", "opencode"} {
-		if path, err := exec.LookPath(shim); err == nil {
-			npmRoots = append(npmRoots, filepath.Join(filepath.Dir(path), "node_modules"))
-		}
-	}
-	for i := range harnesses {
-		h := &harnesses[i]
-		override := os.Getenv("KLM_" + strings.ToUpper(h.ID) + "_BIN")
-		candidates := []string{}
-		if override != "" {
-			candidates = append(candidates, override)
-		} else {
-			if h.ID == "pi" {
-				for _, root := range npmRoots {
-					candidates = append(candidates, filepath.Join(root, "@earendil-works", "pi-coding-agent", "dist", "cli.js"))
-				}
-			} else if h.ID == "opencode" {
-				for _, root := range npmRoots {
-					candidates = append(candidates, filepath.Join(root, "opencode-ai", "bin", "opencode.exe"))
-				}
-			} else if local := os.Getenv("LOCALAPPDATA"); local != "" {
-				candidates = append(candidates, filepath.Join(local, "Programs", "OpenAI", "Codex", "bin", "codex.exe"))
-			}
-			if runtime.GOOS == "windows" {
-				candidates = append(candidates, h.ID+".exe")
-			} else {
-				candidates = append(candidates, h.ID)
-			}
-		}
-		for _, candidate := range candidates {
-			if h.ID == "pi" && strings.EqualFold(filepath.Ext(candidate), ".js") {
-				info, err := os.Stat(candidate)
-				if err != nil || !info.Mode().IsRegular() {
-					continue
-				}
-				node, ok := executable("node")
-				if !ok {
-					continue
-				}
-				path, err := filepath.Abs(candidate)
-				if err != nil {
-					continue
-				}
-				binaries[h.ID] = binary{path: node, args: []string{path}}
-				h.Available = true
-				break
-			}
-			if path, ok := executable(candidate); ok {
-				binaries[h.ID] = binary{path: path}
-				h.Available = true
-				break
-			}
-		}
-		if !h.Available {
-			h.Error = "Executable not found. Install the harness or configure KLM_" + strings.ToUpper(h.ID) + "_BIN and restart the engine."
-			if h.ID == "pi" {
-				h.Error += " Pi's cli.js also requires Node.js on PATH."
-			}
-		}
-	}
-	return harnesses, binaries
 }
 
 func commandArgs(s Session, native nativeSession) []string {
@@ -407,6 +347,9 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 			}
 			err = errors.Join(err, p.analyticsTerminated())
 			if p.runtime != nil {
+				if supervisionErr := p.runtime.checkHealth(); supervisionErr != nil {
+					err = errors.Join(err, supervisionErr, p.runtime.shutdown())
+				}
 				bridge.unbind(p)
 			} else {
 				bridge.close()

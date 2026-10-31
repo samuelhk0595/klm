@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -37,16 +38,22 @@ type turn struct {
 }
 
 type app struct {
-	contentDownloads     contentDownloadTickets
-	store                *sqliteStore // Set only by the completed SQLite startup path.
-	sqlChanges           *sqliteChangeBus
-	clientAuth           *clientAuth
-	restartEngine        func() error
-	controlReady         bool                 // Protected by mu; Linux local readiness waits for complete startup.
-	restarting           bool                 // Protected by mu; prevents duplicate restarts and settings writes during handoff.
-	analyticsGraphClocks map[string]time.Time // Monotonic clocks for owned runs; guarded by mu.
-	activityBoardBusy    map[string]bool      // One scan or move per connection; guarded by mu.
-	activityBoardSlots   chan struct{}
+	contentDownloads             contentDownloadTickets
+	harnessInstallCancel         context.CancelFunc // app.mu; storage freeze cancels already-owned installer work.
+	harnessInstaller             *harnessInstallService
+	harnessInstalling            bool // app.mu: reserves admission before any global mutation.
+	harnessAdmissionStarted      time.Time
+	harnessConsultationDeadlines map[string]time.Time // app.mu; pauses queued expiry, never rewrites attributed creation times.
+	harnessConsumers             atomic.Int64         // Admission increments under app.mu; release never takes app.mu while holding runtime.mu.
+	store                        *sqliteStore         // Set only by the completed SQLite startup path.
+	sqlChanges                   *sqliteChangeBus
+	clientAuth                   *clientAuth
+	restartEngine                func() error
+	controlReady                 bool                 // Protected by mu; Linux local readiness waits for complete startup.
+	restarting                   bool                 // Protected by mu; prevents duplicate restarts and settings writes during handoff.
+	analyticsGraphClocks         map[string]time.Time // Monotonic clocks for owned runs; guarded by mu.
+	activityBoardBusy            map[string]bool      // One scan or move per connection; guarded by mu.
+	activityBoardSlots           chan struct{}
 
 	libraryMu         sync.Mutex
 	oauthMu           sync.Mutex
