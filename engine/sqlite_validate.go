@@ -124,7 +124,7 @@ func (v sqliteValidation) validateSessionsAndTopics() error {
 		{"session history", `SELECT 1 FROM data_sessions s LEFT JOIN record_collections c ON c.parent_table='sessions' AND c.parent_id=s.id AND c.field='events' WHERE c.kind IS NULL OR c.kind<>'array'`},
 		{"general singleton", `SELECT role FROM data_sessions WHERE role='general_agent' GROUP BY role HAVING count(*)>1`},
 		{"session project", `SELECT 1 FROM data_sessions s LEFT JOIN data_projects p ON p.id=s.project_id LEFT JOIN data_sessions parent ON parent.id=s.parent_id WHERE p.id IS NULL AND NOT(s.role='general_agent' AND s.project_id='') AND NOT(s.role='subagent' AND s.project_id='' AND coalesce(parent.role,'')='general_agent')`},
-		{"linked owner", `SELECT 1 FROM data_sessions s LEFT JOIN data_sessions p ON p.id=s.parent_id LEFT JOIN data_sessions gp ON gp.id=p.parent_id WHERE s.parent_id<>'' AND (p.id IS NULL OR p.x_graphRunId<>'' OR s.x_graphRunId<>'' OR p.project_id<>s.project_id OR s.role NOT IN ('side_agent','subagent') OR (p.parent_id<>'' AND NOT(s.role='subagent' AND p.role='side_agent' AND gp.id IS NOT NULL AND gp.parent_id='')))`},
+		{"linked owner", `SELECT 1 FROM data_sessions s LEFT JOIN data_sessions p ON p.id=s.parent_id LEFT JOIN data_sessions gp ON gp.id=p.parent_id WHERE s.parent_id<>'' AND (p.id IS NULL OR p.x_graphRunId<>'' OR s.x_graphRunId<>'' OR p.project_id<>s.project_id OR s.role NOT IN ('side_agent','subagent') OR (p.parent_id<>'' AND NOT(s.role='subagent' AND p.role='side_agent' AND gp.id IS NOT NULL AND gp.parent_id=''))) AND NOT(s.role='subagent' AND EXISTS(SELECT 1 FROM data_delegation_children d WHERE d.id=s.id))`},
 		{"duplicate side agent", `SELECT parent_id FROM data_sessions WHERE role='side_agent' GROUP BY parent_id HAVING count(*)>1`},
 		{"native owner", `SELECT 1 FROM data_native_sessions n LEFT JOIN data_sessions s ON s.id=n.map_key WHERE s.id IS NULL`},
 		{"topic membership", `SELECT 1 FROM data_sessions s LEFT JOIN data_topics t ON t.record_id=s.x_topicId AND t.owner_id=s.project_id WHERE s.x_topicId<>'' AND (t.id IS NULL OR s.role<>'' OR s.parent_id<>'' OR s.x_graphRunId<>'')`},
@@ -178,10 +178,19 @@ func (v sqliteValidation) validateSessionsAndTopics() error {
 		if s.Graph != nil {
 			return errors.New("persisted public graph projection")
 		}
+		managed, err := v.exists("delegation_children", s.ID)
+		if err != nil {
+			return err
+		}
+		if managed {
+			if err := v.validateManagedDelegationChild(s.ID); err != nil {
+				return err
+			}
+		}
 		if s.Role == sessionRoleGeneralAgent && (s.ProjectID != "" || s.ParentID != "" || s.GraphRunID != "" || s.SelectedGraphID != "" || s.Archived || !filepath.IsAbs(s.ExecutionCWD)) {
 			return errors.New("invalid general conversation")
 		}
-		if s.GraphRunID == "" && (s.GraphNodeID != "" || s.ExecutionCWD != "" && s.Role != sessionRoleGeneralAgent || s.Role == "graph_node") {
+		if s.GraphRunID == "" && (s.GraphNodeID != "" || s.ExecutionCWD != "" && s.Role != sessionRoleGeneralAgent && !managed || s.Role == "graph_node") {
 			return errors.New("invalid private conversation ownership")
 		}
 		if s.GraphRunID != "" && (s.Role != "graph_node" || s.ParentID != "" || s.SelectedGraphID != "" || !filepath.IsAbs(s.ExecutionCWD)) {

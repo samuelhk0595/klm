@@ -36,9 +36,32 @@ func refreshSQLiteLibraryReferences(ctx context.Context, tx *sql.Tx, table, id s
 			return err
 		}
 	}
-	if table == "capability_selections" || table == "automations" {
+	if table == "capability_selections" || table == "automations" || table == "global_agents" || table == "agent_bindings" {
 		var selection CapabilitySelection
-		if table == "automations" {
+		if table == "global_agents" {
+			var agent GlobalAgentRecord
+			if err := json.Unmarshal(raw, &agent); err != nil {
+				return err
+			}
+			selection = agentConfig(agent.Definition).Selection
+		} else if table == "agent_bindings" {
+			var binding *SessionAgentBinding
+			if err := json.Unmarshal(raw, &binding); err != nil {
+				return err
+			}
+			if binding != nil {
+				for _, part := range []CapabilitySelection{binding.LastCaptured.Config.Selection, binding.Desired.Selection, binding.InheritedCapabilities} {
+					selection.Skills = append(selection.Skills, part.Skills...)
+					selection.MCPConnections = append(selection.MCPConnections, part.MCPConnections...)
+				}
+				if binding.Overrides.Skills != nil {
+					selection.Skills = append(selection.Skills, (*binding.Overrides.Skills)...)
+				}
+				if binding.Overrides.MCPConnections != nil {
+					selection.MCPConnections = append(selection.MCPConnections, (*binding.Overrides.MCPConnections)...)
+				}
+			}
+		} else if table == "automations" {
 			var a struct {
 				Selection CapabilitySelection `json:"selection"`
 			}
@@ -116,15 +139,37 @@ func refreshSQLiteLibraryReferences(ctx context.Context, tx *sql.Tx, table, id s
 			return err
 		}
 		add(r.Capabilities)
+	case "delegation_invocations":
+		var invocation struct {
+			Capture struct {
+				ExternalCapabilities *capture `json:"externalCapabilities"`
+			} `json:"capture"`
+		}
+		if err := json.Unmarshal(raw, &invocation); err != nil {
+			return err
+		}
+		add(invocation.Capture.ExternalCapabilities)
 	case "graph_snapshots":
 		var s struct {
-			Capabilities map[string]*capture `json:"capabilities"`
+			Capabilities      map[string]*capture `json:"capabilities"`
+			DelegationCatalog *struct {
+				Agents map[string]struct {
+					Execution struct {
+						ExternalCapabilities *capture `json:"externalCapabilities"`
+					} `json:"execution"`
+				} `json:"agents"`
+			} `json:"delegationCatalog"`
 		}
 		if err := json.Unmarshal(raw, &s); err != nil {
 			return err
 		}
 		for _, c := range s.Capabilities {
 			add(c)
+		}
+		if s.DelegationCatalog != nil {
+			for _, agent := range s.DelegationCatalog.Agents {
+				add(agent.Execution.ExternalCapabilities)
+			}
 		}
 	default:
 		return nil
@@ -161,7 +206,7 @@ func (s legacyStage) importLibraryReferences(table, id string, node int64) error
 	// Each capture/selection is the existing bounded single-record import unit;
 	// no collection/history is hydrated and references contain no secret values.
 	switch table {
-	case "capability_selections", "automations", "mcp_connections", "capability_applied", "capability_preparing", "automation_runs", "graph_snapshots":
+	case "capability_selections", "automations", "mcp_connections", "capability_applied", "capability_preparing", "automation_runs", "graph_snapshots", "delegation_invocations":
 	default:
 		return nil
 	}

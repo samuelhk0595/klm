@@ -7,7 +7,7 @@ import { Menu, MenuItem } from '../../design-system/Menu';
 import { GraphDetailsDialog } from './GraphDetailsDialog';
 import { DeleteGraphDialog } from './DeleteGraphDialog';
 import { authoringPath, graphListEntry, type GraphFile } from './files';
-import type { Agent } from '../agents/demo';
+import type { Agent } from '../agents/types';
 import { request } from '../../engine';
 import './graphs.css';
 import { flushDrafts, useEngineDraft } from '../drafts/draftStore';

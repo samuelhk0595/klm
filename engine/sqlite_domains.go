@@ -23,6 +23,12 @@ type sqliteDomain struct {
 
 func sqliteDomains() ([]sqliteDomain, error) {
 	roots := []sqliteDomain{
+		{field: "delegationBatches", table: "delegation_batches", children: []sqliteDomain{{field: "calls", table: "delegation_calls"}}},
+		{field: "delegationInvocations", table: "delegation_invocations"},
+		{field: "delegationChildren", table: "delegation_children"},
+		{field: "globalAgents", table: "global_agents"},
+		{field: "agentSources", table: "agent_sources"},
+		{field: "agentCatalogChanges", table: "agent_catalog_changes"},
 		{field: "engineSettings", table: "engine_settings", single: true},
 		{field: "automations", table: "automations"},
 		{field: "automationTriggers", table: "automation_triggers"},
@@ -86,6 +92,7 @@ func sqliteDomains() ([]sqliteDomain, error) {
 			{field: "folders", table: "legacy_project_folders"}, {field: "archivedFolders", table: "legacy_archived_folders"},
 		}},
 		{field: "sessions", table: "sessions", children: []sqliteDomain{
+			{field: "agentBinding", table: "agent_bindings", single: true},
 			{field: "events", table: "session_events"}, {field: "queue", table: "queued_messages"},
 			{field: "sources", table: "session_sources"}, {field: "permissions", table: "pending_permissions"},
 			{field: "questions", table: "pending_questions"}, {field: "usage", table: "session_usage", single: true},
@@ -193,17 +200,28 @@ func sqliteDomainTables() ([]sqliteDomain, error) {
 // Children reference their containing record. The same JSON byte encoding can be
 // streamed for verification without constructing its domain or collection in Go.
 func sqliteDomainSchema() (string, error) {
+	return sqliteDomainSchemaSelection(nil)
+}
+
+// The same authoritative DDL is used for fresh stores and explicitly versioned
+// additive upgrades. A nonnil selection excludes shared prelude/auxiliary tables.
+func sqliteDomainSchemaSelection(selected map[string]bool) (string, error) {
 	tables, err := sqliteDomainTables()
 	if err != nil {
 		return "", err
 	}
 	var ddl strings.Builder
-	ddl.WriteString(`CREATE TABLE record_collections(
+	if selected == nil {
+		ddl.WriteString(`CREATE TABLE record_collections(
  parent_table TEXT NOT NULL, parent_id TEXT NOT NULL, field TEXT NOT NULL,
  child_table TEXT NOT NULL, kind TEXT NOT NULL, size INTEGER NOT NULL,
  PRIMARY KEY(parent_table,parent_id,field)
 ) STRICT;`)
+	}
 	for _, spec := range tables {
+		if selected != nil && !selected[spec.table] {
+			continue
+		}
 		table := "data_" + spec.table
 		ownerReference := ""
 		if spec.parentTable != "" {
@@ -239,6 +257,9 @@ CREATE TABLE %s_chunks(
 CREATE INDEX data_session_events_kind ON data_session_events(owner_id,kind,position);
 CREATE INDEX data_session_events_correlation ON data_session_events(owner_id,correlation_id,position);`)
 		}
+	}
+	if selected != nil {
+		return ddl.String(), nil
 	}
 	ddl.WriteString(`CREATE TABLE accepted_message_ids(
  session_id TEXT NOT NULL REFERENCES data_sessions(id), message_id TEXT NOT NULL,

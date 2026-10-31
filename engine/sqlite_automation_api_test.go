@@ -20,7 +20,15 @@ func TestSQLiteAutomationManagementHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.catalogs = map[string]catalogCache{"project/pi": {catalog: &ModelCatalog{DefaultModel: "fixture-model", Models: []ModelOption{{ID: "fixture-model"}}}, expires: time.Now().Add(time.Minute)}}
+	project, err := a.store.readProjectMeta(a.ctx, s.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheKey, err := modelCatalogCacheKey(Session{ProjectID: s.ProjectID, Harness: "pi"}, project.Folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.catalogs = map[string]catalogCache{cacheKey: {catalog: &ModelCatalog{DefaultModel: "fixture-model", Models: []ModelOption{{ID: "fixture-model"}}}, expires: time.Now().Add(time.Minute)}}
 	handler := a.routes()
 	call := func(method, path string, body any, want int) map[string]any {
 		t.Helper()

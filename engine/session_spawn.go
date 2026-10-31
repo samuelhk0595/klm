@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 )
 
@@ -55,7 +56,19 @@ func (p *adapter) spawnSession(ctx context.Context, args spawnArgs) (any, error)
 	defer cancel()
 	defer stop()
 	if p.app.store != nil {
-		return p.spawnSQLSession(ctx, args)
+		result, err := p.spawnSQLSession(ctx, args)
+		var problem *AgentConfigProblem
+		if errors.As(err, &problem) {
+			hint := problem.Hint
+			if hint == "" {
+				hint = "Read agents_list/agent_get and current model options, correct the rejected settings and retry the same operationId. No session was created."
+			}
+			err = spawnProblem(problem.Field, problem.Code, problem.Message, hint)
+		}
+		return result, err
+	}
+	if args.Agent != "" {
+		return nil, spawnProblem("agent", "storage_unavailable", "Saved-agent creation requires SQLite storage.", "Use the current engine storage.")
 	}
 	a := p.app
 	a.mu.Lock()

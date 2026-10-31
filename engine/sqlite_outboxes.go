@@ -199,6 +199,9 @@ func (s *sqliteStore) applySQLLibraryFiles(ctx context.Context, change LibraryDe
 }
 
 func (st *sqliteSessionTx) finishLibraryDeletion(c LibraryDeletion) error {
+	if err := st.removeAgentLibraryReferences(c.Kind, c.ItemID); err != nil {
+		return err
+	}
 	for {
 		ids, err := sqliteQueryIDs(st.ctx, st.tx, `SELECT record_key FROM selection_references WHERE domain='automations' AND kind=? AND item=? LIMIT 100`, c.Kind, c.ItemID)
 		if err != nil {
@@ -281,7 +284,8 @@ func (st *sqliteSessionTx) pruneMCPCredentials() error {
  OR r.domain='automation_runs' AND EXISTS(SELECT 1 FROM data_automation_runs a WHERE a.id=r.record_key AND a.status='running')
  OR r.domain='graph_snapshots' AND EXISTS(SELECT 1 FROM data_graph_snapshots p JOIN data_graph_runs g ON g.id=p.owner_id WHERE p.id=r.record_key AND g.status IN ('starting','running','ending'))
  OR r.domain='capability_applied' AND EXISTS(SELECT 1 FROM data_capability_applied p JOIN data_session_capabilities c ON c.id=p.owner_id JOIN data_sessions s ON s.id=c.owner_id WHERE p.id=r.record_key AND s.status='running')
- OR r.domain='capability_preparing' AND EXISTS(SELECT 1 FROM data_capability_preparing p JOIN data_session_capabilities c ON c.id=p.owner_id JOIN data_sessions s ON s.id=c.owner_id WHERE p.id=r.record_key AND s.status='running')
+	 OR r.domain='capability_preparing' AND EXISTS(SELECT 1 FROM data_capability_preparing p JOIN data_session_capabilities c ON c.id=p.owner_id JOIN data_sessions s ON s.id=c.owner_id WHERE p.id=r.record_key AND s.status='running')
+	 OR r.domain='delegation_invocations' AND EXISTS(SELECT 1 FROM data_delegation_invocations i WHERE i.id=r.record_key AND (i.x_state<>'terminal' OR EXISTS(SELECT 1 FROM data_delegation_children c WHERE c.x_activeInvocationId=i.id AND c.x_quarantined='true')))
 ))`, nil, func(id string) error { return st.deleteRecord("mcp_credentials", id) })
 }
 

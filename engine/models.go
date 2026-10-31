@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strconv"
@@ -70,9 +72,29 @@ func (c *ModelCatalog) find(id string) *ModelOption {
 	return nil
 }
 
+// Discovery can consume project/CWD-specific harness configuration. Both the
+// cached result and in-flight discovery must have exactly that same identity.
+// Keep lexical aliases distinct; resolving symlinks could change parent config
+// discovery semantics. Windows directory identity is case-insensitive.
+func modelCatalogCacheKey(s Session, cwd string) (string, error) {
+	directory, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", err
+	}
+	directory = filepath.Clean(directory)
+	if runtime.GOOS == "windows" {
+		directory = strings.ToLower(directory)
+	}
+	encoded, err := json.Marshal([3]string{s.ProjectID, s.Harness, directory})
+	return string(encoded), err
+}
+
 func (a *app) catalog(ctx context.Context, s Session, cwd string, refresh bool) (*ModelCatalog, error) {
+	key, err := modelCatalogCacheKey(s, cwd)
+	if err != nil {
+		return nil, err
+	}
 	a.catalogMu.Lock()
-	key := s.ProjectID + "/" + s.Harness
 	if entry, ok := a.catalogs[key]; ok && !refresh && time.Now().Before(entry.expires) {
 		a.catalogMu.Unlock()
 		return entry.catalog, nil

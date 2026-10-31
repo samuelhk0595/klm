@@ -352,8 +352,9 @@ func loadAuthoring(p Project) (AuthoringCatalog, error) {
 				err = errors.New("Invalid filename identifier.")
 			}
 			if err == nil && kind == "agents" {
-				agent := AgentDefinition{Enabled: true}
-				err = toml.NewDecoder(bytes.NewReader(b)).DisallowUnknownFields().Decode(&agent)
+				document, parseErr := readAgentDocument(b)
+				agent := document.AgentDefinition
+				err = parseErr
 				if err == nil && authoringSlug(agent.Name) != id {
 					err = errors.New("Agent name and filename identifier differ.")
 				}
@@ -420,6 +421,20 @@ func (a *app) authoring(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, "Cannot read project configuration: "+err.Error())
 		return
 	}
+	if a.store != nil {
+		scan, err := a.scanAgentCatalogLocked(r.Context(), p.ID)
+		if err != nil {
+			agentHTTPError(w, err)
+			return
+		}
+		for _, diagnostic := range scan.Diagnostics {
+			c.Errors = append(c.Errors, diagnostic.Message)
+		}
+		// Compatibility surface remains complete for graph editors. New agent
+		// management/pickers use the bounded /api/agents pages and exact detail.
+		respond(w, 200, map[string]any{"agents": scan.Agents, "graphs": c.Graphs, "errors": c.Errors, "diagnostics": scan.Diagnostics, "complete": scan.Complete, "revision": scan.Revision})
+		return
+	}
 	respond(w, 200, c)
 }
 func (a *app) projectModels(w http.ResponseWriter, r *http.Request) {
@@ -460,6 +475,10 @@ func catalogForMutation(p Project) (AuthoringCatalog, error) {
 	return c, err
 }
 func (a *app) saveAgent(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.saveCatalogAgent(w, r)
+		return
+	}
 	p, ok := a.authoringProject(w, r)
 	if !ok {
 		return
@@ -541,6 +560,9 @@ func (a *app) saveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b, err := toml.Marshal(d)
+	if old != nil {
+		b, err = marshalExistingAgentDocument(p, oldID, d)
+	}
 	if err != nil {
 		fail(w, 400, err.Error())
 		return
@@ -578,6 +600,10 @@ func (a *app) saveAgent(w http.ResponseWriter, r *http.Request) {
 	respond(w, 200, AgentRecord{d, id, revision(b), refs})
 }
 func (a *app) deleteAgent(w http.ResponseWriter, r *http.Request) {
+	if a.store != nil {
+		a.deleteCatalogAgent(w, r)
+		return
+	}
 	p, ok := a.authoringProject(w, r)
 	if !ok {
 		return
@@ -888,7 +914,7 @@ func (a *app) saveGraph(w http.ResponseWriter, r *http.Request) {
 	}
 	a.authoringMu.Lock()
 	defer a.authoringMu.Unlock()
-	c, err := catalogForMutation(p)
+	c, err := a.graphAuthoringLocked(r.Context(), p)
 	if err != nil {
 		fail(w, 409, err.Error())
 		return

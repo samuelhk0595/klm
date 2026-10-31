@@ -65,6 +65,19 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 	}
 	sessionModel := p.model
 	p.app.mu.Unlock()
+	if p.delegation != nil {
+		if native.ID == "" {
+			manifest, manifestErr := delegationCodexManifestV1()
+			if manifestErr != nil {
+				return manifestErr
+			}
+			p.pendingCodexDelegation = &manifest
+		} else if native.Delegation == nil || validateDelegationCodexManifest(*native.Delegation) != nil {
+			return errors.New("Codex delegation manifest is unavailable for this native history.")
+		} else {
+			p.pendingCodexDelegation = native.Delegation
+		}
+	}
 
 	process, reused := (*interactiveProcess)(nil), false
 	toolKey := p.runtimeToolKey()
@@ -238,6 +251,9 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 			params["config"] = libraryConfig
 		}
 		method := "thread/start"
+		if native.ID == "" && p.pendingCodexDelegation != nil {
+			params["dynamicTools"] = []DelegationCodexSpec{delegationCodexSpecV1()}
+		}
 		if native.ID != "" {
 			method, params["threadId"] = "thread/resume", native.ID
 			// KLM already stores the timeline; omit old turns from the response,
@@ -530,6 +546,7 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 			if err != nil {
 				return err
 			}
+			p.delegationPromptAttempted()
 			if err := c.send(map[string]any{"id": phase, "method": "turn/start", "params": turnParams}); err != nil {
 				return err
 			}
@@ -537,6 +554,9 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 			c.turnID = str(object(result["turn"]), "id")
 			if !codexIdentifier(c.turnID) {
 				return errors.New("Codex returned an invalid native turn identifier.")
+			}
+			if err := p.delegationNativeStarted(c.turnID); err != nil {
+				return err
 			}
 			if err := p.analyticsStartAt(dispatchedAt); err != nil {
 				return err
@@ -803,6 +823,11 @@ func (c *codexInteractive) frame(frame map[string]any) error {
 		if str(nativeTurn, "id") != c.turnID {
 			return nil
 		}
+		if c.p.delegation != nil {
+			if err := c.p.delegation.gate(c.p.turn.ctx, "native_completion"); err != nil {
+				return err
+			}
+		}
 		if err := c.p.analyticsEnd(); err != nil {
 			return err
 		}
@@ -850,6 +875,11 @@ func (c *codexInteractive) frame(frame map[string]any) error {
 		}
 		if err := cacheNativeMap(c.p.turn.protocolScope, "codex-items/"+c.threadID, c.items, id, item); err != nil {
 			return err
+		}
+		if method == "item/completed" && str(item, "type") == "dynamicToolCall" && str(item, "tool") == delegationToolName && c.p.delegation != nil {
+			if err := c.p.delegation.nativeResultSeen(id, c.turnID); err != nil {
+				return err
+			}
 		}
 		if str(item, "type") == "userMessage" {
 			if clientID := str(item, "clientId"); clientID != "" {
@@ -1155,6 +1185,9 @@ func (c *codexInteractive) request(frame map[string]any) error {
 	}
 	if protocolHasContent(params) {
 		return rpcError(-32602, "Request scope exceeds the supported interactive envelope. No approval or answer was supplied.")
+	}
+	if method == "item/tool/call" {
+		return c.delegationRequest(frame, sourceID)
 	}
 	if c.p.graphSealed() {
 		return rpcError(-32000, "Graph activation is closing; no further interaction is permitted.")

@@ -3,9 +3,9 @@ import { X } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import type { Graph } from './demo';
-import { agentSlug } from '../agents/demo';
 import { bindDraftDiscard, flushDrafts, useEngineDraft } from '../drafts/draftStore';
 import { beginLocalActivity } from '../engines/localActivities';
+import { agentSlug } from '../agents/types';
 
 export function GraphDetailsDialog({ graph, graphs, onSave, onClose, draftKey = `form.graphDetails:${graph?.id ?? 'new'}` }: {
   draftKey?: string;

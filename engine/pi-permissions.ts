@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 
 const linkedConfig = /*KLM_LINKED_CONFIG*/{} as {
   url: string; token: string; graphNode?: boolean; nativeSubagents?: boolean; nativeSubagentPath?: string; toolTimeoutMs: number;
-  libraryUrl?: string; libraryToken?: string;
+  libraryUrl?: string; libraryToken?: string; delegation?: boolean;
   tools?: { name: string; description: string; inputSchema: TSchema; external?: boolean }[];
 };
 
@@ -105,7 +105,7 @@ export default function (pi: ExtensionAPI) {
       if (linkedConfig.graphNode) await linkedRPC("klm/graph/gate", {}, ctx.signal);
       // External tools use engine policy in their dispatch path, not this
       // privileged internal-tool bypass. The gateway validates the allowlist.
-      if (event.toolName === "ask_user" || linkedConfig.nativeSubagents && event.toolName === "subagent" || tools.some(tool => tool.name === event.toolName && !tool.external)) return;
+      if (event.toolName === "ask_user" || linkedConfig.delegation && event.toolName === "subagent_run" || linkedConfig.nativeSubagents && event.toolName === "subagent" || tools.some(tool => tool.name === event.toolName && !tool.external)) return;
       if (tools.some(tool => tool.name === event.toolName && tool.external)) return;
       const signal = ctx.signal;
       if (ctx.mode !== "rpc" || !ctx.hasUI || !signal || signal.aborted) {
@@ -163,7 +163,7 @@ export default function (pi: ExtensionAPI) {
       if (!tools.every(tool => (tool.external ? libraryInventory : inventory).tools?.some(item => item.name === tool.name))) {
         throw new Error("Linked-agent tools are not ready.");
       }
-      const allowed = new Set(["read", "write", "edit", "bash", "powershell", "grep", "find", "ls", "ask_user", ...(linkedConfig.nativeSubagents ? ["subagent"] : []), ...tools.map(tool => tool.name)]);
+      const allowed = new Set(["read", "write", "edit", "bash", "powershell", "grep", "find", "ls", "ask_user", ...(linkedConfig.delegation ? ["subagent_run"] : []), ...(linkedConfig.nativeSubagents ? ["subagent"] : []), ...tools.map(tool => tool.name)]);
       const inventoryTools = pi.getAllTools();
       if (inventoryTools.some(tool => !allowed.has(tool.name))) throw new Error("Pi loaded unselected tools.");
       if (linkedConfig.nativeSubagents) {

@@ -9,6 +9,15 @@ import (
 )
 
 func (a *app) changeSQLSettings(ctx context.Context, id string, model, effort *string, yolo *bool) error {
+	if model != nil || effort != nil {
+		bound, err := a.agentBindingExists(ctx, id)
+		if err != nil {
+			return err
+		}
+		if bound {
+			return a.patchAgentBinding(ctx, id, "", "", AgentOverridePatch{Model: agentOverrideValue[string]{Present: model != nil, Value: model}, Effort: agentOverrideValue[string]{Present: effort != nil, Value: effort}}, yolo)
+		}
+	}
 	if model == nil && effort == nil {
 		if yolo == nil {
 			return controlError(400, "Supply at least one setting.")

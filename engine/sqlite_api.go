@@ -362,6 +362,7 @@ func (a *app) projectSQLTopics(w http.ResponseWriter, r *http.Request) {
 
 func (a *app) respondSQLSession(w http.ResponseWriter, r *http.Request, id string, status int) {
 	var s Session
+	var delegation *DelegationSessionStatus
 	var topic *sqlTopicView
 	var revision, count string
 	more := map[string]bool{}
@@ -418,6 +419,10 @@ func (a *app) respondSQLSession(w http.ResponseWriter, r *http.Request, id strin
 		if err := decodeSQLiteRecord(r.Context(), tx, "session_usage", sqliteOwnedKey(id, ""), 64<<10, &s.Usage); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
+		delegation, err = (&sqliteSessionTx{ctx: r.Context(), tx: tx}).delegationSessionStatus(s)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
@@ -425,15 +430,20 @@ func (a *app) respondSQLSession(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	a.mu.Lock()
+	if t := a.runs[id]; t != nil && t.delegation != nil && t.delegation.preparing != nil && delegation != nil {
+		delegation.Waiting = true
+		delegation.Actions.Steer, delegation.Actions.Settings = false, false
+	}
 	if runtime := a.runtimes[id]; runtime != nil {
 		s.RuntimeActive = runtime.active()
 	}
 	a.mu.Unlock()
 	wire := struct {
 		Session
-		Capabilities any           `json:"capabilities"`
-		Topic        *sqlTopicView `json:"topic,omitempty"`
-	}{s, map[string]any{"revision": sqliteRevision(s.Capabilities.Revision), "desired": s.Capabilities.Desired, "applied": s.Capabilities.Applied, "preparing": s.Capabilities.Preparing}, topic}
+		Capabilities any                      `json:"capabilities"`
+		Topic        *sqlTopicView            `json:"topic,omitempty"`
+		Delegation   *DelegationSessionStatus `json:"delegation,omitempty"`
+	}{s, map[string]any{"revision": sqliteRevision(s.Capabilities.Revision), "desired": s.Capabilities.Desired, "applied": s.Capabilities.Applied, "preparing": s.Capabilities.Preparing}, topic, delegation}
 	respond(w, status, map[string]any{"session": wire, "revision": revision, "eventCount": count, "more": more})
 }
 

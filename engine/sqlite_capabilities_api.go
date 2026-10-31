@@ -27,9 +27,25 @@ func (a *app) sqlConversationCapabilities(w http.ResponseWriter, r *http.Request
 			fail(w, 400, err.Error())
 			return
 		}
+		bound, err := a.agentBindingExists(r.Context(), id)
+		if err != nil {
+			agentHTTPError(w, err)
+			return
+		}
+		if bound {
+			err = a.patchAgentBinding(r.Context(), id, "", expected, AgentOverridePatch{Skills: agentOverrideValue[[]string]{Present: true, Value: &selection.Skills}, MCPConnections: agentOverrideValue[[]MCPSelection]{Present: true, Value: &selection.MCPConnections}}, nil)
+			if err != nil {
+				agentHTTPError(w, err)
+				return
+			}
+			read := r.Clone(r.Context())
+			read.Method = http.MethodGet
+			a.sqlConversationCapabilities(w, read)
+			return
+		}
 		a.libraryMu.Lock()
 		a.mu.Lock()
-		err := a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error {
+		err = a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error {
 			s, err := st.sessionMeta(id)
 			if err != nil {
 				return err

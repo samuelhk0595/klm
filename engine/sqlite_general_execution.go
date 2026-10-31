@@ -271,7 +271,7 @@ func (p *adapter) callSQLGeneralTool(ctx context.Context, name string, args gene
 		if args.Effort != nil {
 			effort = *args.Effort
 		}
-		return p.spawnSession(ctx, spawnArgs{ProjectID: args.ProjectID, Title: title, Prompt: args.Prompt, OperationID: args.OperationID, SourceUserEventID: args.SourceUserEventID, Harness: args.Harness, Model: model, Effort: effort, Workspace: args.Folder, YOLO: args.YOLO})
+		return p.spawnSession(ctx, spawnArgs{Agent: args.Agent, AgentSourceUID: args.AgentSourceUID, AgentRevision: args.AgentRevision, AgentOverrides: args.AgentOverrides, InheritParentCapabilities: args.InheritParentCapabilities, ProjectID: args.ProjectID, Title: title, Prompt: args.Prompt, OperationID: args.OperationID, SourceUserEventID: args.SourceUserEventID, Harness: args.Harness, Model: model, Effort: effort, Workspace: args.Folder, YOLO: args.YOLO})
 	}
 	if name == "project_graphs_list" {
 		a.mu.Unlock()

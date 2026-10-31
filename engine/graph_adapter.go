@@ -170,6 +170,12 @@ func (p *adapter) graphSealed() bool {
 
 func (p *adapter) bridgeTools() []map[string]any {
 	tools := []map[string]any{}
+	if p.delegation != nil {
+		tools = append(tools, delegationOutputTool())
+	}
+	if p.turn.graphDelegation != nil {
+		tools = append(tools, agentDiscoveryTools(false)...)
+	}
 	if p.automationToolAvailable() {
 		tools = append(tools, automationTools()...)
 	}

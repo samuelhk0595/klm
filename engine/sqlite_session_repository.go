@@ -47,6 +47,9 @@ func (s *sqliteStore) sessionTransaction(ctx context.Context, change func(*sqlit
 			return err
 		}
 		changes.publishedContent = st.changes.publishedContent
+		if err := st.validateDelegationChanges(); err != nil {
+			return err
+		}
 		if len(st.changes.Sessions) == 0 && len(st.changes.Records) == 0 && len(st.changes.Invalidated) == 0 {
 			changes.Revision = current
 			return nil
@@ -121,7 +124,7 @@ func (s *sqliteStore) readSessionMeta(ctx context.Context, id string) (Session, 
 }
 
 func sqliteSessionMetadataJSON(meta Session) ([]byte, error) {
-	if meta.Events != nil || meta.Queue != nil || meta.Sources != nil || meta.Permissions != nil || meta.Questions != nil || meta.Usage != nil || !reflect.DeepEqual(meta.Capabilities, ConversationCapabilities{}) {
+	if meta.AgentBinding != nil || meta.Events != nil || meta.Queue != nil || meta.Sources != nil || meta.Permissions != nil || meta.Questions != nil || meta.Usage != nil || !reflect.DeepEqual(meta.Capabilities, ConversationCapabilities{}) {
 		return nil, errors.New("session metadata cannot contain history or operational collections")
 	}
 	meta.Graph, meta.RuntimeActive = nil, false // runtime projections are not durable facts.
@@ -133,13 +136,16 @@ func sqliteSessionMetadataJSON(meta Session) ([]byte, error) {
 	if err := json.Unmarshal(encoded, &fields); err != nil {
 		return nil, err
 	}
-	for _, name := range []string{"events", "queue", "sources", "permissions", "questions", "usage", "capabilities"} {
+	for _, name := range []string{"events", "queue", "sources", "permissions", "questions", "usage", "capabilities", "agentBinding"} {
 		delete(fields, name)
 	}
 	return json.Marshal(fields)
 }
 
 func (st *sqliteSessionTx) putSessionMeta(meta Session) error {
+	if err := st.validateManagedSessionUpdate(meta); err != nil {
+		return err
+	}
 	encoded, err := sqliteSessionMetadataJSON(meta)
 	if err != nil {
 		return err

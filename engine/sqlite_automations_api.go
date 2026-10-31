@@ -296,6 +296,10 @@ func (a *app) saveSQLAutomation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := body.Automation.Automation
+	if v.AgentConfiguration != nil {
+		fail(w, 400, "Captured specialist configuration is engine-owned.")
+		return
+	}
 	if body.Automation.Revision != "" {
 		n, err := sqlExpectedRevision(body.Automation.Revision)
 		if err != nil {

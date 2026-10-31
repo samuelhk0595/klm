@@ -6,7 +6,7 @@ import { Button, IconButton } from '../../design-system/Button';
 import { Badge } from '../../design-system/Badge';
 import { Menu, MenuItem } from '../../design-system/Menu';
 import { HarnessIcon } from '../chat/HarnessIcon';
-import type { Agent } from '../agents/demo';
+import type { Agent } from '../agents/types';
 import { AgentNodePanel } from './AgentNodePanel';
 import { ChoiceNodePanel } from './ChoiceNodePanel';
 import { ForkNodePanel } from './ForkNodePanel';

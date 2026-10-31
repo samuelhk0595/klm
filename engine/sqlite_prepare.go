@@ -80,7 +80,7 @@ func validateSQLiteImport(ctx context.Context, s *sqliteStore) error {
 	}
 	return s.write(ctx, func(tx *sql.Tx) error {
 		v := sqliteValidation{ctx: ctx, tx: tx}
-		for _, validate := range []func() error{v.validateIdentities, v.validateSessionsAndTopics, v.validateCollaboration, v.validateWebhooks, v.validateBoard, v.validateAnalytics, v.validateAutomations, v.validateGraphs} {
+		for _, validate := range []func() error{v.validateIdentities, v.validateSessionsAndTopics, v.validateCollaboration, v.validateWebhooks, v.validateBoard, v.validateAnalytics, v.validateAutomations, v.validateGraphs, v.validateDelegationRecords} {
 			if err := validate(); err != nil {
 				return err
 			}

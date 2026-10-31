@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"strings"
@@ -108,13 +109,15 @@ func linkedTools() []map[string]any {
 	}
 	for _, t := range tools {
 		if str(t, "name") == "session_spawn" {
+			t["description"] = str(t, "description") + " With agent, saved specialist defaults and Library replace parent defaults; explicit settings override them. Without agent, existing inheritance is unchanged. Use agents_list/agent_get for saved definitions."
+			addAgentSpawnProperties(t["inputSchema"].(map[string]any)["properties"].(map[string]any))
 			delete(t["inputSchema"].(map[string]any)["properties"].(map[string]any), "workspace")
 		}
 		if str(t, "name") == "session_spawn_options" {
 			t["description"] = "Read available installed harnesses, exact model IDs/efforts and recent real user message IDs. Topic identity is inherited by the engine; there is no folder/workspace override. Use before changing settings or recovering a rejected spawn. Does not create sessions or authorize creation."
 		}
 	}
-	return tools
+	return append(tools, agentDiscoveryTools(false)...)
 }
 
 // Do not expose the internal delivery handshake as if it were model guidance.
@@ -192,7 +195,10 @@ func (b *linkedBridge) serve(w http.ResponseWriter, r *http.Request) {
 		Method  string          `json:"method"`
 		Params  json.RawMessage `json:"params"`
 	}
-	if !decode(w, r, &message) {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, delegationRequestLimit+8192))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&message) != nil || decoder.Decode(new(any)) != io.EOF {
+		fail(w, 400, "Invalid private JSON-RPC request.")
 		return
 	}
 	if message.JSONRPC != "2.0" {
@@ -210,6 +216,17 @@ func (b *linkedBridge) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch message.Method {
+	case "klm/delegation/ready", "klm/delegation/gate", "klm/delegation/admit", "klm/delegation/prepared", "klm/delegation/wait", "klm/delegation/cancel":
+		if p == nil || (p.harness != "pi" && p.harness != "opencode") {
+			fail(w, 409, "Owned delegation turn is not active.")
+			return
+		}
+		value, err := p.delegationRPC(r.Context(), message.Method, message.Params)
+		if err != nil {
+			respond(w, 200, map[string]any{"jsonrpc": "2.0", "id": message.ID, "error": map[string]any{"code": -32000, "message": err.Error(), "data": delegationRPCErrorData(message.Method, message.Params, err)}})
+			return
+		}
+		result = value
 	case "initialize":
 		var params struct {
 			ProtocolVersion string `json:"protocolVersion"`
@@ -350,6 +367,12 @@ func (b *linkedBridge) call(ctx context.Context, name string, raw json.RawMessag
 	}
 	if name == "session_topic_set" {
 		return p.setSessionTopic(raw)
+	}
+	if name == "subagent_output_read" {
+		return p.callDelegationOutput(ctx, raw)
+	}
+	if name == "agents_list" || name == "agent_get" {
+		return p.callAgentDiscovery(ctx, name, raw)
 	}
 	if name == "automation_succeed" || name == "automation_fail" {
 		return p.callAutomationTool(name, raw)

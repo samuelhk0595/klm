@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
 import { request, type QueuedMessage, type Session, type SessionResponse } from '../../engine';
+import { agentExecutionBlocked, useSessionAgent } from '../agents/binding';
 
 const labels = { queued: 'Queued', steering: 'Next turn', sending: 'Sending', accepted: 'Next turn', interrupting: 'Interrupting', paused: 'Paused', uncertain: 'Delivery unconfirmed' };
 
 export function MessageQueue({ session, disabled, onSnapshot, onInterrupt }: { session: Session; disabled?: boolean; onSnapshot: (value: SessionResponse) => void; onInterrupt: (sessionId: string) => void }) {
+  useSessionAgent(session);
+  const executionBlocked = agentExecutionBlocked(session);
   const [pending, setPending] = useState('');
   const [error, setError] = useState('');
   const [page, setPage] = useState<{ items: QueuedMessage[]; nextAfterId: string; hasMore: boolean }>();
@@ -21,7 +24,7 @@ export function MessageQueue({ session, disabled, onSnapshot, onInterrupt }: { s
     finally { if (!current.signal.aborted) setPending(''); }
   }
   async function update(id: string, send: boolean) {
-    if (pending || disabled) return;
+     if (pending || disabled || send && (agentExecutionBlocked(session) || session.delegation?.actions.interrupt === false)) return;
     const retryUncertain = send && messages.find(item => item.id === id)?.status === 'uncertain';
     if (retryUncertain && !window.confirm('Delivery was not confirmed. Retrying may deliver this message twice. Retry delivery?')) return;
     if (send) onInterrupt(session.id);
@@ -36,7 +39,7 @@ export function MessageQueue({ session, disabled, onSnapshot, onInterrupt }: { s
     {messages.map(message => <div className="message-queue-item" key={message.id}>
       <div className="message-queue-content"><small>{message.origin ? `${message.origin.kind === 'instruction' ? 'Instruction' : 'Initial prompt'} from ${message.origin.title} (${message.origin.sessionId}) · ` : ''}{labels[message.status]}</small><p>{message.text}</p>{message.error && <small className="form-error">{message.error}</small>}</div>
       <div className="message-queue-actions">
-        {session.automation?.status !== 'running' && message.status !== 'sending' && message.status !== 'interrupting' && <Button size="sm" disabled={disabled || !!pending} onClick={() => void update(message.id, true)}>Send now</Button>}
+        {session.automation?.status !== 'running' && message.status !== 'sending' && message.status !== 'interrupting' && <Button size="sm" disabled={disabled || !!pending || executionBlocked || session.delegation?.actions.interrupt === false} onClick={() => void update(message.id, true)}>Send now</Button>}
         <IconButton label="Remove queued message" disabled={disabled || !!pending || message.status === 'sending' || message.status === 'accepted' || message.status === 'interrupting'} onClick={() => void update(message.id, false)}><X /></IconButton>
       </div>
     </div>)}

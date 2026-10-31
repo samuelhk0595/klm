@@ -838,7 +838,7 @@ cannot call privileged role/control methods. OpenCode native children and manage
 Pi native children receive only the external selection, not root conversation-role
 tools or the internal manager.
 
-Managed Pi loads the installed `pi-subagents` 0.70.0 through a version-gated private
+The legacy managed Pi path loads `pi-subagents` 0.70.0 through a version-gated private
 projection, without enabling unrelated extensions or changing global settings.
 Native foreground/background workers inherit the parent's resolved model, effort,
 live permission policy and captured external Library. They use hidden child history
@@ -846,7 +846,9 @@ and route permissions/questions through the owning conversation. They are not
 independent top-level sessions. The engine keeps the complete turn bound through
 background result delivery, then refreshes that managed Pi profile before the next
 turn. Native workflows, schedules, external runners and model overrides are not
-exposed; graph-node Pi delegation remains disabled to preserve Choice sealing.
+exposed. Native graph-node delegation remains disabled. The owned reusable-child
+path below replaces this native factory for instrumented parents and supports v2
+graph nodes without giving children Choice or administrative tools.
 Go compilation and a non-model extension/SDK-child load probe provide lightweight
 evidence, not runtime acceptance. Model execution, background delivery, Stop and
 restart checks remain pending in `PI_SUBAGENTS_IMPLEMENTATION_PROGRESS.md`.
@@ -1283,11 +1285,63 @@ subscription or automatic continuation. `ask` remains for information/clarificat
 and retains correlated replies. Agent-authored instructions and question responses
 are not human authorization for graph execution or session creation.
 
+## Reusable Agents and Owned Children
+
+In the stacked publication, SQLite schema4 follows the predecessor's content2
+and adds catalog3 then delegation4. Unpublished standalone agent-only schemas2/3
+are rejected without mutation and require an explicit migration; see
+`AGENTS_UNIFICATION_PUBLICATION.md`.
+
+The reusable-agent implementation unifies global SQLite definitions and local
+`.klm/agents` TOMLs through one visible slug catalog with durable source identity.
+Sessions can follow a saved definition while keeping independent field overrides;
+sources refresh between complete turns, never during an admitted execution.
+
+The engine-owned `subagent_run` tool delegates task work from main, side, general
+and v2 graph-node parents. A batch has 1–8 leaf children, at most four simultaneous
+executions and one active batch per parent. The parent receives a consolidated
+result only after every child settles. Specialists can use another supported
+harness/model/effort; unnamed children use effective parent settings and an empty
+external Library by default. Inheriting the parent's entire external selection is
+a false-by-default creation option, requiring an explicit human request. Internal
+roles and administrative tools never transfer. Independent session creation keeps
+its separate human authorization and lifecycle.
+
+Owned children retain their same-parent history, harness and directory for reuse.
+Parent Stop cancels them. Permissions, questions and MCP elicitation are answered
+through the actual owner with exact request/grant scope; child histories are
+read-only. Unconfirmed native/process/tool finality retains quarantine and blocks
+continuation. Restart invalidates interrupted work without replay. A chat Stop
+continues to leave independent graph execution alone.
+
+Pi/OpenCode use owned local wrappers with native delegation suppressed. Codex
+registers the v1 dynamic tool only on newly created instrumented native threads;
+older threads keep normal chat without adopting or rewriting history. Graph v2
+delegation resolves only from the run's sealed specialist, Library and public model
+metadata. Existing v1 artifacts retain their original contract. Child admission
+and Choice reservation exclude each other; Choice acceptance follows all-child
+join, owned drainage and confirmed result delivery in the same activation/workspace.
+
+The shared UI presents factual batch progress, outcomes, settings, reuse, bounded
+output and read-only child histories, plus owning-chat request cards. Isolated
+Playwright validation exercised actual frontend/backend and installed Pi, OpenCode
+and new Codex parent/child adapters against a deterministic local model provider.
+Core evidence covers creation/overrides/source refresh, two-child consolidation,
+Pi reuse and owner question replies under YOLO, graph Save/selection, Focus controls
+and a narrow browser viewport. Four reproduced UI/process-lifecycle issues were
+fixed and rechecked. Live upstream providers, native graph Choice/drain, remote MCP
+paths, already-running-child Stop, unexercised harness/role combinations and native
+Tauri/Flutter remain human/runtime acceptance checks. No production installation
+was performed. Checkpoints and actual evidence/retention limits are recorded in
+`AGENTS_UNIFICATION_COMPLETION_CP_R1.md`, `AGENTS_UNIFICATION_COMPLETION_CP_R2.md`
+and `AGENTS_UNIFICATION_PLAYWRIGHT_VALIDATION.md`.
+
 ## Agent and Graph Authoring
 
-Project agents and graphs can be authored independently of graph execution. Each
-agent is a TOML in `.klm/agents`; each graph is a YAML in the sibling `.klm/graphs`.
-The project files are the source of truth. Agents use real harness model identifiers
+Agents and project graphs can be authored independently of graph execution. Local
+agents are TOMLs in `.klm/agents`; global agents are engine-owned SQLite definitions.
+Each graph is a YAML in the sibling `.klm/graphs`. Local project files remain their
+source of truth. Agents use real harness model identifiers
 and require effort only when supported by the model. Their prompts live in TOML.
 
 Graph creation starts with a name and optional description. Save persists the graph

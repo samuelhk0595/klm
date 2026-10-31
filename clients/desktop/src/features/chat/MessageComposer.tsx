@@ -1,7 +1,7 @@
 import { ArrowUp, FileText, Folder, ListPlus, LoaderCircle, Mic, Square, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Button, IconButton } from '../../design-system/Button';
-import { request, transcribeAudio, type FileMention, type ProjectPath } from '../../engine';
+import { request, transcribeAudio, type FileMention, type ProjectPath, type DelegationActions } from '../../engine';
 import { mentionQuery } from './mentions';
 import { MentionEditor, type MentionEditorHandle } from './MentionEditor';
 import { IS_MOBILE_HOST } from '../../platform';
@@ -22,7 +22,7 @@ function recordingFilename(type: string) {
   return 'recording.webm';
 }
 
-export function MessageComposer({ onSend, onTranscription, draft, onDraftChange, projectId, disabled = false, running = false, steeringOnly = false, clearOnSend = true, onStop, modelControl, graphControl, placeholder = 'Message the agent' }: {
+export function MessageComposer({ onSend, onTranscription, draft, onDraftChange, projectId, disabled = false, running = false, steeringOnly: requestedSteeringOnly = false, clearOnSend = true, onStop, modelControl, graphControl, actions, placeholder = 'Message the agent' }: {
   onSend: (draft: ComposerDraft, mode?: SendMode) => boolean | void; draft: ComposerDraft; onDraftChange: (draft: ComposerDraft) => void;
   onTranscription?: (text: string) => void;
   projectId?: string;
@@ -32,8 +32,10 @@ export function MessageComposer({ onSend, onTranscription, draft, onDraftChange,
   modelControl?: ReactNode;
   graphControl?: ReactNode;
   placeholder?: string;
+  actions?: DelegationActions;
 }) {
   const { text, mentions } = draft;
+  const steeringOnly = requestedSteeringOnly || actions?.interrupt === false;
   const [caret, setCaret] = useState(0);
   const [focused, setFocused] = useState(false);
   const [composing, setComposing] = useState(false);
@@ -111,6 +113,9 @@ export function MessageComposer({ onSend, onTranscription, draft, onDraftChange,
   }
   function send(mode: SendMode = 'steer') {
     if (!text.trim() || disabled || submittedDraft.current === draft) return;
+    if (mode === 'interrupt' && actions?.interrupt === false) return;
+    if (running && mode === 'steer' && actions?.steer === false) mode = 'queue';
+    if (actions?.send === false || mode === 'queue' && actions?.queue === false) return;
     setError('');
     try {
       // The parent synchronously owns the pending draft before starting HTTP.
@@ -254,7 +259,7 @@ export function MessageComposer({ onSend, onTranscription, draft, onDraftChange,
       }
     }
   }
-  const sendButton = <IconButton label={running ? 'Send on next turn' : 'Send message'} variant="soft" type="submit" disabled={!text.trim() || disabled} className="send-button">{running ? <ListPlus /> : <ArrowUp />}</IconButton>;
+  const sendButton = <IconButton label={running ? actions?.steer === false ? 'Queue message' : 'Send on next turn' : 'Send message'} variant="soft" type="submit" disabled={!text.trim() || disabled || actions?.send === false} className="send-button">{running ? <ListPlus /> : <ArrowUp />}</IconButton>;
   const mobileSendVisible = !!text.trim();
   return <form className="composer" aria-label="Message composer" onSubmit={event => { event.preventDefault(); send(); }}>
     {open && <div className="mention-picker">

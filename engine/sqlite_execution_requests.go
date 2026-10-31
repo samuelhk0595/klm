@@ -16,6 +16,19 @@ func (st *sqliteSessionTx) requestKey(table, owner, id string) (string, error) {
 	return key, err
 }
 func (st *sqliteSessionTx) sessionYOLO(s Session) (bool, error) {
+	if s.Role == sessionRoleSubagent {
+		child, err := st.delegationChild(s.ID)
+		if err == nil {
+			parent, err := st.sessionMeta(child.ParentSessionID)
+			if err != nil {
+				return false, err
+			}
+			return st.sessionYOLO(parent)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return false, err
+		}
+	}
 	r, err := st.activeAutomation(s.ID)
 	if err != nil {
 		return false, err
@@ -123,12 +136,30 @@ func (a *app) sqlRequestOwnerLocked(id, requestID, kind string, origin *SpawnOri
 	if meta.Role == sessionRoleSubagent {
 		return "", controlError(404, "Conversation not found.")
 	}
-	if origin == nil {
-		return id, nil
-	}
 	t := a.runs[id]
 	present := t != nil && (kind == "permission" && t.approvals[requestID] != nil || kind == "question" && t.questions[requestID] != nil)
 	if present {
+		return id, nil
+	}
+	// A managed child is read-only publicly. Replies target the owner's exact
+	// pending request and active lease, while the grant remains child-scoped.
+	for childID, childTurn := range a.runs {
+		binding := childTurn.delegationChild
+		if binding == nil || childTurn.ctx.Err() != nil {
+			continue
+		}
+		ownerID := binding.owner.parent.id
+		if graph := binding.owner.parent.turn.graphDelegation; graph != nil {
+			ownerID = graph.OwnerID
+		}
+		if ownerID != id {
+			continue
+		}
+		if kind == "permission" && childTurn.approvals[requestID] != nil || kind == "question" && childTurn.questions[requestID] != nil {
+			return childID, nil
+		}
+	}
+	if origin == nil {
 		return id, nil
 	}
 	table := "pending_permissions"

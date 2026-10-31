@@ -4,7 +4,7 @@ package main
 // tree. No whole diskState, project, session history or domain ledger JSON row.
 const sqliteSchema = `
 PRAGMA application_id=1263291697;
-PRAGMA user_version=1;
+PRAGMA user_version=4;
 CREATE TABLE store_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL) STRICT;
 CREATE TABLE permission_reply_intents(request_id TEXT PRIMARY KEY,session_id TEXT NOT NULL,grant_id TEXT NOT NULL) STRICT;
 CREATE INDEX permission_reply_intents_grant ON permission_reply_intents(grant_id);

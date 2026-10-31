@@ -72,7 +72,7 @@ export function LibraryPanel({ onGeneralAgent }: { onGeneralAgent?: () => void }
     {inventory && !inventory.connections.length && <p className="muted">No MCP connections.</p>}
     {authorization && <div className="library-confirmation"><strong>Authenticate {authorization.name}</strong><p><a href={authorization.url} target={IS_MOBILE_HOST ? '_self' : '_blank'} rel="noreferrer">Open authorization page</a></p><Button size="sm" onClick={() => { setAuthorization(undefined); refresh(); }}>Done / Refresh</Button></div>}
     {deletion && <div className="library-confirmation" role="group" aria-label="Confirm library deletion"><h4>Delete {deletion.name}?</h4><p>Remove these saved references. Captured runs and active turns keep their snapshots.</p>
-      <ul>{deletion.preview.references.map(ref => <li key={`${ref.kind}/${ref.projectId}/${ref.id}`}>{ref.title} · {ref.kind === 'captured_run' ? 'Captured run (preserved)' : ref.kind}</li>)}</ul>
+      <ul>{deletion.preview.references.map(ref => <li key={`${ref.kind}/${ref.projectId}/${ref.id}`}>{ref.title} · {ref.kind === 'captured_run' ? 'Captured run (preserved)' : ref.kind === 'global_agent' ? 'Global agent' : ref.kind === 'agent_binding' ? 'Agent-linked session' : ref.kind.replaceAll('_', ' ')}</li>)}</ul>
       {!deletion.preview.references.length && <p>No saved references.</p>}
       {deletion.preview.hasMore && <Button size="sm" disabled={busy} onClick={() => void action(async () => {
         const page = await request<DeletionPreview>(`/api/library/${deletion.kind}/${encodeURIComponent(deletion.id)}/deletion?offset=${deletion.preview.nextOffset}`);

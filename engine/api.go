@@ -120,6 +120,8 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/projects/{id}/topics", a.createTopic)
 	mux.HandleFunc("GET /api/projects/{id}/paths", a.projectPaths)
 	mux.HandleFunc("GET /api/projects/{id}/authoring", a.authoring)
+	a.registerAgentRoutes(mux)
+	a.delegationRoutes(mux)
 	mux.HandleFunc("GET /api/projects/{id}/models/{harness}", a.projectModels)
 	mux.HandleFunc("POST /api/projects/{id}/agents", a.saveAgent)
 	mux.HandleFunc("PATCH /api/projects/{id}/agents/{item}", a.saveAgent)
@@ -618,12 +620,17 @@ func workspace(p *Project, name string) (string, bool) {
 
 func (a *app) createSession(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ProjectID string `json:"projectId"`
-		TopicID   string `json:"topicId"`
-		Title     string `json:"title"`
-		Workspace string `json:"workspace"`
-		Harness   string `json:"harness"`
-		Model     string `json:"model"`
+		ProjectID      string                `json:"projectId"`
+		TopicID        string                `json:"topicId"`
+		Title          string                `json:"title"`
+		Workspace      string                `json:"workspace"`
+		Harness        string                `json:"harness"`
+		Model          string                `json:"model"`
+		Effort         string                `json:"effort"`
+		Agent          string                `json:"agent"`
+		AgentSourceUID string                `json:"agentSourceUid"`
+		AgentRevision  string                `json:"agentRevision"`
+		AgentOverrides *AgentConfigOverrides `json:"agentOverrides"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -634,6 +641,19 @@ func (a *app) createSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model := strings.TrimSpace(body.Model)
+	if body.Agent != "" {
+		if body.Workspace != "" && body.Workspace != "Ungrouped" {
+			fail(w, 400, "Omit workspace. Use topicId.")
+			return
+		}
+		id, err := a.createManualAgentSession(r.Context(), body.ProjectID, title, body.TopicID, body.Harness, body.Model, body.Effort, body.Agent, body.AgentSourceUID, body.AgentRevision, body.AgentOverrides)
+		if err != nil {
+			agentHTTPError(w, err)
+			return
+		}
+		a.respondSQLSession(w, r, id, 201)
+		return
+	}
 	if model != "" {
 		if _, ok := cleanLabel(model, 200); !ok || strings.HasPrefix(model, "-") {
 			fail(w, 400, "Invalid model identifier.")
@@ -651,7 +671,7 @@ func (a *app) createSession(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, "Harness is unknown or not installed.")
 			return
 		}
-		s := newTopLevelSession(body.ProjectID, title, "Ungrouped", body.Harness, model, "")
+		s := newTopLevelSession(body.ProjectID, title, "Ungrouped", body.Harness, model, body.Effort)
 		s.TopicID = body.TopicID
 		err := a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error { return st.createSession(s, a.dir) })
 		a.mu.Unlock()
@@ -1324,6 +1344,12 @@ func (a *app) chatSessionHandler(handler http.HandlerFunc) http.HandlerFunc {
 			if s.GraphRunID != "" || s.Role == sessionRoleSubagent && r.Method != http.MethodGet {
 				fail(w, 404, "Conversation not found.")
 				return
+			}
+			if s.Role == sessionRoleSubagent {
+				if err := a.validateGraphChildRead(r.Context(), s.ID); err != nil {
+					sqlHTTPError(w, err)
+					return
+				}
 			}
 			if s.ProjectID != "" {
 				p, err := a.store.readProjectMeta(r.Context(), s.ProjectID)

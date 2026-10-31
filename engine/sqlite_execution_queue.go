@@ -247,6 +247,25 @@ func (a *app) scheduleSQLMessagesLocked() {
 		if !ready {
 			continue
 		}
+		bound, bindingErr := a.agentBindingExists(a.ctx, id)
+		if bindingErr != nil {
+			a.failStorageLocked(bindingErr)
+			return
+		}
+		if bound {
+			if err := a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error { meta.Status = "running"; return st.putSessionMeta(meta) }); err != nil {
+				return
+			}
+			ctx, cancel := context.WithCancel(a.ctx)
+			t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+			if a.runs == nil {
+				a.runs = map[string]*turn{}
+			}
+			a.runs[id] = t
+			a.wg.Add(1)
+			go a.executeBoundQueued(t, meta, native, harness, folder, payload, messages)
+			continue
+		}
 		if err := a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
 			for _, q := range messages {
 				if err := st.appendQueuedUser(id, q); err != nil {
@@ -282,6 +301,15 @@ func (p *adapter) takeSQLSteeringLocked() (*QueuedMessage, submission, error) {
 	var messages []QueuedMessage
 	var payload submission
 	err := a.writeSQLLocked(p.turn.ctx, func(st *sqliteSessionTx) error {
+		if p.delegation != nil {
+			batch, err := st.activeDelegation(p.id)
+			if err != nil {
+				return err
+			}
+			if batch != nil || p.delegation.preparing != nil {
+				return nil
+			}
+		}
 		queue, err := st.queue(p.id)
 		if err != nil {
 			return err
@@ -615,6 +643,11 @@ func (a *app) admitSQLMessage(r *http.Request, id, identity, text, mode string, 
 	payload, err := prepareMentions(r.Context(), cwd, before.Harness, text, mentions)
 	if err != nil {
 		return err
+	}
+	if mode != "steer" {
+		if err := a.checkAgentMessageEligibility(r.Context(), id); err != nil {
+			return err
+		}
 	}
 	guidance, err := conversationGuidance(&before)
 	if before.Role != sessionRoleGeneralAgent {

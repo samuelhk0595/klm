@@ -4,9 +4,11 @@ import { Button } from '../../design-system/Button';
 import { getConversationGraph, type ConversationGraphState, type EngineEvent, type EventPage, type Session, type SessionResponse } from '../../engine';
 import { ConversationHistory } from '../chat/ConversationHistory';
 import { GraphPicker } from '../chat/GraphPicker';
-import { MessageComposer, type ComposerDraft, type SendMode } from '../chat/MessageComposer';
+import { type ComposerDraft, type SendMode } from '../chat/MessageComposer';
+import { AgentMessageComposer as MessageComposer } from '../agents/AgentMessageComposer';
 import { MessageQueue } from '../chat/MessageQueue';
 import { GraphRequestPages } from '../chat/GraphRequestPages';
+import { DelegationRequests } from '../chat/DelegationRequests';
 import { ModelPicker } from '../chat/ModelPicker';
 import { PendingSubmission, type LocalSubmission } from '../chat/PendingSubmission';
 import { PermissionCard } from '../chat/PermissionCard';
@@ -79,10 +81,11 @@ export function FocusSessionChat({ session, projectName, subagents, draft, pendi
       </div>}
       <PendingSubmission items={submissions} onRestore={onRestoreSubmission} onRetry={onRetrySubmission} />
       <GraphRequestPages session={session} projectName={projectName} onResolved={refreshGraph} />
+      <DelegationRequests session={session} projectName={projectName} onSnapshot={onSnapshot} />
       <MessageQueue session={session} disabled={pending} onSnapshot={onSnapshot} onInterrupt={onInterrupt} />
       {general && generalControls}
       {harnessUnavailable && <p role="status" className="form-error">The selected harness is not installed.</p>}
-      <MessageComposer steeringOnly={session.automation?.status === 'running'} projectId={general ? undefined : session.projectId} placeholder={`Message ${title}`} draft={draft} onDraftChange={onDraftChange} onSend={onSend} onStop={onStop} running={running} disabled={pending || harnessUnavailable}
+      <MessageComposer session={session} onSnapshot={onSnapshot} steeringOnly={session.automation?.status === 'running'} projectId={general ? undefined : session.projectId} placeholder={`Message ${title}`} draft={draft} onDraftChange={onDraftChange} onSend={onSend} onStop={onStop} running={running} disabled={pending || harnessUnavailable}
         onTranscription={onTranscription}
         graphControl={IS_MOBILE_HOST ? undefined : graphControl}
         modelControl={<ModelPicker key={`${session.id}/${session.harness}`} session={session} disabled={pending || running} optionsDisabled={pending || disconnected} onSave={onModel} onSnapshot={onSnapshot} graphControl={IS_MOBILE_HOST ? graphControl : undefined} />} />

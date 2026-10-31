@@ -64,6 +64,14 @@ func (a *app) changeSessionYOLO(ctx context.Context, id string, enabled bool) er
 					return controlError(409, "Codex started this turn with a full-access sandbox. Finish or stop that turn before disabling YOLO.")
 				}
 			}
+			if !enabled {
+				for _, child := range a.runs {
+					binding := child.delegationChild
+					if binding != nil && binding.owner.parent.id == id && child.nativeYOLOConfigured && child.nativeYOLO {
+						return controlError(409, "A Codex child started with full access. Finish or stop the owning turn before disabling YOLO.")
+					}
+				}
+			}
 			if s.YOLO == enabled {
 				return nil
 			}

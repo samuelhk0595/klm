@@ -129,6 +129,11 @@ func (a *app) sqlAutomationSessionBlocked(st *sqliteSessionTx, project, id strin
 	if s.ProjectID != project || s.Role != "" || s.ParentID != "" || s.GraphRunID != "" {
 		return s, "Choose a normal top-level session in this project.", nil
 	}
+	if binding, err := st.agentBinding(id); err != nil {
+		return s, "", err
+	} else if binding != nil && binding.Blocked != nil {
+		return s, binding.Blocked.Message, nil
+	}
 	archived, err := st.effectivelyArchived(s)
 	if err != nil {
 		return s, "", err
@@ -169,12 +174,16 @@ func (a *app) sqlAutomationSessionBlocked(st *sqliteSessionTx, project, id strin
 }
 
 func (a *app) admitSQLAutomationLocked(id string) (*AutomationRun, bool, error) {
+	agentAdmission, err := a.refreshAutomationAgentLocked(id)
+	if err != nil {
+		return nil, false, err
+	}
 	if a.harnessInstalling {
 		return nil, false, nil
 	}
 	var admitted *AutomationRun
 	parallel := false
-	err := a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
+	err = a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
 		var v Automation
 		if err := decodeSQLiteRecord(st.ctx, st.tx, "automations", id, 8<<20, &v); err != nil {
 			return err
@@ -268,6 +277,41 @@ func (a *app) admitSQLAutomationLocked(id string) (*AutomationRun, bool, error) 
 			config.SessionID = s.ID
 		}
 		r := AutomationRun{ID: newID(), AutomationID: v.ID, ProjectID: v.ProjectID, SessionID: s.ID, Snapshot: config, PromptKind: promptKind, Capabilities: trigger.Capabilities, Trigger: trigger, Status: "running", StartedAt: now()}
+		if !creating && trigger.Snapshot == nil {
+			if binding, err := st.agentBinding(s.ID); err != nil {
+				return err
+			} else if binding != nil {
+				if agentAdmission == nil || agentAdmission.Preparation == nil || agentAdmission.SessionID != s.ID || agentAdmission.Harness != s.Harness || agentAdmission.StopVersion != a.stopVersions[s.ID] || binding.Revision != agentAdmission.Preparation.BindingRevision {
+					return nil
+				}
+				var autoDigest, triggerDigest string
+				if err := st.tx.QueryRowContext(st.ctx, `SELECT digest FROM data_automations WHERE id=?`, id).Scan(&autoDigest); err != nil {
+					return err
+				}
+				if err := st.tx.QueryRowContext(st.ctx, `SELECT digest FROM data_automation_triggers WHERE id=?`, key).Scan(&triggerDigest); err != nil {
+					return err
+				}
+				if autoDigest != agentAdmission.AutomationDigest || trigger.ID != agentAdmission.TriggerID || triggerDigest != agentAdmission.TriggerDigest || project.Folder != agentAdmission.Directory {
+					return nil
+				}
+				var selection ConversationCapabilities
+				if err := decodeSQLiteRecord(st.ctx, st.tx, "session_capabilities", sqliteOwnedKey(s.ID, ""), 64<<10, &selection); err != nil {
+					return err
+				}
+				prepared := agentAdmission.Preparation
+				if prepared.ExternalCapabilities == nil || sqliteRevision(selection.Revision) != prepared.SelectionRevision || agentConfigDigest(binding.Desired) != agentConfigDigest(prepared.Resolution.Config) {
+					return nil
+				}
+				capture := prepared.Resolution.Capture
+				r.Snapshot.AgentConfiguration = &AgentExecutionCapture{Config: prepared.Resolution.Config, Source: &capture, Revision: agentConfigDigest(prepared.Resolution.Config)}
+				r.Capabilities = prepared.ExternalCapabilities
+			} else if agentAdmission != nil {
+				return nil // Destination lost its binding while the capture was prepared.
+			}
+		}
+		if r.Snapshot.AgentConfiguration != nil && r.Capabilities == nil && r.Snapshot.AgentConfiguration.ExternalCapabilities == nil {
+			return agentProblem(409, "automation_capture_missing", "agent", "The saved-agent recovery snapshot has no admitted Library capture. Choose a fresh run explicitly.")
+		}
 		trigger.Consumed, trigger.BlockedReason = true, ""
 		if err := st.putRoot("automation_triggers", trigger.ID, trigger); err != nil {
 			return err

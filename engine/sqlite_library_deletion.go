@@ -9,8 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-
-	"github.com/pelletier/go-toml/v2"
 )
 
 // References are streamed from maintained indexes, not retained captures. Project
@@ -23,7 +21,9 @@ func (st *sqliteSessionTx) libraryReferenceHash(kind, id string, visit func(Libr
 	 UNION ALL SELECT 'automation',a.id,a.x_name,a.project_id,a.digest FROM selection_references r JOIN data_automations a ON a.id=r.record_key WHERE r.domain='automations' AND r.kind=? AND r.item=? AND a.x_deleted<>'true'
 	 UNION ALL SELECT 'captured_automation_run',a.id,a.x_snapshot_name,a.project_id,'' FROM capture_references r JOIN data_automation_runs a ON a.id=r.record_key WHERE r.domain='automation_runs' AND r.kind=? AND r.item=?
 	 UNION ALL SELECT 'captured_run',g.id,g.x_graphId,g.project_id,'' FROM capture_references r JOIN data_graph_snapshots p ON p.id=r.record_key JOIN data_graph_runs g ON g.id=p.owner_id WHERE r.domain='graph_snapshots' AND r.kind=? AND r.item=?
-	) ORDER BY kind,project,id`, kind, id, kind, id, kind, id, kind, id)
+	 UNION ALL SELECT 'global_agent',a.x_slug,a.x_slug,'',a.digest FROM selection_references r JOIN data_global_agents a ON a.id=r.record_key WHERE r.domain='global_agents' AND r.kind=? AND r.item=?
+	 UNION ALL SELECT 'agent_binding',s.id,s.x_title,s.project_id,b.digest FROM selection_references r JOIN data_agent_bindings b ON b.id=r.record_key JOIN data_sessions s ON s.id=b.owner_id WHERE r.domain='agent_bindings' AND r.kind=? AND r.item=?
+	) ORDER BY kind,project,id`, kind, id, kind, id, kind, id, kind, id, kind, id, kind, id)
 	if err != nil {
 		return "", err
 	}
@@ -156,7 +156,7 @@ func (a *app) prepareSQLLibraryDeletion(ctx context.Context, kind, id string, of
 				selection = removeLibraryReference(selection, kind, plan.change.ItemID)
 				definition := agent.AgentDefinition
 				definition.Skills, definition.MCPConnections = selection.Skills, selection.MCPConnections
-				body, err := toml.Marshal(definition)
+				body, err := marshalExistingAgentDocument(p, agent.ID, definition)
 				if err != nil {
 					return plan, err
 				}

@@ -312,6 +312,11 @@ func (a *app) changeSQLHarnessLocked(ctx context.Context, id, harness string) er
 		if s.Role != sessionRoleSideAgent && s.Role != sessionRoleGeneralAgent {
 			return controlError(404, "Conversation not found.")
 		}
+		if binding, err := st.agentBinding(id); err != nil {
+			return err
+		} else if binding != nil {
+			return controlError(409, "A saved agent session's harness is fixed at creation.")
+		}
 		var accepted bool
 		if s.Role == sessionRoleGeneralAgent {
 			accepted, err = st.generalInputAccepted(id)

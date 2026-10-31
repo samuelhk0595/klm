@@ -4,7 +4,7 @@ import { Button, IconButton } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import { SearchSelect } from '../../design-system/SearchSelect';
 import { Textarea } from '../../design-system/Textarea';
-import type { Agent } from '../agents/demo';
+import type { Agent } from '../agents/types';
 import { gitBranchNameError } from './fork';
 import type { JoinDefinition } from './join';
 import { forgetDrafts, useEngineDraft } from '../drafts/draftStore';

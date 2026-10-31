@@ -121,6 +121,10 @@ func (a *app) saveAutomation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := body.Automation
+	if v.AgentConfiguration != nil {
+		fail(w, 400, "Captured specialist configuration is engine-owned.")
+		return
+	}
 	requestData, _ := json.Marshal(body)
 	requestRevision := revision(requestData)
 	if r.PathValue("automationId") == "" {

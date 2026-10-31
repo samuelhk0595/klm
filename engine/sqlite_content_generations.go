@@ -41,22 +41,27 @@ CREATE TABLE IF NOT EXISTS event_content_publications(
 CREATE INDEX IF NOT EXISTS event_content_publications_generation ON event_content_publications(generation_id);
 CREATE INDEX IF NOT EXISTS event_content_generations_base ON event_content_generations(base_id);
 CREATE TABLE IF NOT EXISTS event_content_appends(base_id TEXT NOT NULL REFERENCES event_content_generations(id) ON DELETE CASCADE,offset INTEGER NOT NULL,body BLOB NOT NULL CHECK(length(body)>0 AND length(body)<=65536),PRIMARY KEY(base_id,offset)) STRICT;
-PRAGMA user_version=2;
 `
 
 func (s *sqliteStore) migrateContentGenerations(ctx context.Context) error {
+	if err := s.validatePublicationSchemaLayout(ctx); err != nil {
+		return err
+	}
 	return s.write(ctx, func(tx *sql.Tx) error {
 		var version int
 		if err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 			return err
 		}
-		if version == 2 {
+		if version >= 2 && version <= sqliteSchemaVersion {
 			return nil
 		}
 		if version != 1 {
 			return errors.New("Unsupported SQLite content schema.")
 		}
-		_, err := tx.ExecContext(ctx, sqliteContentGenerationSchema)
+		if _, err := tx.ExecContext(ctx, sqliteContentGenerationSchema); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, `PRAGMA user_version=2`)
 		return err
 	})
 }

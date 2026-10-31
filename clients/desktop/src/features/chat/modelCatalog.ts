@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { ENGINE_URL, request, type ModelCatalog } from '../../engine';
+import { currentEngineIdentity, engineIdentityGeneration } from '../../engineIdentity';
 
 type Entry = { value: ModelCatalog | null; at: number; error: string; loading: boolean; listeners: Set<() => void>; controller?: AbortController; flight?: Promise<void> };
 const entries = new Map<string, Entry>();
+let cacheIdentity = '';
 function entry(key: string): Entry {
   let found = entries.get(key);
   if (!found) { found = { value: null, at: 0, error: '', loading: false, listeners: new Set() }; entries.set(key, found); }
@@ -25,7 +27,9 @@ function load(key: string, endpoint: string, force = false) {
 }
 
 export function useModelCatalog(projectId: string, harness: string, sessionId?: string, enabled = true) {
-  const key = `${ENGINE_URL}/${projectId}/${harness}`;
+  const identity = `${ENGINE_URL}/${currentEngineIdentity()}/${engineIdentityGeneration()}`;
+  if (identity !== cacheIdentity) { entries.forEach(item => item.controller?.abort()); entries.clear(); cacheIdentity = identity; }
+  const key = JSON.stringify([identity, projectId, harness, sessionId ?? '']);
   const endpoint = sessionId ? `/api/sessions/${encodeURIComponent(sessionId)}/models` : `/api/projects/${encodeURIComponent(projectId)}/models/${encodeURIComponent(harness)}`;
   const [, render] = useState(0);
   useEffect(() => {

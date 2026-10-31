@@ -1,5 +1,5 @@
 import type { Edge } from '@xyflow/react';
-import { agentSlug } from '../agents/demo';
+import { agentSlug } from '../agents/types';
 import type { CanvasNode } from './GraphCanvas';
 import { connectionKey, type BorderPoint, type FixedHandle } from './connections';
 
