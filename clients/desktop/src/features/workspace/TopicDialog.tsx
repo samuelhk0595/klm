@@ -1,10 +1,13 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowLeft, Check, Pencil, Plus, Search, X } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
-import type { Topic } from '../../engine';
+import { request, type Topic } from '../../engine';
 import { topicColors } from './topics';
 import './topic-dialog.css';
 import { useTopicPage } from './useTopicPage';
+import { bindDraftDiscard, flushDrafts, useEngineDraft } from '../drafts/draftStore';
+import { IS_DESKTOP } from '../../platform';
+import { beginLocalActivity } from '../engines/localActivities';
 
 type TopicInput = Pick<Topic, 'name' | 'color'>;
 type TopicSelection = {
@@ -14,7 +17,9 @@ type TopicSelection = {
   onCreate: (input: TopicInput) => Promise<string | null>;
 };
 
-export function TopicDialog({ topic, selection, onSave, onClose }: {
+export function TopicDialog({ topic, selection, onSave, onClose, draftKey, projectId }: {
+  projectId?: string;
+  draftKey?: string;
   topic?: Topic;
   selection?: TopicSelection;
   onSave: (input: TopicInput) => Promise<string | null>;
@@ -24,18 +29,21 @@ export function TopicDialog({ topic, selection, onSave, onClose }: {
   const focusTarget = useRef<HTMLInputElement>(null);
   const submitting = useRef(false);
   const id = useId();
-  const [mode, setMode] = useState<'choose' | 'create' | 'edit'>(selection ? 'choose' : topic ? 'edit' : 'create');
-  const [name, setName] = useState(topic?.name ?? '');
-  const [color, setColor] = useState<Topic['color']>(topic?.color ?? 'neutral');
+  const key = draftKey ?? `form.topic:${selection?.projectId ?? ''}:${topic?.id ?? 'new'}`;
+  const forgetDrafts = bindDraftDiscard();
+  const [baseTopic] = useEngineDraft<Topic | undefined>(`${key}.base`, topic, true);
+  const [mode, setMode] = useEngineDraft<'choose' | 'create' | 'edit'>(`${key}.mode`, selection ? 'choose' : topic ? 'edit' : 'create');
+  const [name, setName] = useEngineDraft(`${key}.${mode}.name`, mode === 'create' ? '' : topic?.name ?? '');
+  const [color, setColor] = useEngineDraft<Topic['color']>(`${key}.${mode}.color`, mode === 'create' ? 'neutral' : topic?.color ?? 'neutral');
   const [query, setQuery] = useState('');
-  const [selectedId, setSelectedId] = useState(topic?.id ?? '');
+  const [selectedId, setSelectedId] = useEngineDraft(`${key}.selected`, topic?.id ?? '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const choosing = mode === 'choose';
   const creating = mode === 'create';
   const title = choosing ? 'Choose topic' : creating ? 'New topic' : 'Edit topic';
   const page = useTopicPage(selection?.projectId, choosing, query);
-  const [chosenTopic, setChosenTopic] = useState(topic);
+  const [chosenTopic, setChosenTopic] = useEngineDraft<Topic | undefined>(`${key}.chosen`, topic);
   const candidates = selection?.projectId ? page.items : selection?.topics ?? [];
   const activeTopics = [...new Map([...candidates, ...(chosenTopic ? [chosenTopic] : [])].filter(item => !item.archived).map(item => [item.id, item])).values()];
   const matches = activeTopics.filter(item => item.name.toLowerCase().includes(query.trim().toLowerCase()));
@@ -52,8 +60,8 @@ export function TopicDialog({ topic, selection, onSave, onClose }: {
 
   function changeMode(next: typeof mode) {
     setError('');
-    if (next === 'create') { setName(''); setColor('neutral'); }
-    if (next === 'edit') { setName(topic?.name ?? ''); setColor(topic?.color ?? 'neutral'); }
+    if (!IS_DESKTOP && next === 'create') { setName(''); setColor('neutral'); }
+    if (!IS_DESKTOP && next === 'edit') { setName(topic?.name ?? ''); setColor(topic?.color ?? 'neutral'); }
     setMode(next);
   }
 
@@ -62,16 +70,23 @@ export function TopicDialog({ topic, selection, onSave, onClose }: {
     <form onSubmit={async event => {
       event.preventDefault();
       if (submitting.current || !canSubmit) return;
+      const finished = beginLocalActivity('Saving topic');
       submitting.current = true;
       setBusy(true); setError('');
       try {
+        await flushDrafts();
+        const owner = projectId ?? selection?.projectId;
+        if (IS_DESKTOP && mode === 'edit' && owner && baseTopic) {
+          const latest = await request<Topic>(`/api/projects/${encodeURIComponent(owner)}/topics/${encodeURIComponent(baseTopic.id)}`);
+          if (topic?.id !== baseTopic.id || (baseTopic.revision !== undefined && String(latest.revision) !== String(baseTopic.revision))) throw new Error('Topic changed. Cancel this edit and reopen it to review the saved topic.');
+        }
         const input = { name: name.trim(), color };
         const failure = choosing && selection ? await selection.onSelect(selectedId)
           : creating && selection ? await selection.onCreate(input) : await onSave(input);
-        if (failure) setError(failure); else onClose();
+        if (failure) setError(failure); else { forgetDrafts(key); onClose(); }
       } catch (failure) {
         setError(failure instanceof Error ? failure.message : 'Could not save the topic. Try again.');
-      } finally { submitting.current = false; setBusy(false); }
+      } finally { submitting.current = false; setBusy(false); finished(); }
     }}>
       <header className="topic-dialog-heading">
         {selection && !choosing && <IconButton label="Back to topics" disabled={busy} onClick={() => changeMode('choose')}><ArrowLeft aria-hidden="true" /></IconButton>}
@@ -119,7 +134,7 @@ export function TopicDialog({ topic, selection, onSave, onClose }: {
         {error && <p role="alert" className="form-error topic-dialog-error">{error}</p>}
       </div>
       <footer className="topic-dialog-footer">
-        <Button disabled={busy} variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button disabled={busy} variant="ghost" onClick={() => { forgetDrafts(key); onClose(); }}>Cancel</Button>
         <Button type="submit" variant="primary" disabled={busy || !canSubmit}>
           {busy ? 'Saving…' : choosing ? 'Apply topic' : creating ? selection ? 'Create and move' : 'Create topic' : 'Save changes'}
         </Button>

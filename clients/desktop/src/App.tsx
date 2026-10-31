@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Download, Focus, GitBranch, Maximize2, Minimize2, Minus, PanelLeft, PanelRight, PanelsTopLeft } from 'lucide-react';
 import { IS_DESKTOP, IS_MOBILE_HOST, openContentDownload, openFocus, startWindowDrag } from './platform';
-import { bindEngineIdentity, currentEngineIdentity, engineStorageKey } from './engineIdentity';
+import { bindEngineIdentity, currentEngineIdentity, engineStorageKey, persistEngineIdentity } from './engineIdentity';
 import { Button, IconButton } from './design-system/Button';
 import { BottomSheet } from './design-system/BottomSheet';
 import { Badge } from './design-system/Badge';
@@ -37,6 +37,10 @@ import { MessageQueue } from './features/chat/MessageQueue';
 import { GraphRequestPages } from './features/chat/GraphRequestPages';
 import { PendingSubmission, readPendingSubmissions, savePendingSubmissions, type LocalSubmission } from './features/chat/PendingSubmission';
 import { MessageComposer, type ComposerDraft, type SendMode } from './features/chat/MessageComposer';
+import { chatDraftKeys, restoreChatDraftContext } from './features/chat/chatDrafts';
+import { acceptChatDeliveries, sameComposerDraft, type ChatDraftState, type DeliveryConfirmation } from './features/chat/chatAcceptance';
+import { draftStorageReady, flushDrafts, hasEngineDraft, readDraftValue, setDraftValues, useDraftStorageStatus, useEngineDraft } from './features/drafts/draftStore';
+import { beginLocalActivity, engineChangePending } from './features/engines/localActivities';
 import { readConversationWindow, subscribeScope } from './features/chat/scopedConnection';
 import { DesignSystem } from './DesignSystem';
 import { ProjectRail } from './features/projects/ProjectRail';
@@ -118,7 +122,9 @@ function readWorkspaceNavigation(): WorkspaceNavigation {
 }
 
 export function App() {
+  const draftStorage = useDraftStorageStatus();
   const [engineIdentity, setEngineIdentity] = useState(currentEngineIdentity);
+  const inventoryIdentity = useRef(currentEngineIdentity());
   const [engine, setEngine] = useState<EngineState>({ projects: [], sessions: [], harnesses: [] });
   const [modelPreviews, setModelPreviews] = useState<Record<string, { model: string; effort: string }>>({});
   const { projects, harnesses } = engine;
@@ -181,12 +187,12 @@ export function App() {
   }
   const [sessionErrors, setSessionErrors] = useState<Record<string, string>>({});
   const [pendingSessions, setPendingSessions] = useState<Record<string, boolean>>({});
-  const [localMessages, setLocalMessages] = useState(readPendingSubmissions);
+  const [localMessages, setLocalMessages] = useEngineDraft<Record<string, LocalSubmission[]>>(chatDraftKeys.submissions, () => IS_DESKTOP ? {} : readPendingSubmissions());
   // Reserve synchronously before React renders pending submissions. Accepted or
   // uncertain deliveries keep the reservation; only definite rejection releases it.
   const generalHarnessBlocks = useRef(new Map(Object.entries(localMessages).flatMap(([sessionId, items]) =>
     items.filter(item => item.status !== 'failed').map(item => [item.id, sessionId] as const))));
-  useEffect(() => savePendingSubmissions(localMessages), [localMessages]);
+  useEffect(() => { if (!IS_DESKTOP) savePendingSubmissions(localMessages); }, [localMessages]);
   const submissionTails = useRef(new Map<string, Promise<void>>());
   const submissionRequests = useRef(new Set<string>());
   const submissionControllers = useRef(new Map<string, { sessionId: string; controller: AbortController }>());
@@ -228,8 +234,8 @@ export function App() {
   const navigation = useRef(0);
   const stream = useRef<EventSource | null>(null);
   const [workspaceNavigation, setWorkspaceNavigation] = useState(readWorkspaceNavigation);
-  const [view, setView] = useState<'chat' | 'general' | 'design' | 'agents' | 'graphs' | 'activity-board'>(() => IS_MOBILE_HOST || workspaceNavigation.generalOpen ? 'general' : 'chat');
-  const [boardProjectId, setBoardProjectId] = useState('');
+  const [view, setView] = useEngineDraft<'chat' | 'general' | 'design' | 'agents' | 'graphs' | 'activity-board'>('ui.view', () => IS_MOBILE_HOST || workspaceNavigation.generalOpen ? 'general' : 'chat');
+  const [boardProjectId, setBoardProjectId] = useEngineDraft('ui.boardProject', '');
   const boardOrigin = useRef<'chat' | 'general'>('general');
   const boardView = view === 'activity-board';
   const tasksBoard = useActivityBoard(loaded && (!focusMinimized || !focusEnabled));
@@ -252,21 +258,22 @@ export function App() {
       return { ...current, collapsedTopics };
     });
   }, [loaded, projects]);
-  const [addingProject, setAddingProject] = useState<string | null>(null);
-  const [editingProject, setEditingProject] = useState<Project | null>(null);
-  const [projectSettingsId, setProjectSettingsId] = useState('');
-  const [projectSettingsSection, setProjectSettingsSection] = useState<ProjectSettingsSection>('general');
+  const [addingProject, setAddingProject] = useEngineDraft<string | null>('ui.addProject', null);
+  const [editingProject, setEditingProject] = useEngineDraft<Project | null>('ui.editProject', null);
+  const [projectSettingsId, setProjectSettingsId] = useEngineDraft('ui.projectSettings', '');
+  const [projectSettingsSection, setProjectSettingsSection] = useEngineDraft<ProjectSettingsSection>('ui.projectSettingsSection', 'general');
   const settingsProject = projects.find(item => item.id === projectSettingsId);
-  useEffect(() => { if (projectSettingsId && !settingsProject) setProjectSettingsId(''); }, [projectSettingsId, settingsProject?.id]);
-  const [creatingSession, setCreatingSession] = useState<{ projectId: string; topicId?: string } | null>(null);
-  const [renamingSession, setRenamingSession] = useState<Session | null>(null);
-  const [editingTopic, setEditingTopic] = useState<{ projectId: string; topic: Topic } | null>(null);
-  const [creatingTopicProjectId, setCreatingTopicProjectId] = useState('');
-  const [choosingTopicSessionId, setChoosingTopicSessionId] = useState('');
+  useEffect(() => { if (!IS_DESKTOP && projectSettingsId && !settingsProject) setProjectSettingsId(''); }, [projectSettingsId, settingsProject?.id]);
+  const [creatingSession, setCreatingSession] = useEngineDraft<{ projectId: string; topicId?: string } | null>('ui.createSession', null);
+  const [renamingSession, setRenameLocator] = useEngineDraft<Pick<Session, 'id' | 'title'> | null>('ui.renameSession', null);
+  const setRenamingSession = (value: Pick<Session, 'id' | 'title'> | null) => setRenameLocator(IS_DESKTOP && value ? { id: value.id, title: value.title } : value);
+  const [editingTopic, setEditingTopic] = useEngineDraft<{ projectId: string; topic: Topic } | null>('ui.editTopic', null);
+  const [creatingTopicProjectId, setCreatingTopicProjectId] = useEngineDraft('ui.createTopic', '');
+  const [choosingTopicSessionId, setChoosingTopicSessionId] = useEngineDraft('ui.chooseTopic', '');
   const choosingTopicSession = sessions.find(item => item.id === choosingTopicSessionId && !item.role && !item.parentId);
   const choosingTopicProject = projects.find(item => item.id === choosingTopicSession?.projectId);
   const canChooseTopic = !!choosingTopicSession && !!choosingTopicProject && !choosingTopicSession.archived && !topicArchived(choosingTopicProject, choosingTopicSession);
-  useEffect(() => { if (choosingTopicSessionId && !canChooseTopic) setChoosingTopicSessionId(''); }, [choosingTopicSessionId, canChooseTopic]);
+  useEffect(() => { if (!IS_DESKTOP && choosingTopicSessionId && !canChooseTopic) setChoosingTopicSessionId(''); }, [choosingTopicSessionId, canChooseTopic]);
   const project = projects.find(item => item.id === activeProjectId) ?? projects[0];
   const projectSessions = sessions.filter(item => item.projectId === project?.id && !item.parentId && item.role !== 'graph_node');
   const visibleProjectSessions = projectSessions.filter(item => !item.archived && !topicArchived(project, item)).sort(newestSessionFirst);
@@ -312,17 +319,25 @@ export function App() {
   }, [overlaySessionId, overlaySession?.id]);
   const activeId = session?.id ?? '';
   useEffect(() => {
+    if (IS_DESKTOP) {
+      if (!loaded || !draftStorageReady()) return;
+      acceptLocalDeliveries(sessions.map(item => ({ sessionId: item.id, parentSessionId: item.role === 'side_agent' ? item.parentId : undefined,
+        ids: [...(item.queue ?? []).map(entry => entry.id), ...item.events.map(event => event.id)] })));
+      return;
+    }
     setLocalMessages(current => {
       let updated = current;
       for (const item of sessions) {
         const pending = current[item.id];
         if (!pending?.length) continue;
         const remaining = pending.filter(message => !item.queue?.some(entry => entry.id === message.id) && !item.events.some(event => event.id === message.id));
-        if (remaining.length !== pending.length) updated = { ...updated, [item.id]: remaining };
+        if (remaining.length !== pending.length) {
+          updated = { ...updated, [item.id]: remaining };
+        }
       }
       return updated;
     });
-  }, [sessions]);
+  }, [sessions, IS_DESKTOP && loaded, draftStorage.ready]);
   // Spawned sessions arrive in the multiplexed inventory; no history scan or
   // reconnect is necessary to discover them.
   const gitBranch = sessionMetadata?.sessionId === activeId ? sessionMetadata.gitBranch ?? '' : '';
@@ -360,14 +375,14 @@ export function App() {
   const mobileNavigationVisible = IS_MOBILE_HOST && view === 'chat' && !!project && (mobileNavigationOpen || loaded && !session);
   const mobileSessionVisible = IS_MOBILE_HOST && view === 'chat' && !!session && !mobileNavigationVisible;
   const sideOpen = openSideSessions.includes(activeId);
-  const sideVisible = sideOpen && !generalView && view === 'chat' && !mobileNavigationVisible && !sidebarOpen && !creatingSession && !editingProject && !projectSettingsId && addingProject === null;
+  const sideVisible = sideOpen && !generalView && view === 'chat' && (!IS_DESKTOP || loaded && draftStorage.ready) && !mobileNavigationVisible && !sidebarOpen && !creatingSession && !editingProject && !projectSettingsId && addingProject === null;
   const sideSession = sessions.find(item => item.parentId === activeId && item.role === 'side_agent');
-  const [sideSources, setSideSources] = useState<Record<string, SourceReference[]>>({});
+  const [sideSources, setSideSources] = useEngineDraft<Record<string, SourceReference[]>>(chatDraftKeys.sources, {});
   const [sideErrors, setSideErrors] = useState<Record<string, string>>({});
   const openingSide = useRef(new Set<string>());
-  const [drafts, setDrafts] = useState<Record<string, ComposerDraft>>({});
+  const [drafts, setDrafts] = useEngineDraft<Record<string, ComposerDraft>>(chatDraftKeys.composers, {});
   metadataPins.current = new Set([activeId, generalSession?.id ?? '', sideSession?.id ?? '', ...floatingSessionIds, ...Object.values(floatingSubagentIds), ...mobileChatSheets.flatMap(sheet => [sheet.sessionId, sheet.subagentId ?? '']), ...[...historyAccess.current].sort((a,b) => b[1]-a[1]).slice(0,6).map(([id]) => id)]);
-  const [settingsOpen, setSettingsOpen] = useState(() => new URLSearchParams(window.location.search).get('klm-library') === '1');
+  const [settingsOpen, setSettingsOpen] = useEngineDraft('ui.settings', () => new URLSearchParams(window.location.search).get('klm-library') === '1');
   const [automationStop, setAutomationStop] = useState<{ resolve: (confirmed: boolean) => void }>();
   const shell = useRef<HTMLDivElement>(null);
   const readMainGeometry = useCallback(() => {
@@ -408,14 +423,14 @@ export function App() {
     } catch { /* Navigation still works when browser storage is unavailable. */ }
   }, [loaded, workspaceNavigation, project?.id, projectSession?.id, generalView, selectedSessions]);
   useEffect(() => {
-    if (!generalView || generalSession) return;
+    if (!generalView || generalSession || IS_DESKTOP && (!loaded || engineChangePending())) return;
     const controller = new AbortController();
     setGeneralError('');
     void request<SessionResponse>('/api/general-session', 'POST', {}, 15000, AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]))
       .then(next => { if (!controller.signal.aborted) receiveSession(next); })
       .catch(error => { if (!controller.signal.aborted) setGeneralError(errorMessage(error)); });
     return () => controller.abort();
-  }, [generalView, generalSession?.id, generalRetry]);
+  }, [generalView, generalSession?.id, generalRetry, IS_DESKTOP && loaded]);
   function setSideOpen(open: boolean) {
     if (!activeId) return;
     setWorkspaceNavigation(current => ({ ...current, openSideSessions: open
@@ -433,26 +448,45 @@ export function App() {
       try {
         const next = await request<EngineSnapshot>('/api/state');
         if (!active) return;
-        const identityChanged = next.engineId ? bindEngineIdentity(next.engineId) : false;
+        if (IS_DESKTOP && !next.engineId) throw new Error('The engine did not confirm its database identity. Drafts have not been loaded.');
+        const identityChanged = (next.engineId ? bindEngineIdentity(next.engineId, !IS_DESKTOP) : false) ||
+          IS_DESKTOP && !!inventoryIdentity.current && next.engineId !== inventoryIdentity.current;
         if (next.engineId) setEngineIdentity(next.engineId);
+        if (IS_DESKTOP) {
+          if (identityChanged) setLoaded(false);
+          await restoreChatDraftContext(next.engineId!, !inventoryIdentity.current);
+          if (!active) return;
+          // Do not record first identity adoption until legacy delivery data is
+          // protected; a failed write must remain retryable after a page reload.
+          persistEngineIdentity();
+          const restored = readDraftValue<Record<string, LocalSubmission[]>>(chatDraftKeys.submissions, {});
+          for (const [session, items] of Object.entries(restored)) for (const item of items) if (item.status !== 'failed') generalHarnessBlocks.current.set(item.id, session);
+        }
         if (identityChanged) {
           historyAccess.current.clear(); projectMetadataIds.current.clear(); activityIds.current.clear(); metadataPins.current.clear();
           projectWindow.current = { key: '', pages: 1, start: '' }; topicWindow.current = { key: '', cursor: '' };
           for (const id of submissionTails.current.keys()) stopVersions.current.set(id, (stopVersions.current.get(id) ?? 0) + 1);
-          const restoredNavigation = readWorkspaceNavigation(); const restoredSubmissions = readPendingSubmissions();
+          const restoredNavigation = readWorkspaceNavigation();
+          const restoredSubmissions = IS_DESKTOP ? readDraftValue<Record<string, LocalSubmission[]>>(chatDraftKeys.submissions, {}) : readPendingSubmissions();
           for (const pending of submissionControllers.current.values()) pending.controller.abort();
           submissionControllers.current.clear(); submissionTails.current.clear(); submissionRequests.current.clear(); generalHarnessBlocks.current.clear();
           pending.current.clear(); setPendingSessions({}); setSessionErrors({}); setSideErrors({}); setGraphErrors({}); setSessionTabs({}); setOpenSubagentTabs({});
-          automationStop?.resolve(false); setAutomationStop(undefined); setCreatingSession(null); setRenamingSession(null); setEditingProject(null); setProjectSettingsId(''); setChoosingTopicSessionId(''); setAddingProject(null); setSettingsOpen(false);
+          automationStop?.resolve(false); setAutomationStop(undefined);
+          if (!IS_DESKTOP) { setCreatingSession(null); setRenamingSession(null); setEditingProject(null); setProjectSettingsId(''); setChoosingTopicSessionId(''); setAddingProject(null); setSettingsOpen(false); }
           for (const [session, items] of Object.entries(restoredSubmissions)) for (const item of items) if (item.status !== 'failed') generalHarnessBlocks.current.set(item.id, session);
           setEngine({ projects: [], sessions: [], harnesses: [] }); setLoaded(false);
-          setDrafts({}); setModelPreviews({}); setLocalMessages(restoredSubmissions); setWorkspaceNavigation(restoredNavigation); setView(restoredNavigation.generalOpen ? 'general' : 'chat');
+          if (!IS_DESKTOP) { setDrafts({}); setLocalMessages(restoredSubmissions); }
+          setModelPreviews({}); setWorkspaceNavigation(restoredNavigation);
+          if (!IS_DESKTOP) setView(restoredNavigation.generalOpen ? 'general' : 'chat');
+          else if (!hasEngineDraft('ui.view')) setDraftValues({ 'ui.view': restoredNavigation.generalOpen ? 'general' : 'chat' });
           const layout = readFocusLayout(); setFloatingSessionIds(layout.sessionIds); setFloatingSubagentIds(layout.subagentIds ?? {}); setUnavailableFloatingIds([]);
           setOverlaySessionId(''); setMobileChatSheets([]); setActivityCursor(''); setRefreshVersion(n => n + 1);
+          inventoryIdentity.current = next.engineId ?? '';
           return;
         }
         const activity = await request<{ items: Session[]; nextCursor?: string }>(`/api/activity/sessions?limit=100${activityCursor ? `&cursor=${encodeURIComponent(activityCursor)}` : ''}`);
         if (!active) return;
+        inventoryIdentity.current = next.engineId ?? '';
         const projectsUnchanged = revision === projectRevision.current;
         const previousActivityIds = activityIds.current;
         setEngine(current => {
@@ -728,7 +762,7 @@ export function App() {
       if (action !== 'stop') { pending.current.delete(id); setPendingSessions(current => ({ ...current, [id]: false })); }
     }
   }
-  async function patchSession(target: Session, body: { title?: string; archived?: boolean; topicId?: string }): Promise<string | null> {
+  async function patchSession(target: Pick<Session, 'id'>, body: { title?: string; archived?: boolean; topicId?: string }): Promise<string | null> {
     const id = target.id;
     if (pending.current.has(id)) return 'Another session update is still in progress.';
     pending.current.add(id); setPendingSessions(current => ({ ...current, [id]: true })); setSessionErrors(current => ({ ...current, [id]: '' }));
@@ -763,10 +797,22 @@ export function App() {
       setModelPreviews(current => { const next = { ...current }; delete next[id]; return next; });
     }
   }
+  function acceptLocalDeliveries(confirmations: DeliveryConfirmation[]) {
+    const current: ChatDraftState = {
+      drafts: readDraftValue(chatDraftKeys.composers, {}),
+      sources: readDraftValue(chatDraftKeys.sources, {}),
+      submissions: readDraftValue(chatDraftKeys.submissions, {}),
+    };
+    const accepted = acceptChatDeliveries(current, confirmations);
+    if (accepted === current) return;
+    setDraftValues({ [chatDraftKeys.composers]: accepted.drafts, [chatDraftKeys.sources]: accepted.sources, [chatDraftKeys.submissions]: accepted.submissions });
+  }
   function submitLocal(target: Session, message: LocalSubmission) {
+    if (IS_DESKTOP && !draftStorageReady()) { setSessionErrors(current => ({ ...current, [target.id]: 'Load this engine’s drafts before sending a message.' })); return; }
     const identity = currentEngineIdentity();
     const { id, draft, sources, mode } = message;
     if (submissionRequests.current.has(id)) return;
+    const finished = beginLocalActivity('Delivering message');
     submissionRequests.current.add(id);
     if (target.role === 'general_agent') generalHarnessBlocks.current.set(id, target.id);
     setLocalMessages(current => ({ ...current, [target.id]: (current[target.id] ?? []).map(item => item.id === id ? { ...item, status: 'sending' } : item) }));
@@ -775,26 +821,36 @@ export function App() {
     if (mode === 'interrupt') interruptSubmissions(target.id);
     const previous = submissionTails.current.get(target.id) ?? Promise.resolve();
     const stopVersion = stopVersions.current.get(target.id) ?? 0;
-    const task = previous.then(() => {
+    let dispatched = false;
+    const task = previous.then(async () => {
+      if (identity !== currentEngineIdentity()) throw new DOMException('Engine identity changed.', 'AbortError');
+      if ((stopVersions.current.get(target.id) ?? 0) !== stopVersion) throw new EngineRequestError('Message paused by an interruption. Restore it when ready.', 409);
+      if (IS_DESKTOP) await flushDrafts();
       if (identity !== currentEngineIdentity()) throw new DOMException('Engine identity changed.', 'AbortError');
       if ((stopVersions.current.get(target.id) ?? 0) !== stopVersion) throw new EngineRequestError('Message paused by an interruption. Restore it when ready.', 409);
       const controller = new AbortController();
       submissionControllers.current.set(id, { sessionId: target.id, controller });
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(45000)]);
+      dispatched = true;
       return request<SessionResponse>(`/api/sessions/${encodeURIComponent(target.id)}/messages`, 'POST', { ...draft, sources, mode, clientId: id }, 45000, signal);
     })
       .then(next => {
         if (identity !== currentEngineIdentity()) return;
         setEngine(current => { const sessions = mergeSessions(current.sessions, [next], 'mutation'); return sessions === current.sessions ? current : { ...current, sessions }; });
-        setLocalMessages(current => ({ ...current, [target.id]: (current[target.id] ?? []).map(item => item.id === id ? { ...item, status: 'accepted' } : item) }));
+        if (IS_DESKTOP) {
+          acceptLocalDeliveries([{ sessionId: target.id, parentSessionId: target.role === 'side_agent' ? target.parentId : undefined, ids: [id] }]);
+        } else setLocalMessages(current => ({ ...current, [target.id]: (current[target.id] ?? []).map(item => item.id === id ? { ...item, status: 'accepted' } : item) }));
         setSessionErrors(current => ({ ...current, [target.id]: '' }));
       }).catch(error => {
         if (identity !== currentEngineIdentity()) return;
-        const status = error instanceof EngineRequestError && error.status >= 400 && error.status < 500 && error.status !== 408 ? 'failed' : 'uncertain';
+        // Queue/history may have confirmed this delivery while POST was pending.
+        if (IS_DESKTOP && !(readDraftValue<Record<string, LocalSubmission[]>>(chatDraftKeys.submissions, {})[target.id] ?? []).some(item => item.id === id)) return;
+        const status = !dispatched || error instanceof EngineRequestError && error.status >= 400 && error.status < 500 && error.status !== 408 ? 'failed' : 'uncertain';
         if (status === 'failed') generalHarnessBlocks.current.delete(id);
         setLocalMessages(current => ({ ...current, [target.id]: (current[target.id] ?? []).map(item => item.id === id ? { ...item, status } : item) }));
         setSessionErrors(current => ({ ...current, [target.id]: errorMessage(error) }));
       }).finally(() => {
+        finished();
         if (identity !== currentEngineIdentity()) return;
         submissionRequests.current.delete(id);
         submissionControllers.current.delete(id);
@@ -802,23 +858,40 @@ export function App() {
       });
     submissionTails.current.set(target.id, task);
   }
-  function sendMessage(target: Session, draft: ComposerDraft, sources: SourceReference[], mode: SendMode = 'steer') {
+  function sendMessage(target: Session, draft: ComposerDraft, sources: SourceReference[], mode: SendMode = 'steer', composerKey = target.id) {
     if (target.automation?.status === 'running') mode = 'steer';
     if (target.role === 'general_agent' && pending.current.has(target.id)) return false;
-    const message: LocalSubmission = { id: clientMessageId(), draft, sources, mode, status: 'sending' };
+    if (IS_DESKTOP) {
+      if (!loaded || !draftStorageReady()) return false;
+      const current = readDraftValue<Record<string, LocalSubmission[]>>(chatDraftKeys.submissions, {});
+      if ((current[target.id] ?? []).some(item => item.status !== 'failed' && sameComposerDraft(item.draft, draft))) {
+        setSessionErrors(current => ({ ...current, [target.id]: 'Resolve the pending message before sending this draft again.' }));
+        return false;
+      }
+    }
+    const message: LocalSubmission = { id: clientMessageId(), draft, sources, mode, status: 'sending', ...(IS_DESKTOP ? { composerKey } : {}) };
     setLocalMessages(current => ({ ...current, [target.id]: [...(current[target.id] ?? []), message] }));
     submitLocal(target, message);
     return true;
   }
   function restoreLocal(target: Session, message: LocalSubmission, key = target.id) {
-    if (drafts[key]?.text || drafts[key]?.mentions.length) {
+    if ((drafts[key]?.text || drafts[key]?.mentions.length) && !(IS_DESKTOP && sameComposerDraft(drafts[key], message.draft))) {
       setSessionErrors(current => ({ ...current, [target.id]: 'Clear the current draft before restoring this message.' }));
       return;
     }
-    setDrafts(current => ({ ...current, [key]: message.draft }));
-    if (message.sources.length && key.startsWith('side:')) setSideSources(current => ({ ...current, [key.slice(5)]: [...message.sources, ...(current[key.slice(5)] ?? [])] }));
+    setDrafts(current => ({ ...current, [key]: IS_DESKTOP ? { ...message.draft, mentions: [...message.draft.mentions] } : message.draft }));
+    if (message.sources.length && key.startsWith('side:')) setSideSources(current => {
+      const previous = current[key.slice(5)] ?? [];
+      const added = IS_DESKTOP ? message.sources.filter(source => !previous.some(item => item.sessionId === source.sessionId && item.messageId === source.messageId && item.passage === source.passage)) : message.sources;
+      return { ...current, [key.slice(5)]: [...added, ...previous] };
+    });
     generalHarnessBlocks.current.delete(message.id);
-    setLocalMessages(current => ({ ...current, [target.id]: (current[target.id] ?? []).filter(item => item.id !== message.id) }));
+    setLocalMessages(current => {
+      const remaining = (current[target.id] ?? []).filter(item => item.id !== message.id);
+      const next = { ...current, [target.id]: remaining };
+      if (IS_DESKTOP && !remaining.length) delete next[target.id];
+      return next;
+    });
   }
   function send(draft: ComposerDraft, mode?: SendMode) {
     if (!session || !draft.text.trim()) return false;
@@ -854,6 +927,7 @@ export function App() {
     setSessionTabs(current => current[activeId] === `subagent:${sessionId}` ? { ...current, [activeId]: 'chat' } : current);
   }
   async function ensureSide(main: Session) {
+    if (engineChangePending()) return;
     if (sessions.some(item => item.parentId === main.id && item.role === 'side_agent') || openingSide.current.has(main.id)) return;
     openingSide.current.add(main.id);
     setSideErrors(current => ({ ...current, [main.id]: '' }));
@@ -870,8 +944,8 @@ export function App() {
     if (!sideSession) return false;
     const mainId = activeId;
     const sources = sideSources[mainId] ?? [];
-    setSideSources(current => ({ ...current, [mainId]: (current[mainId] ?? []).filter(source => !sources.includes(source)) }));
-    return sendMessage(sideSession, draft, sources, mode);
+    if (!IS_DESKTOP) setSideSources(current => ({ ...current, [mainId]: (current[mainId] ?? []).filter(source => !sources.includes(source)) }));
+    return sendMessage(sideSession, draft, sources, mode, `side:${mainId}`);
   }
   async function exportSession() {
     if (!session) return;
@@ -951,11 +1025,18 @@ export function App() {
   }
   function openProjectEditor(target: Project) {
     navigation.current += 1;
-    setEditingProject(target); setSidebarOpen(false);
+    setEditingProject(IS_DESKTOP ? { id: target.id, name: target.name, folder: target.folder, icon: target.icon, folders: [], archivedFolders: [] } : target); setSidebarOpen(false);
   }
-  function openProjectSettings(target: Project, section: ProjectSettingsSection = 'general') {
+  function openProjectSettings(target: Project, section?: ProjectSettingsSection) {
     navigation.current += 1;
-    setProjectSettingsSection(section); setProjectSettingsId(target.id); setSidebarOpen(false);
+    let nextSection = section ?? 'general';
+    if (IS_DESKTOP) {
+      const key = `ui.projectSettingsSection:${target.id}`;
+      const saved = readDraftValue<unknown>(key, undefined);
+      if (section === undefined && (saved === 'general' || saved === 'webhooks' || saved === 'tasks' || saved === 'automations')) nextSection = saved;
+      else setDraftValues({ [key]: nextSection });
+    }
+    setProjectSettingsSection(nextSection); setProjectSettingsId(target.id); setSidebarOpen(false);
   }
   function openProjectPicker() {
     navigation.current += 1;
@@ -974,6 +1055,11 @@ export function App() {
   }
   async function editProject(projectId: string, input: Pick<Project, 'name' | 'icon'>): Promise<string | null> {
     try {
+      if (IS_DESKTOP && editingProject?.id === projectId) {
+        const latest = projects.find(project => project.id === projectId);
+        if (!latest) return 'Project is unavailable. The draft has been retained.';
+        if (latest.name !== editingProject.name || latest.icon !== editingProject.icon) return 'Project changed. Cancel this edit and reopen it to review the saved values.';
+      }
       const next = await request<Project>(`/api/projects/${encodeURIComponent(projectId)}`, 'PATCH', { name: input.name, icon: input.icon });
       projectRevision.current += 1;
       setEngine(current => ({ ...current, projects: current.projects.map(item => item.id === projectId ? next : item) }));
@@ -1070,6 +1156,8 @@ export function App() {
     tabItems.push({ value: `subagent:${id}`, label, closeLabel: `Close ${label}`, onClose: () => closeSubagent(id) });
   }
 
+  if (IS_DESKTOP && (!loaded || !draftStorage.ready)) return <main className="app-shell"><section className="empty-chat"><h2>{draftStorage.error || connectionError || 'Loading engine and drafts…'}</h2>{(draftStorage.error || connectionError) && <Button onClick={() => setRefreshVersion(value => value + 1)}>Retry</Button>}</section></main>;
+
   return <ActivityPagingContext.Provider value={{ hasMore: !!activityNext, older: !!activityCursor, next: () => setActivityCursor(activityNext), latest: () => setActivityCursor('') }}><SessionNavigationProvider key={engineIdentity} sessions={sessions} projects={projects} onOpenSession={IS_MOBILE_HOST ? openSessionOverlay : openSessionInProject}><div ref={shell} className={`app-shell ${focusMaximized ? 'is-maximized' : ''} ${focusMinimized && focusEnabled ? 'is-minimized' : ''} ${sidebarOpen ? 'sidebar-open' : ''} ${sideVisible && session ? 'side-agent-open' : ''}`}
     data-mobile-screen={mobileNavigationVisible ? 'sessions' : mobileSessionVisible ? 'chat' : undefined}
     data-mobile-project-rail={IS_MOBILE_HOST && generalView ? mobileProjectRailOpen ? 'open' : 'hidden' : undefined}
@@ -1132,6 +1220,7 @@ export function App() {
       {focusError && <div role="alert" className="storage-error">{focusError} <Button size="sm" onClick={() => void focus()}>Retry</Button></div>}
       {generalWindowError && !focusMinimized && <div role="alert" className="storage-error">{generalWindowError} <Button size="sm" disabled={openingGeneralWindow} onClick={() => void openGeneralFloatingWindow()}>Retry</Button></div>}
       {connectionError && <div role="alert" className="storage-error">{connectionError} <Button size="sm" onClick={() => setRefreshVersion(current => current + 1)}>Retry</Button></div>}
+      {draftStorage.error && <div role="alert" className="storage-error">{draftStorage.error} Keep this window open. <Button size="sm" onClick={() => { if (!draftStorage.ready) setRefreshVersion(current => current + 1); else void flushDrafts().catch(() => {}); }}>Retry saving drafts</Button></div>}
       {boardView && <Suspense fallback={<p role="status">Loading tasks…</p>}><ActivityBoardPage projects={projects} projectId={boardProjectId} visible={!focusMinimized || !focusEnabled} board={tasksBoard} onProjectChange={setBoardProjectId} onBack={() => setView(boardOrigin.current)} onConnections={id => { const target = projects.find(p => p.id === id); if (target) openProjectSettings(target, 'tasks'); }} /></Suspense>}
       <KlmAgentWorkspace enabled={generalView} visible={!focusMinimized || !focusEnabled} projects={projects} sessions={sessions} onChatVisibility={setGeneralChatVisible} projectRailOpen={mobileProjectRailOpen} onToggleProjectRail={IS_MOBILE_HOST ? () => setMobileProjectRailOpen(current => !current) : undefined} overlaySessionId={IS_MOBILE_HOST ? mobileChats.at(-1)?.session.id : overlaySession?.id} onOpenOverlay={openSessionOverlay} onCloseOverlay={() => setOverlaySessionId('')} onOpenProject={openSessionInProject} onOpenFloatingChat={focusEnabled ? () => void openGeneralFloatingWindow() : undefined} openingFloatingChat={openingGeneralWindow} onOpenBoard={() => openBoard()}>
       {(view === 'chat' || view === 'design') && <div className="session-navigation"><TabNav<SessionTab> value={view === 'design' ? 'chat' : activeTab} onChange={tab => { setView('chat'); setSessionTabs(current => ({ ...current, [activeId]: tab })); }} items={view === 'chat' ? tabItems : [{ value: 'chat', label: 'Chat' }]} />{view === 'chat' && project && session && <>{focusEnabled && !projectSessionArchived && <IconButton className="session-open-floating" label="Open session in floating window and minimize main window" onClick={() => { openFloatingSession(session); setFocusMinimized(true); }}><PanelsTopLeft /></IconButton>}<button className={`topic-tag topic-color-${currentTopic?.color ?? 'neutral'}`} title={projectSessionArchived ? `Edit topic: ${currentTopic?.name ?? 'Ungrouped'}` : 'Change topic'} aria-haspopup="dialog" disabled={!!connectionError || projectSessionArchived && !currentTopic} onClick={() => { if (projectSessionArchived && currentTopic) setEditingTopic({ projectId: project.id, topic: currentTopic }); else setChoosingTopicSessionId(session.id); }}>{currentTopic?.name ?? 'Choose topic'}</button></>}</div>}
@@ -1168,11 +1257,11 @@ export function App() {
           {generalConversation && <GeneralHarnessPicker session={session} harnesses={harnesses} disabled={!!pendingSessions[session.id] || generalHarnessBlocked(session) || !!connectionError} onChange={harness => void updateSession(session, 'harness', { harness })} />}
           {generalView && !harnesses.some(harness => harness.id === session.harness && harness.available) && <p role="status" className="form-error">The selected harness is not installed.</p>}
           {!generalView && projectSessionArchived && <div className="archived-conversation-actions"><span>{currentTopic?.archived ? 'Topic archived' : 'Session archived'}</span><Button size="sm" onClick={async () => { if (currentTopic?.archived && project) { const failure = await patchTopic(project.id, currentTopic, { archived: false }); setSessionErrors(current => ({ ...current, [session.id]: failure ?? '' })); } else void patchSession(session, { archived: false }); }}>{currentTopic?.archived ? 'Restore topic' : 'Restore session'}</Button></div>}
-          <MessageComposer key={session.id} steeringOnly={session.automation?.status === 'running'} placeholder={overlaySession ? `Message ${session.title}` : undefined} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} onTranscription={text => setDrafts(current => {
+          <MessageComposer key={session.id} clearOnSend={!IS_DESKTOP} steeringOnly={session.automation?.status === 'running'} placeholder={overlaySession ? `Message ${session.title}` : undefined} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} onTranscription={text => setDrafts(current => {
             const draft = current[session.id] ?? { text: '', mentions: [] };
             const separator = !draft.text || draft.text.endsWith('\n\n') ? '' : draft.text.endsWith('\n') ? '\n' : '\n\n';
             return { ...current, [session.id]: { ...draft, text: `${draft.text}${separator}${text.trim()}` } };
-          })} disabled={!!pendingSessions[session.id] || !generalView && projectSessionArchived || generalView && !harnesses.some(harness => harness.id === session.harness && harness.available)} running={session.status === 'running'} onStop={() => void updateSession(session, 'stop', {})} graphControl={IS_MOBILE_HOST ? undefined : composerGraphControl} modelControl={<ModelPicker key={`${session.id}/${session.harness}`} session={session} disabled={!!pendingSessions[session.id] || working} optionsDisabled={!!pendingSessions[session.id] || !!connectionError} onSave={(model, effort) => applyModelSettings(session, model, effort)} onSnapshot={receiveSession} graphControl={IS_MOBILE_HOST ? composerGraphControl : undefined} />} />
+          })} disabled={!draftStorage.ready || !!pendingSessions[session.id] || !generalView && projectSessionArchived || generalView && !harnesses.some(harness => harness.id === session.harness && harness.available)} running={session.status === 'running'} onStop={() => void updateSession(session, 'stop', {})} graphControl={IS_MOBILE_HOST ? undefined : composerGraphControl} modelControl={<ModelPicker key={`${session.id}/${session.harness}`} session={session} disabled={!!pendingSessions[session.id] || working} optionsDisabled={!!pendingSessions[session.id] || !!connectionError} onSave={(model, effort) => applyModelSettings(session, model, effort)} onSnapshot={receiveSession} graphControl={IS_MOBILE_HOST ? composerGraphControl : undefined} />} />
           <SessionStatusBar session={session} />
         </div>
       </>}
@@ -1195,13 +1284,13 @@ export function App() {
       receiveSession(target); setProjectSettingsId(''); openSessionInProject(target);
     }} onClose={() => setProjectSettingsId('')} />}
     {automationStop && <StopAutomationDialog onDecision={confirmed => { const resolve = automationStop.resolve; setAutomationStop(undefined); resolve(confirmed); }} />}
-    {creatingSession && createProject && <CreateSessionDialog project={createProject} harnesses={harnesses} topicId={creatingSession.topicId} onCreate={createSession} onClose={() => { navigation.current += 1; setCreatingSession(null); }} />}
-    {canChooseTopic && choosingTopicSession && choosingTopicProject && <TopicDialog key={`choose-topic:${choosingTopicSession.id}`} topic={sessionTopic(choosingTopicProject, choosingTopicSession)} selection={{ projectId: choosingTopicProject.id, topics: choosingTopicProject.topics ?? [], onSelect: id => chooseSessionTopic(choosingTopicSession, id), onCreate: input => createTopic(choosingTopicProject.id, input, choosingTopicSession) }} onSave={input => {
+    {creatingSession && createProject && <CreateSessionDialog key={`${createProject.id}:${creatingSession.topicId ?? ''}`} project={createProject} harnesses={harnesses} topicId={creatingSession.topicId} onCreate={createSession} onClose={() => { navigation.current += 1; setCreatingSession(null); }} />}
+    {canChooseTopic && choosingTopicSession && choosingTopicProject && <TopicDialog key={`choose-topic:${choosingTopicSession.id}`} draftKey={`form.topic.choose:${choosingTopicProject.id}:${choosingTopicSession.id}`} topic={sessionTopic(choosingTopicProject, choosingTopicSession)} selection={{ projectId: choosingTopicProject.id, topics: choosingTopicProject.topics ?? [], onSelect: id => chooseSessionTopic(choosingTopicSession, id), onCreate: input => createTopic(choosingTopicProject.id, input, choosingTopicSession) }} onSave={input => {
       const topic = sessionTopic(choosingTopicProject, choosingTopicSession);
       return topic ? patchTopic(choosingTopicProject.id, topic, input) : Promise.resolve('Topic is unavailable. Close and try again.');
     }} onClose={() => setChoosingTopicSessionId('')} />}
-    {creatingTopicProjectId && <TopicDialog key={`new-topic:${creatingTopicProjectId}`} onSave={input => createTopic(creatingTopicProjectId, input)} onClose={() => setCreatingTopicProjectId('')} />}
-    {editingTopic && <TopicDialog key={editingTopic.topic.id} topic={editingTopic.topic} onSave={input => patchTopic(editingTopic.projectId, editingTopic.topic, input)} onClose={() => setEditingTopic(null)} />}
+    {creatingTopicProjectId && <TopicDialog key={`new-topic:${creatingTopicProjectId}`} draftKey={`form.topic.new:${creatingTopicProjectId}`} onSave={input => createTopic(creatingTopicProjectId, input)} onClose={() => setCreatingTopicProjectId('')} />}
+    {editingTopic && <TopicDialog key={editingTopic.topic.id} projectId={editingTopic.projectId} draftKey={`form.topic.edit:${editingTopic.projectId}:${editingTopic.topic.id}`} topic={editingTopic.topic} onSave={input => patchTopic(editingTopic.projectId, editingTopic.topic, input)} onClose={() => setEditingTopic(null)} />}
   </div>
     {mobileChats.map(({ session: mobileChatSession, ...sheet }) => <BottomSheet key={sheet.id} title={sheet.title} className="mobile-session-chat-sheet" onClose={() => closeMobileChatSheet(sheet.id)}>
       <FocusSessionChat session={mobileChatSession} projectName={projects.find(owner => owner.id === mobileChatSession.projectId)?.name ?? ''} subagents={sessions.filter(item => item.parentId === mobileChatSession.id && item.role === 'subagent')}

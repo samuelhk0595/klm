@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Background, ConnectionLineType, Handle, MarkerType, Panel, Position, ReactFlow, useEdgesState, useNodesState, useOnViewportChange, useReactFlow, useUpdateNodeInternals, type Connection, type Edge, type Node, type NodeProps, type ReactFlowInstance, type XYPosition } from '@xyflow/react';
+import { applyEdgeChanges, applyNodeChanges, Background, ConnectionLineType, Handle, MarkerType, Panel, Position, ReactFlow, useOnViewportChange, useReactFlow, useUpdateNodeInternals, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, type NodeProps, type ReactFlowInstance, type XYPosition } from '@xyflow/react';
 import { ArrowLeft, Bot, Diamond, GitFork, GitMerge, Maximize, Minus, Plus, Save, Settings2, Terminal, Trash2 } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
 import { Badge } from '../../design-system/Badge';
@@ -30,6 +30,10 @@ import '@xyflow/react/dist/style.css';
 import './graph-shimmer.css';
 import './graph-running-led.css';
 import './graph-canvas.css';
+import { bindDraftDiscard, draftRecord, flushDrafts, setDraftValues, useEngineDraft } from '../drafts/draftStore';
+import { IS_DESKTOP } from '../../platform';
+import { GraphDraftScope } from './draftScope';
+import { beginLocalActivity } from '../engines/localActivities';
 
 type CanvasNodeData = {
   fixedHandles?: FixedHandle[];
@@ -162,19 +166,28 @@ export function CanvasControls() {
 }
 
 export function GraphCanvas({ agents, graph, graphs, projectId, onSaved, onClose }: { agents: Agent[]; graph: GraphFile; graphs: GraphFile[]; projectId: string; onSaved: () => Promise<void>; onClose: () => void }) {
-  const [drawing] = useState(() => graphDrawing(graph));
-  const [nodes, setNodes, onNodesChange] = useNodesState(drawing.nodes.length ? drawing.nodes : initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(drawing.edges);
-  const [definition, setDefinition] = useState(graph.definition);
-  const file = useRef(graph);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const key = `form.graph:${projectId}:${graph.id}`;
+  const forgetDrafts = bindDraftDiscard();
+  const [baseFile, setBaseFile] = useEngineDraft(`${key}.base`, graph, true);
+  const [drawing] = useState(() => graphDrawing(IS_DESKTOP ? baseFile : graph));
+  const [nodes, setNodes] = useEngineDraft<CanvasNode[]>(`${key}.nodes`, drawing.nodes.length ? drawing.nodes : initialNodes, false,
+    value => Array.isArray(value) && value.every(node => draftRecord(node) && typeof node.id === 'string' && draftRecord(node.data) && draftRecord(node.position) && Number.isFinite(node.position.x) && Number.isFinite(node.position.y)));
+  const [edges, setEdges] = useEngineDraft<Edge[]>(`${key}.edges`, drawing.edges, false,
+    value => Array.isArray(value) && value.every(edge => draftRecord(edge) && typeof edge.id === 'string' && typeof edge.source === 'string' && typeof edge.target === 'string'));
+  const onNodesChange = useCallback((changes: NodeChange<CanvasNode>[]) => setNodes(current => applyNodeChanges(changes, current)), [setNodes]);
+  const onEdgesChange = useCallback((changes: EdgeChange<Edge>[]) => setEdges(current => applyEdgeChanges(changes, current)), [setEdges]);
+  const [definition, setDefinition, clearDefinition] = useEngineDraft(`${key}.definition`, IS_DESKTOP ? baseFile.definition : graph.definition);
+  const file = useRef(IS_DESKTOP ? baseFile : graph);
+  const [detailsOpen, setDetailsOpen] = useEngineDraft(`${key}.detailsOpen`, false);
+  const [viewport, setViewport] = useEngineDraft(`${key}.viewport`, baseFile.layout.viewport);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [saveError, setSaveError] = useState('');
-  const [layoutError, setLayoutError] = useState('');
+  const [layoutError, setLayoutError] = useEngineDraft(`${key}.layoutError`, '');
   const [saved, setSaved] = useState('');
   const layoutQueue = useRef<Promise<unknown>>(Promise.resolve());
-  const lastLayout = useRef<GraphLayout>(graph.layout);
+  const [layoutDraft, setLayoutDraft] = useEngineDraft<GraphLayout>(`${key}.layout`, baseFile.layout);
+  const lastLayout = useRef<GraphLayout>(IS_DESKTOP ? layoutDraft : graph.layout);
   const base = authoringPath(projectId);
   const headerLeading = document.getElementById('workspace-header-leading');
   const headerActions = document.getElementById('workspace-header-actions');
@@ -183,7 +196,7 @@ export function GraphCanvas({ agents, graph, graphs, projectId, onSaved, onClose
   const dynamic = useDynamicHandles(canvasRoot, nodes, connection => validGraphConnection(connection, nodes, edges), !saving);
   // All deletion paths (including configuration changes) share anchor cleanup.
   useEffect(() => { setNodes(current => pruneHandles(current, edges)); }, [edges, setNodes]);
-  const [configuringId, setConfiguringId] = useState<string | null>(null);
+  const [configuringId, setConfiguringId] = useEngineDraft<string | null>(`${key}.configuring`, null);
   const [contextMenu, setContextMenu] = useState<CanvasContextMenu | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [removingEdgeIds, setRemovingEdgeIds] = useState<string[]>([]);
@@ -203,30 +216,39 @@ export function GraphCanvas({ agents, graph, graphs, projectId, onSaved, onClose
   ])];
 
   function persistLayout(layout: GraphLayout) {
+    const finished = beginLocalActivity('Saving graph layout');
     // Keep positions of the saved topology too, even when unsaved edits remove or
     // rename an element. Autosaving layout must not erase the saved graph's layout.
     const merged = { ...lastLayout.current, viewport: layout.viewport, positions: { ...lastLayout.current.positions, ...layout.positions } };
     lastLayout.current = merged;
-    const next = layoutQueue.current.catch(() => {}).then(() => request<GraphLayout>(`${base}/graphs/${encodeURIComponent(file.current.id)}/layout`, 'POST', merged));
+    if (IS_DESKTOP) setLayoutDraft(merged);
+    const next = layoutQueue.current.catch(() => {}).then(async () => { if (IS_DESKTOP) await flushDrafts(); return request<GraphLayout>(`${base}/graphs/${encodeURIComponent(file.current.id)}/layout`, 'POST', merged); })
+      .then(result => { setLayoutError(''); return result; }, error => { setLayoutError(error instanceof Error ? error.message : 'Could not save layout.'); throw error; }).finally(finished);
     layoutQueue.current = next;
-    void next.then(() => setLayoutError(''), error => setLayoutError(error instanceof Error ? error.message : 'Could not save layout.'));
     return next;
   }
   async function save() {
     if (savingRef.current || configuringId) return;
+    const finished = beginLocalActivity('Saving graph');
     savingRef.current = true; setSaving(true); setSaveError(''); setSaved('');
     try {
+      await flushDrafts();
       const nextDefinition = canvasDefinition(definition, nodes, edges);
       await layoutQueue.current.catch(() => {});
       const layout = canvasLayout(nodes, flow.current?.getViewport(), edges);
       const next = await request<GraphFile>(`${base}/graphs/${encodeURIComponent(file.current.id)}`, 'POST', { definition: nextDefinition, revision: file.current.revision, layout });
       lastLayout.current = next.layout;
+      if (IS_DESKTOP) setLayoutDraft(next.layout);
       layoutQueue.current = Promise.resolve();
       setLayoutError('');
-      file.current = next; setDefinition(next.definition); setSaved('Saved');
+      file.current = next; setBaseFile(next); setDefinition(next.definition);
+      // Keep this current scene's local node IDs: server-canonical choice IDs
+      // must not orphan unapplied subeditors or raw preview inputs on return.
+      if (IS_DESKTOP) setDraftValues({ [`${key}.nodes`]: nodes, [`${key}.edges`]: edges });
+      clearDefinition(next.definition); setSaved('Saved');
       await onSaved();
     } catch (error) { setSaveError(error instanceof Error ? error.message : 'Could not save graph.'); }
-    finally { savingRef.current = false; setSaving(false); }
+    finally { savingRef.current = false; setSaving(false); finished(); }
   }
   // Only executable edits invalidate the explicit-save indicator; measurements
   // and position changes are handled independently by layout autosave.
@@ -330,13 +352,14 @@ export function GraphCanvas({ agents, graph, graphs, projectId, onSaved, onClose
     };
   });
 
-  return <section className="graph-editor" aria-label={`${definition.name} editor`}>
+  return <GraphDraftScope.Provider value={`${key}.node:${configuringId ?? ''}`}><section className="graph-editor" aria-label={`${definition.name} editor`}>
     {headerLeading && createPortal(<div className="graph-editor-heading">
       <Button disabled={saving} onClick={() => { void layoutQueue.current.catch(() => {}).then(onClose); }}><ArrowLeft />Back to graphs</Button>
       <strong>{definition.name}</strong>
     </div>, headerLeading)}
     {headerActions && createPortal(<>
       <span className="small muted" role="status">{saved}</span>
+      {IS_DESKTOP && <Button disabled={saving} onClick={() => { forgetDrafts(key); onClose(); }}>Discard changes</Button>}
       <IconButton label="Graph details" disabled={saving} onClick={() => setDetailsOpen(true)}><Settings2 /></IconButton>
       <Button variant="primary" disabled={saving || !!configuringId} onClick={() => void save()}><Save />{saving ? 'Saving...' : 'Save'}</Button>
     </>, headerActions)}
@@ -363,8 +386,8 @@ export function GraphCanvas({ agents, graph, graphs, projectId, onSaved, onClose
       }}
       onNodeDragStart={() => { setContextMenu(null); dynamic.moveStart(); }} onMoveStart={() => setContextMenu(null)} onMove={() => dynamic.viewportChanged()}
       onNodeDragStop={(_, moved) => { dynamic.moveEnd(); if (!savingRef.current) void persistLayout(canvasLayout(nodes.map(n => n.id === moved.id ? { ...n, position: moved.position } : n), flow.current?.getViewport())).catch(() => {}); }}
-      onMoveEnd={(event, viewport) => { if (event && !savingRef.current) void persistLayout(canvasLayout(nodes, viewport)).catch(() => {}); }}
-      minZoom={0.2} maxZoom={2} defaultViewport={graph.layout.viewport} fitView={!graph.layout.viewport} fitViewOptions={{ maxZoom: 1 }}>
+      onMoveEnd={(event, viewport) => { if (event && !savingRef.current) { setViewport(viewport); void persistLayout(canvasLayout(nodes, viewport)).catch(() => {}); } }}
+      minZoom={0.2} maxZoom={2} defaultViewport={IS_DESKTOP ? viewport : graph.layout.viewport} fitView={!(IS_DESKTOP ? viewport : graph.layout.viewport)} fitViewOptions={{ maxZoom: 1 }}>
       <Background gap={24} size={1} color="var(--color-faint)" />
       <CanvasControls />
       {configuringNode?.type === 'aiAgent' && <Panel position="center-right" className="graph-agent-panel-position"><AgentNodePanel key={configuringNode.id} agents={agents} name={configuringNode.data.name ?? ''} onNameChange={name => setNodes(current => current.map(node => node.id === configuringNode.id ? { ...node, data: { ...node.data, name } } : node))} agentId={configuringNode.data.agentId ?? ''} overrides={configuringNode.data.overrides ?? {}} onSelectAgent={id => {
@@ -393,7 +416,7 @@ export function GraphCanvas({ agents, graph, graphs, projectId, onSaved, onClose
       }} onClose={() => setConfiguringId(null)} /></Panel>}
     </ReactFlow>
     </div>
-    {detailsOpen && <GraphDetailsDialog graph={{ ...graphListEntry(file.current), name: definition.name, description: definition.description }} graphs={graphs.map(graphListEntry)} onClose={() => setDetailsOpen(false)} onSave={(name, description) => { setDefinition(current => ({ ...current, name, description })); setDetailsOpen(false); }} />}
+    {detailsOpen && <GraphDetailsDialog draftKey={`${key}.details`} graph={{ ...graphListEntry(file.current), name: definition.name, description: definition.description }} graphs={graphs.map(graphListEntry)} onClose={() => setDetailsOpen(false)} onSave={(name, description) => { setDefinition(current => ({ ...current, name, description })); setDetailsOpen(false); }} />}
     <Menu label={contextMenu?.kind === 'canvas' ? 'Node catalog' : 'Node actions'} role="menu" className={contextMenu?.kind === 'canvas' ? 'graph-node-catalog' : 'graph-node-actions-menu'} open={contextMenu !== null} position={contextMenu ?? undefined} onOpenChange={open => { if (!open) setContextMenu(null); }} trigger={() => null}>
       {contextMenu?.kind === 'canvas' ? <>
         <MenuItem role="menuitem" onClick={() => {
@@ -440,5 +463,5 @@ export function GraphCanvas({ agents, graph, graphs, projectId, onSaved, onClose
       if (configuringId === removingNode.id) setConfiguringId(null);
       setRemovingId(null);
     }} />}
-  </section>;
+  </section></GraphDraftScope.Provider>;
 }

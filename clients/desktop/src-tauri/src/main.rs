@@ -2,6 +2,7 @@
 
 mod web;
 mod client_auth;
+mod draft_storage;
 
 use tauri::{menu::{Menu, MenuItem}, tray::TrayIconBuilder, Manager};
 use tauri_plugin_dialog::DialogExt;
@@ -44,7 +45,7 @@ fn main() {
         .plugin(tauri_plugin_single_instance::init(|app, _, _| open_window(app)))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![open_focus, open_content_download, client_auth::client_credential_get, client_auth::client_credential_set, client_auth::client_credential_delete])
+        .invoke_handler(tauri::generate_handler![open_focus, open_content_download, client_auth::client_credential_get, client_auth::client_credential_set, client_auth::client_credential_delete, draft_storage::draft_read, draft_storage::draft_write, draft_storage::draft_delete])
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
             let exit = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;

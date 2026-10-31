@@ -543,6 +543,46 @@ lifecycle cases still await validation.
 
 ### Windows Delivery and Focus
 
+The Windows/Tauri desktop can save multiple engines, with no product-imposed
+registration count limit and one active connection per page load. The avatar
+between Theme and Settings opens the searchable saved-engine list. Each entry has
+a required client-local name and an optional predefined icon (otherwise initials);
+the separate Client name belongs to the paired device on the engine. Edit/Remove
+manage this desktop's metadata/credential only. Removing the active entry leaves
+selection empty instead of silently choosing another engine.
+
+Changing engine freezes new UI actions, waits for actual local save/submission/
+layout work, detaches reads/streams/renewal, confirms protected draft persistence,
+commits the selected registration and reloads the complete UI. It never sends Stop
+or Restart, and work on the previous engine continues. Audio recording and native
+pickers must finish/cancel first; waiting for finite work has Cancel switch, which
+does not undo server actions. Registry readback failures do not claim a proven
+persistent rollback. Offline/401/loading/no-selection recovery can select or add
+an engine outside the workspace/auth gates.
+
+Editable chat/form values, secret inputs, original revisions/operation IDs and
+editor locators are retained in Windows CurrentUser DPAPI storage below the
+desktop's app-data directory, separate from engine data and static web assets.
+Pre-auth connection drafts have a separate protected profile document, never an
+entity/database namespace. Restoring drafts never submits, authorizes or replays
+work. Browser/Focus/mobile keep their existing independent single-connection
+behavior; they do not inherit the desktop registry or native credentials.
+
+On native desktop, `VITE_ENGINE_URL` seeds a genuinely absent registry; a saved
+selection takes precedence afterward. Browser/mobile retain the fixed override
+semantics. Dev/release app identities and credentials remain separate. Implementation
+and lightweight checks are tracked in `MULTI_ENGINE_SWITCHING_IMPLEMENTATION_PROGRESS.md`
+and `MULTI_ENGINE_DRAFTS_COVERAGE.md`. Directed real Windows/Tauri/WebView2 Playwright
+exercised authenticated Local DEV ↔ VPS switching, keyring/DPAPI retention with
+representative drafts, transport teardown and selected failure/recovery paths.
+The Project Settings locator defect was corrected and passed a focused native
+retest. [MULTI_ENGINE_PLAYWRIGHT_VALIDATION.md](MULTI_ENGINE_PLAYWRIGHT_VALIDATION.md)
+preserves both tested SHAs and limits:
+actual lost-message ACK/work continuity, audio/native pickers/transcription,
+remaining variants and broad client/installation acceptance are not inferred to
+pass. Human acceptance remains pending. `MULTI_ENGINE_DEV_VALIDATION.md` describes
+the isolated DEV-only procedure.
+
 The engine and Tauri 2 desktop client are installed separately. `klm start` starts
 the engine in the background and returns after readiness; `klm stop` requests
 graceful shutdown through a local, per-user Windows channel. The engine installer

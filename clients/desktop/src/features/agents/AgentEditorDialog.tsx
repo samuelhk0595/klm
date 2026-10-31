@@ -12,6 +12,8 @@ import { agentSlug, type Agent } from './demo';
 import { AuthoringProject, useAgentModels } from './catalog';
 import { CapabilitySelector } from '../library/CapabilitySelector';
 import type { MCPSelection } from '../library/api';
+import { bindDraftDiscard, flushDrafts, useEngineDraft } from '../drafts/draftStore';
+import { beginLocalActivity } from '../engines/localActivities';
 
 type AgentDraft = {
   skills: string[];
@@ -31,14 +33,17 @@ function effortLabel(value: string) {
 export function AgentEditorDialog({ agent, agents, onSave, onClose }: {
   agent?: Agent;
   agents: Agent[];
-  onSave: (draft: AgentDraft) => void | Promise<void>;
+  onSave: (draft: AgentDraft, revision?: string) => void | Promise<void>;
   onClose: () => void;
 }) {
   const id = useId();
   const projectId = useContext(AuthoringProject);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => { dialog.current?.showModal(); }, []);
-  const [draft, setDraft] = useState<Omit<AgentDraft, 'defaultHarness'> & { defaultHarness?: Harness['id'] }>(() => ({
+  const key = `form.agent:${projectId}:${agent?.id ?? 'new'}`;
+  const forgetDrafts = bindDraftDiscard();
+  const [revision] = useEngineDraft(`${key}.revision`, agent?.revision ?? '', true);
+  const [draft, setDraft] = useEngineDraft<Omit<AgentDraft, 'defaultHarness'> & { defaultHarness?: Harness['id'] }>(`${key}.values`, () => ({
     name: agent?.name ?? '',
     description: agent?.description ?? '',
     defaultHarness: agent?.defaultHarness,
@@ -70,10 +75,11 @@ export function AgentEditorDialog({ agent, agents, onSave, onClose }: {
     <form className="agent-editor" onSubmit={async event => {
       event.preventDefault();
       if (!valid || !draft.defaultHarness || saving) return;
+      const finished = beginLocalActivity('Saving agent');
       setSaving(true); setSaveError('');
-      try { await onSave({ ...draft, effort: efforts.length ? draft.effort : '', defaultHarness: draft.defaultHarness, name: draft.name.trim(), description: draft.description.trim() }); }
+      try { await flushDrafts(); await onSave({ ...draft, effort: efforts.length ? draft.effort : '', defaultHarness: draft.defaultHarness, name: draft.name.trim(), description: draft.description.trim() }, revision); forgetDrafts(key); }
       catch (error) { setSaveError(error instanceof Error ? error.message : 'Could not save agent.'); }
-      finally { setSaving(false); }
+      finally { setSaving(false); finished(); }
     }}>
       <div className="agent-editor-header">
         <h2 id={`${id}-title`}>{agent ? 'Edit agent' : 'New agent'}</h2>
@@ -94,7 +100,7 @@ export function AgentEditorDialog({ agent, agents, onSave, onClose }: {
         {projectId && <div className="agent-editor-wide"><h3>Library</h3><CapabilitySelector harness={draft.defaultHarness} value={{ skills: draft.skills, mcpConnections: draft.mcpConnections }} onChange={selection => setDraft(current => ({ ...current, ...selection }))} /></div>}
       </div>
       {saveError && <p className="form-error" role="alert">{saveError}</p>}
-      <div className="agent-editor-actions"><Button disabled={saving} onClick={onClose}>Cancel</Button><Button type="submit" variant="primary" disabled={!valid || saving}>{saving ? 'Saving...' : agent ? 'Save changes' : 'Create agent'}</Button></div>
+      <div className="agent-editor-actions"><Button disabled={saving} onClick={() => { forgetDrafts(key); onClose(); }}>Cancel</Button><Button type="submit" variant="primary" disabled={!valid || saving}>{saving ? 'Saving...' : agent ? 'Save changes' : 'Create agent'}</Button></div>
     </form>
   </dialog>;
 }

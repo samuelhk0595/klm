@@ -4,28 +4,34 @@ import { Button, IconButton } from '../../design-system/Button';
 import { Menu, MenuItem } from '../../design-system/Menu';
 import { createFilesystemDirectory, deleteFilesystemDirectory, renameFilesystemDirectory, EngineRequestError, getFilesystemDirectories, getFilesystemRoots, pickDirectory, type FilesystemDirectory, type FilesystemListing, type FilesystemRoots } from '../../engine';
 import './directoryBrowser.css';
+import { draftRecord, flushDrafts, hasEngineDraft, useEngineDraft } from '../drafts/draftStore';
+import { IS_DESKTOP } from '../../platform';
+import { beginLocalActivity } from '../engines/localActivities';
 
 type Target = { kind: 'roots'; initial?: string } | { kind: 'directory'; path: string };
 type FolderEdit = { kind: 'create'; parent: string } | { kind: 'rename' | 'delete'; parent: string; item: FilesystemDirectory };
 
-export function DirectoryBrowser({ initialPath, onSelect, onCancel }: {
+export function DirectoryBrowser({ initialPath, onSelect, onCancel, draftKey = 'form.directory' }: {
+  draftKey?: string;
   initialPath: string; onSelect: (path: string) => void; onCancel: () => void;
 }) {
   const [roots, setRoots] = useState<FilesystemRoots | null>(null);
   const [listing, setListing] = useState<FilesystemListing | null>(null);
   const [listingValid, setListingValid] = useState(false);
-  const [draft, setDraft] = useState(initialPath);
-  const [selectedPath, setSelectedPath] = useState('');
-  const [query, setQuery] = useState('');
-  const [descending, setDescending] = useState(false);
+  const [locationTarget, setLocationTarget] = useEngineDraft<Target>(`${draftKey}.location`, { kind: 'roots', initial: initialPath }, false,
+    value => draftRecord(value) && (value.kind === 'roots' && (value.initial === undefined || typeof value.initial === 'string') || value.kind === 'directory' && typeof value.path === 'string'));
+  const [draft, setDraft] = useEngineDraft(`${draftKey}.path`, initialPath);
+  const [selectedPath, setSelectedPath] = useEngineDraft(`${draftKey}.selected`, '');
+  const [query, setQuery] = useEngineDraft(`${draftKey}.query`, '');
+  const [descending, setDescending] = useEngineDraft(`${draftKey}.descending`, false);
   const [busy, setBusy] = useState<'listing' | 'native' | 'mutation' | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const [menuTarget, setMenuTarget] = useState<FilesystemDirectory | null>(null);
-  const [folderEdit, setFolderEdit] = useState<FolderEdit | null>(null);
-  const [folderName, setFolderName] = useState('');
+  const [folderEdit, setFolderEdit] = useEngineDraft<FolderEdit | null>(`${draftKey}.edit`, null);
+  const [folderName, setFolderName] = useEngineDraft(`${draftKey}.folderName`, '');
   const [folderError, setFolderError] = useState('');
-  const [mutationUncertain, setMutationUncertain] = useState(false);
+  const [mutationUncertain, setMutationUncertain] = useEngineDraft(`${draftKey}.uncertain`, false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [nativeError, setNativeError] = useState('');
@@ -58,30 +64,37 @@ export function DirectoryBrowser({ initialPath, onSelect, onCancel }: {
     onCancel();
   }
 
-  async function navigate(target: Target, selectedAfter = '', message = '') {
+  async function navigate(target: Target, selectedAfter = '', message = '', restoring = false) {
     const { controller, current } = begin();
     setBusy('listing'); setError(''); setNativeError(''); setFailedTarget(null);
-    setSelectedPath(''); setQuery(''); setNotice('');
-    setFolderEdit(null); setFolderError(''); setMutationUncertain(false);
+    if (!restoring) { setSelectedPath(''); setQuery(''); setFolderEdit(null); setMutationUncertain(false); setLocationTarget(target); }
+    setNotice(''); setFolderError('');
     // Keep parent metadata for recovery, but never select a failed/stale listing.
     setListingValid(false);
-    if (target.kind === 'directory') setDraft(target.path);
+    if (target.kind === 'directory' && !restoring) setDraft(target.path);
     else setListing(null);
     let attempted = target;
     try {
       let path: string | null = target.kind === 'directory' ? target.path : null;
+      if (restoring && target.kind === 'directory') {
+        const locations = await getFilesystemRoots(controller.signal);
+        if (!current()) return;
+        setRoots(locations);
+      }
       if (target.kind === 'roots') {
         const result = await getFilesystemRoots(controller.signal);
         if (!current()) return;
         setRoots(result);
         path = target.initial?.trim() ? target.initial : target.initial !== undefined ? result.home : null;
-        setDraft(path ?? '');
+        if (!restoring || !hasEngineDraft(`${draftKey}.path`)) setDraft(path ?? '');
       }
       if (path !== null) {
         attempted = { kind: 'directory', path };
         const result = await getFilesystemDirectories(path, controller.signal);
         if (!current()) return;
-        setListing(result); setDraft(result.path); setListingValid(true);
+        setListing(result); setListingValid(true);
+        if (!restoring || !hasEngineDraft(`${draftKey}.path`)) setDraft(result.path);
+        setLocationTarget({ kind: 'directory', path: result.path });
         if (result.directories.some(item => item.path === selectedAfter)) setSelectedPath(selectedAfter);
         setNotice(message);
       }
@@ -100,6 +113,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onCancel }: {
   }
 
   async function nativePicker() {
+    const finished = beginLocalActivity('Native directory picker', true);
     const { controller, current } = begin();
     setBusy('native'); setNativeError('');
     try {
@@ -111,6 +125,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onCancel }: {
     } catch (failure) {
       if (current()) setNativeError(failure instanceof Error ? failure.message : 'Could not open the native picker. Browse directories instead.');
     } finally {
+      finished();
       if (current()) {
         request.current = null;
         setBusy(null);
@@ -127,7 +142,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onCancel }: {
 
   useEffect(() => {
     pathInput.current?.focus();
-    void navigate({ kind: 'roots', initial: initialPath });
+    void navigate(IS_DESKTOP ? locationTarget : { kind: 'roots', initial: initialPath }, '', '', IS_DESKTOP);
     return invalidate;
     // Each browser visit mounts anew; interactions own subsequent navigation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -196,11 +211,13 @@ export function DirectoryBrowser({ initialPath, onSelect, onCancel }: {
 
   async function submitFolderEdit() {
     if (!folderEdit || !folderName.trim() || busy || request.current || mutationUncertain) return;
+    const finished = beginLocalActivity('Updating directory');
     const edit = folderEdit;
     const { controller, current } = begin();
     setBusy('mutation'); setFolderError('');
     const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]);
     try {
+      if (IS_DESKTOP) { setMutationUncertain(true); await flushDrafts(); }
       if (edit.kind === 'create') {
         const result = await createFilesystemDirectory(edit.parent, folderName, signal);
         if (current()) void navigate({ kind: 'directory', path: result.path }, '', 'Folder created.');
@@ -218,6 +235,7 @@ export function DirectoryBrowser({ initialPath, onSelect, onCancel }: {
         setFolderError(failure instanceof EngineRequestError ? failure.message : 'The folder change could not be confirmed. Refresh this directory before trying again.');
       }
     } finally {
+      finished();
       if (current()) { request.current = null; setBusy(null); }
     }
   }

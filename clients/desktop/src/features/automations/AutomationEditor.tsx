@@ -12,6 +12,7 @@ import { automationPath, type Automation, type AutomationList } from './api';
 import { useTopicPage } from '../workspace/useTopicPage';
 import { topicArchived } from '../workspace/topics';
 import { scheduledDate, sessionModes, triggerSummary, weekdays } from './presentation';
+import { bindDraftDiscard, useEngineDraft } from '../drafts/draftStore';
 
 const steps = ['Activation', 'Task', 'Configuration'];
 const references = [
@@ -21,15 +22,18 @@ const references = [
 ];
 const failure = (error: unknown) => error instanceof Error ? error.message : 'Could not load configuration.';
 
-export function AutomationEditor({ initial, project, sessions, topics, zone, busy, onSave, onCancel }: {
+export function AutomationEditor({ initial: incoming, project, sessions, topics, zone, busy, onSave, onCancel }: {
   initial: Automation; project: Project; sessions: Session[]; topics: AutomationList['topics']; zone: string; busy: boolean;
   onSave: (v: Automation, topic?: { name: string; color: string }) => Promise<boolean>; onCancel: () => void;
 }) {
-  const [draft, setDraft] = useState(initial);
-  const [step, setStep] = useState(0);
-  const [topicMode, setTopicMode] = useState(initial.topicId ? 'existing' : 'new');
-  const [topicName, setTopicName] = useState('');
-  const [topicColor, setTopicColor] = useState('neutral');
+  const key = `form.automation:${project.id}:${incoming.id || 'new'}`;
+  const forgetDrafts = bindDraftDiscard();
+  const [initial] = useEngineDraft(`${key}.base`, incoming, true);
+  const [draft, setDraft] = useEngineDraft(`${key}.values`, initial, true);
+  const [step, setStep] = useEngineDraft(`${key}.step`, 0);
+  const [topicMode, setTopicMode] = useEngineDraft(`${key}.topicMode`, initial.topicId ? 'existing' : 'new');
+  const [topicName, setTopicName] = useEngineDraft(`${key}.topicName`, '');
+  const [topicColor, setTopicColor] = useEngineDraft(`${key}.topicColor`, 'neutral');
   const [topicSearch, setTopicSearch] = useState('');
   const [sessionSearch, setSessionSearch] = useState('');
   const [sessionQuery, setSessionQuery] = useState('');
@@ -50,7 +54,7 @@ export function AutomationEditor({ initial, project, sessions, topics, zone, bus
   const heading = useRef<HTMLHeadingElement>(null);
   const prompt = useRef<HTMLTextAreaElement>(null);
   const followUp = useRef<HTMLTextAreaElement>(null);
-  const [promptField, setPromptField] = useState<'prompt' | 'followUpPrompt'>('prompt');
+  const [promptField, setPromptField] = useEngineDraft<'prompt' | 'followUpPrompt'>(`${key}.promptField`, 'prompt');
   const sessionMode = draft.sessionMode || 'new_per_run';
   const usesSession = sessionMode === 'existing' || sessionMode === 'reuse_created' && !!draft.sessionId;
   const creating = !usesSession;
@@ -153,7 +157,7 @@ export function AutomationEditor({ initial, project, sessions, topics, zone, bus
     event.preventDefault();
     if (busy) return;
     if (step < 2) { if (validate()) changeStep(step + 1); }
-    else if (validate(true)) void onSave(draft, creating && topicMode === 'new' ? { name: topicName.trim(), color: topicColor } : undefined);
+    else if (validate(true)) void onSave(draft, creating && topicMode === 'new' ? { name: topicName.trim(), color: topicColor } : undefined).then(saved => { if (saved) forgetDrafts(key); }).catch(error => setValidation(failure(error)));
   }} onInput={event => {
     if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement) event.target.setCustomValidity('');
   }}>
@@ -225,8 +229,8 @@ export function AutomationEditor({ initial, project, sessions, topics, zone, bus
         </div>
       </fieldset>
     </div>
-    {confirmDiscard ? <div className="automation-discard" role="alert"><p>Discard your unsaved changes?</p><div><Button disabled={busy} onClick={() => setConfirmDiscard(false)}>Keep editing</Button><Button variant="danger-soft" disabled={busy} onClick={onCancel}>Discard changes</Button></div></div> : <footer className="automation-editor-footer">
-      <Button variant="ghost" disabled={busy} onClick={() => dirty ? setConfirmDiscard(true) : onCancel()}>Cancel</Button>
+    {confirmDiscard ? <div className="automation-discard" role="alert"><p>Discard your unsaved changes?</p><div><Button disabled={busy} onClick={() => setConfirmDiscard(false)}>Keep editing</Button><Button variant="danger-soft" disabled={busy} onClick={() => { forgetDrafts(key); onCancel(); }}>Discard changes</Button></div></div> : <footer className="automation-editor-footer">
+      <Button variant="ghost" disabled={busy} onClick={() => { if (dirty) setConfirmDiscard(true); else { forgetDrafts(key); onCancel(); } }}>Cancel</Button>
       <div>{step > 0 && <Button disabled={busy} onClick={() => changeStep(step - 1)}><ArrowLeft aria-hidden="true" />Back</Button>}<Button variant="primary" type="submit" disabled={busy || step === 2 && creating && loading}>{busy ? 'Saving…' : step < 2 ? 'Continue' : initial.id ? 'Save changes' : 'Create automation'}{step < 2 && <ArrowRight aria-hidden="true" />}</Button></div>
     </footer>}
   </form>;

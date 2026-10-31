@@ -2,9 +2,11 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Button } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import { AUTH_REQUIRED_EVENT, clientAuthGeneration, clientFetch, initializeClientAuth, isClientAuthCurrent, pairClient, retryClientAuth } from '../../clientAuth';
-import { configureEngineURL, IS_MOBILE_HOST, reloadClient, returnToHosts, selectableEngineURL } from '../../platform';
+import { configureEngineURL, IS_DESKTOP, IS_MOBILE_HOST, reloadClient, returnToHosts, selectableEngineURL } from '../../platform';
 import { ENGINE_URL } from '../../engine';
 import './client-connection.css';
+import { EngineRecoveryActions, EngineRecoverySummary } from '../engines/EngineProvider';
+import { engineChangePending } from '../engines/localActivities';
 
 export function ClientConnection({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
@@ -45,7 +47,7 @@ export function ClientConnection({ children }: { children: ReactNode }) {
     if (!connected) return;
     // Authenticated client-originated requests renew both durable activity and
     // the cookie. Server output alone is never activity.
-    const renew = () => { void check(); };
+    const renew = () => { if (!engineChangePending()) void check(); };
     const timer = window.setInterval(renew, 60000);
     window.addEventListener('focus', renew);
     return () => { window.clearInterval(timer); window.removeEventListener('focus', renew); };
@@ -81,6 +83,7 @@ export function ClientConnection({ children }: { children: ReactNode }) {
   }
 
   if (connected) return children;
+  if (IS_DESKTOP) return <main className="client-connection"><section className="client-connection-card"><h1>{checking ? 'Connecting to engine…' : 'Engine connection unavailable'}</h1><EngineRecoverySummary />{error && <p role="alert" className="form-error">{error}</p>}<EngineRecoveryActions /></section></main>;
   return <main className="client-connection"><section className="client-connection-card">
     <h1>Connect to engine</h1>
     {checking ? <p role="status">Connecting...</p> : <form className="settings-form" onSubmit={pair}>

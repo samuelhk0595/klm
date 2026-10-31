@@ -6,6 +6,7 @@ import { mentionQuery } from './mentions';
 import { MentionEditor, type MentionEditorHandle } from './MentionEditor';
 import { IS_MOBILE_HOST } from '../../platform';
 import { MobileAudioRecording } from './mobileAudio';
+import { beginLocalActivity } from '../engines/localActivities';
 
 export type SendMode = 'queue' | 'steer' | 'interrupt';
 
@@ -21,12 +22,13 @@ function recordingFilename(type: string) {
   return 'recording.webm';
 }
 
-export function MessageComposer({ onSend, onTranscription, draft, onDraftChange, projectId, disabled = false, running = false, steeringOnly = false, onStop, modelControl, graphControl, placeholder = 'Message the agent' }: {
+export function MessageComposer({ onSend, onTranscription, draft, onDraftChange, projectId, disabled = false, running = false, steeringOnly = false, clearOnSend = true, onStop, modelControl, graphControl, placeholder = 'Message the agent' }: {
   onSend: (draft: ComposerDraft, mode?: SendMode) => boolean | void; draft: ComposerDraft; onDraftChange: (draft: ComposerDraft) => void;
   onTranscription?: (text: string) => void;
   projectId?: string;
   disabled?: boolean; running?: boolean; onStop?: () => void;
   steeringOnly?: boolean;
+  clearOnSend?: boolean;
   modelControl?: ReactNode;
   graphControl?: ReactNode;
   placeholder?: string;
@@ -51,6 +53,8 @@ export function MessageComposer({ onSend, onTranscription, draft, onDraftChange,
   const mobileAudioOperation = useRef<AbortController | null>(null);
   const mobileRecording = useRef<MobileAudioRecording | null>(null);
   const mobileAudioBusy = useRef(false);
+  const audioActivity = useRef<(() => void) | undefined>(undefined);
+  function finishAudioActivity() { audioActivity.current?.(); audioActivity.current = undefined; }
   const mounted = useRef(true);
   const query = focused && !composing && projectId ? mentionQuery(text, caret, mentions) : null;
   const queryKey = query ? JSON.stringify([projectId, query.start, query.query]) : '';
@@ -89,6 +93,7 @@ export function MessageComposer({ onSend, onTranscription, draft, onDraftChange,
       audioStream.current?.getTracks().forEach(track => track.stop());
       recorder.current = null;
       audioStream.current = null;
+      finishAudioActivity();
     };
   }, []);
   useEffect(() => {
@@ -109,7 +114,12 @@ export function MessageComposer({ onSend, onTranscription, draft, onDraftChange,
     setError('');
     try {
       // The parent synchronously owns the pending draft before starting HTTP.
-      if (onSend(draft, mode) !== false) { submittedDraft.current = draft; onDraftChange({ text: '', mentions: [] }); }
+      if (onSend(draft, mode) !== false) {
+        submittedDraft.current = draft;
+        // Desktop keeps the draft until the parent receives a real acceptance;
+        // an interrupted request is recoverable with its original delivery ID.
+        if (clearOnSend) onDraftChange({ text: '', mentions: [] });
+      }
     } catch (error) { setError(error instanceof Error ? error.message : 'Message could not be sent. Retry.'); }
   }
   function releaseAudio() {
@@ -182,10 +192,12 @@ export function MessageComposer({ onSend, onTranscription, draft, onDraftChange,
     }
     setAudioState('transcribing');
     setError('');
+    audioActivity.current = beginLocalActivity('Audio recording', true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (!mounted.current) {
         stream.getTracks().forEach(track => track.stop());
+        finishAudioActivity();
         return;
       }
       audioStream.current = stream;
@@ -198,6 +210,7 @@ export function MessageComposer({ onSend, onTranscription, draft, onDraftChange,
       nextRecorder.onerror = () => {
         failed = true;
         releaseAudio();
+        finishAudioActivity();
         if (mounted.current) {
           setAudioState('idle');
           setError('Audio recording failed. Retry.');
@@ -206,14 +219,18 @@ export function MessageComposer({ onSend, onTranscription, draft, onDraftChange,
       nextRecorder.onstop = async () => {
         const type = nextRecorder.mimeType || mimeType || 'audio/webm';
         releaseAudio();
-        if (failed || !mounted.current) return;
+        if (failed || !mounted.current) { finishAudioActivity(); return; }
         const audio = new Blob(chunks, { type });
         if (!audio.size) {
+          finishAudioActivity();
           setAudioState('idle');
           setError('No audio was recorded. Retry.');
           return;
         }
         const controller = new AbortController();
+        const recordingFinished = audioActivity.current;
+        audioActivity.current = beginLocalActivity('Audio transcription');
+        recordingFinished?.();
         transcriptionRequest.current = controller;
         try {
           const text = await transcribeAudio(audio, recordingFilename(type), controller.signal);
@@ -221,6 +238,7 @@ export function MessageComposer({ onSend, onTranscription, draft, onDraftChange,
         } catch (error) {
           if (mounted.current && !controller.signal.aborted) setError(error instanceof Error ? error.message : 'Transcription failed. Retry.');
         } finally {
+          finishAudioActivity();
           if (transcriptionRequest.current === controller) transcriptionRequest.current = null;
           if (mounted.current) setAudioState('idle');
         }
@@ -229,6 +247,7 @@ export function MessageComposer({ onSend, onTranscription, draft, onDraftChange,
       setAudioState('recording');
     } catch (error) {
       releaseAudio();
+      finishAudioActivity();
       if (mounted.current) {
         setAudioState('idle');
         setError(error instanceof DOMException && error.name === 'NotAllowedError' ? 'Microphone access was denied.' : 'Could not start audio recording. Retry.');

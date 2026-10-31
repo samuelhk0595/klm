@@ -1,4 +1,8 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { normalizeEngineURL } from './engineURL';
+import { initializeEngineRegistry } from './features/engines/engineRegistry';
+
+export { normalizeEngineURL } from './engineURL';
 
 export const IS_DESKTOP = isTauri();
 
@@ -7,6 +11,35 @@ const mobileBridge = (window as Window & { KlmMobile?: MobileBridge }).KlmMobile
 export const IS_MOBILE_HOST = typeof mobileBridge?.postMessage === 'function';
 
 const engineURLStorageKey = 'klm.engine-url.v1';
+
+function defaultEngineURL() {
+  const hostname = IS_DESKTOP ? 'localhost' : window.location.hostname;
+  if (!IS_DESKTOP && hostname === 'klm.codemob.com.br') return 'https://klmengine.codemob.com.br';
+  const port = import.meta.env.DEV || window.location.port === '17332' ? '17331' : '7331';
+  return `http://${hostname || 'localhost'}:${port}`;
+}
+
+function desktopConnection(): { url: string; error: string } {
+  try {
+    const registry = initializeEngineRegistry(() => {
+      const override = import.meta.env.VITE_ENGINE_URL?.trim();
+      if (override) return override;
+      // Desktop migration must not replace unreadable/invalid legacy data with
+      // another endpoint. Web/mobile retain their legacy fallback below.
+      return localStorage.getItem(engineURLStorageKey)?.trim() || defaultEngineURL();
+    });
+    const active = registry.engines.find(engine => engine.id === registry.activeEngineId);
+    return { url: active?.url ?? '', error: active ? '' : 'Select an engine to connect.' };
+  } catch (error) {
+    return { url: '', error: error instanceof Error ? error.message : 'Cannot load saved engines.' };
+  }
+}
+
+// Resolve once, before auth/engine/identity modules capture their endpoint.
+// An unusable desktop selection has no URL: authenticated requests fail closed
+// instead of sending relative requests or silently falling back to localhost.
+const desktop = IS_DESKTOP ? desktopConnection() : undefined;
+export const engineConnectionError = () => desktop?.error ?? '';
 
 export function returnToHosts() {
   mobileBridge?.postMessage('home');
@@ -31,20 +64,25 @@ export async function openContentDownload(url: string) {
 }
 
 export function resolveEngineURL() {
+  if (desktop) return desktop.url;
   const override = import.meta.env.VITE_ENGINE_URL?.trim();
   if (override) return normalizeEngineURL(override);
   try {
     const configured = localStorage.getItem(engineURLStorageKey)?.trim();
     if (configured) return normalizeEngineURL(configured);
   } catch { /* Invalid legacy selections or unavailable storage fall back to the URL-derived engine. */ }
-  const hostname = IS_DESKTOP ? 'localhost' : window.location.hostname;
-  if (!IS_DESKTOP && hostname === 'klm.codemob.com.br') return 'https://klmengine.codemob.com.br';
-  const port = import.meta.env.DEV || window.location.port === '17332' ? '17331' : '7331';
-  return `http://${hostname || 'localhost'}:${port}`;
+  return defaultEngineURL();
 }
 
 export function configureEngineURL(value: string) {
   const configured = selectableEngineURL(value);
+  if (desktop) {
+    if (desktop.error) throw new Error(desktop.error);
+    // The legacy forms cannot bypass draft preservation. The engine selector
+    // will commit a registry selection only after its confirmed draft flush.
+    if (configured !== desktop.url) throw new Error('This connection form only supports the active engine.');
+    return configured;
+  }
   localStorage.setItem(engineURLStorageKey, configured);
   return configured;
 }
@@ -52,39 +90,13 @@ export function configureEngineURL(value: string) {
 export function selectableEngineURL(value: string) {
   const configured = normalizeEngineURL(value);
   const override = import.meta.env.VITE_ENGINE_URL?.trim();
-  if (override && configured !== normalizeEngineURL(override)) {
+  if (!IS_DESKTOP && override && configured !== normalizeEngineURL(override)) {
     throw new Error('Engine URL is fixed by VITE_ENGINE_URL. Update the development override to switch engines.');
   }
   return configured;
 }
 
 export function reloadClient() { window.location.reload(); }
-
-export function normalizeEngineURL(value: string) {
-  let address = value.trim();
-  const hasScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(address);
-  if (!hasScheme) {
-    // A bare IPv6 literal needs brackets before URL parsing.
-    if (/^[\da-f:]+$/i.test(address) && address.includes("::")) address = "[" + address + "]";
-    const candidate = new URL("http://" + address);
-    const ip = candidate.hostname.startsWith("[") || /^\d+\.\d+\.\d+\.\d+$/.test(candidate.hostname);
-    address = (ip ? "http://" : "https://") + address;
-  }
-  const url = new URL(address);
-  if (url.username || url.password) throw new Error("The engine URL cannot include credentials.");
-  const ip = url.hostname.startsWith("[") || /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname);
-  // URL.port omits explicit :80/:443, so inspect the original authority.
-  const authority = address.slice(address.indexOf("://") + 3).split(/[/?#]/, 1)[0];
-  // Bare IP input uses the engine port; absolute URLs retain standard default
-  // ports so re-normalizing a canonical URL is idempotent (including :80/:443).
-  if (ip && !hasScheme && !/:\d+$/.test(authority)) url.port = "7331";
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Use an HTTP or HTTPS URL.');
-  const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]';
-  if (url.protocol !== 'https:' && !loopback) throw new Error('Use HTTPS for remote engines.');
-  if (url.search || url.hash) throw new Error('The engine URL cannot include a query or fragment.');
-  const configured = url.toString().replace(/\/+$/, '');
-  return configured;
-}
 
 export async function openFocus() {
   await invoke('open_focus');

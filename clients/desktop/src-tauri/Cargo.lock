@@ -2029,13 +2029,18 @@ dependencies = [
  "keyring",
  "mime_guess",
  "percent-encoding",
+ "serde",
+ "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
+ "tempfile",
  "tokio",
  "url",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
