@@ -15,6 +15,9 @@ import (
 
 type turn struct {
 	protocolScope         *protocolContentScope
+	graphDelegation       *graphDelegationBinding
+	delegation            *delegationExecution
+	delegationChild       *delegationChildBinding
 	automationRecoveryIDs []string
 	analyticsID           string
 	analyticsAnchor       time.Time           // Monotonic dispatch anchor; protected by app.mu.

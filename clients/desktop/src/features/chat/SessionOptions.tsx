@@ -9,6 +9,8 @@ import { IS_MOBILE_HOST } from '../../platform';
 import { SessionLibraryDialog } from '../library/SessionLibraryDialog';
 import { Button } from '../../design-system/Button';
 import { useEngineDraft } from '../drafts/draftStore';
+import { editableAgentSession } from '../agents/binding';
+import { SessionAgentDialog } from '../agents/SessionAgentDialog';
 
 type YoloIntent = { value?: boolean; saving: boolean; error: string };
 const idleIntent: YoloIntent = { saving: false, error: '' };
@@ -25,6 +27,9 @@ export function SessionOptions({ session, disabled, onSnapshot, graphControl }: 
 }) {
   const [open, setOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useEngineDraft(`ui.sessionLibrary:${session.id}`, false);
+  const [agentOpen, setAgentOpen] = useEngineDraft(`ui.sessionAgent:${session.id}`, false);
+  const agentAction = editableAgentSession(session) ? <Button size="sm" disabled={session.delegation?.actions.settings === false} onClick={() => { setOpen(false); setAgentOpen(true); }}>Agent settings</Button> : null;
+  const delegationNotice = session.harness === 'codex' && session.delegation?.availability.available === false ? <p className="muted">Subagents unavailable in this history.</p> : null;
   const key = `${ENGINE_URL}/${session.id}`;
   const subscribe = useCallback((listener: () => void) => {
     let set = listeners.get(key);
@@ -50,18 +55,24 @@ export function SessionOptions({ session, disabled, onSnapshot, graphControl }: 
     {open && <BottomSheet title="Session options" className="mobile-session-options-sheet" onClose={() => setOpen(false)}>
       <Toggle label="YOLO mode" checked={yolo} disabled={locked} onCheckedChange={value => void save(value)} />
       <Button size="sm" onClick={() => { setOpen(false); setLibraryOpen(true); }}>Library</Button>
+      {agentAction}
+      {delegationNotice}
       {error && <p className="form-error" role="alert">{error}</p>}
       {graphControl && <section className="mobile-session-graph"><h3>Graph</h3>{graphControl}</section>}
     </BottomSheet>}
     {libraryOpen && <SessionLibraryDialog key={session.id} session={session} onClose={() => setLibraryOpen(false)} />}
+    {agentOpen && <SessionAgentDialog session={session} onSnapshot={onSnapshot} onClose={() => setAgentOpen(false)} />}
   </div>;
   return <div className="session-options">
     {(preview ?? session.yolo) && <span className="yolo-indicator" title="YOLO mode is active for this session">YOLO</span>}
     <Menu label="Session options" className="session-options-menu" open={open} onOpenChange={setOpen} trigger={props => <IconButton {...props} label="Session options" size="sm"><EllipsisVertical /></IconButton>}>
       <Toggle label="YOLO mode" checked={preview ?? !!session.yolo} disabled={locked} onCheckedChange={value => void save(value)} title="Skip permission approvals and saved restrictions for this session" />
       <Button size="sm" onClick={() => { setOpen(false); setLibraryOpen(true); }}>Library</Button>
+      {agentAction}
+      {delegationNotice}
       {error && <p className="form-error menu-feedback" role="alert">{error}</p>}
     </Menu>
     {libraryOpen && <SessionLibraryDialog key={session.id} session={session} onClose={() => setLibraryOpen(false)} />}
+    {agentOpen && <SessionAgentDialog session={session} onSnapshot={onSnapshot} onClose={() => setAgentOpen(false)} />}
   </div>;
 }

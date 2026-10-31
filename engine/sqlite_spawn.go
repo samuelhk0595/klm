@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"strings"
 )
 
@@ -140,6 +141,16 @@ func (a *app) sqlSpawnSelection(st *sqliteSessionTx, from Session, args spawnArg
 		}
 		topicID = topic.ID
 	}
+	if args.Agent != "" {
+		selection := Session{ProjectID: projectID, Title: title, Workspace: "Ungrouped", TopicID: topicID, Harness: args.Harness, Model: args.Model, Effort: args.Effort, YOLO: from.YOLO}
+		if args.YOLO != nil {
+			selection.YOLO = *args.YOLO
+		}
+		return selection, project, nil
+	}
+	if args.InheritParentCapabilities != nil || args.AgentOverrides != nil {
+		return bad("agent", "agent_required", "Agent overrides and inheritance require a saved agent.")
+	}
 	harness := args.Harness
 	if harness == "" {
 		harness = from.Harness
@@ -186,6 +197,9 @@ func (p *adapter) spawnSQLSession(ctx context.Context, args spawnArgs) (any, err
 	var from, selection Session
 	var project Project
 	var receipt *SessionSpawn
+	var inheritedForAgent CapabilitySelection
+	var agentResolution *AgentResolution
+	var binding *SessionAgentBinding
 	a.mu.Lock()
 	if !p.activeToolLocked() {
 		a.mu.Unlock()
@@ -205,6 +219,9 @@ func (p *adapter) spawnSQLSession(ctx context.Context, args spawnArgs) (any, err
 			}
 		}
 		selection, project, err = a.sqlSpawnSelection(st, from, args)
+		if err == nil && args.Agent != "" && args.InheritParentCapabilities != nil && *args.InheritParentCapabilities {
+			inheritedForAgent, err = st.inheritedSelection(from.ID)
+		}
 		return err
 	})
 	a.mu.Unlock()
@@ -214,16 +231,38 @@ func (p *adapter) spawnSQLSession(ctx context.Context, args spawnArgs) (any, err
 	if receipt != nil {
 		return spawnReceiptResult(*receipt), nil
 	}
-	catalog, err := a.catalog(ctx, selection, project.Folder, false)
-	if err != nil {
-		return nil, spawnProblem("harness", "catalog_unavailable", "Could not verify the requested model catalog.", "Retry spawn options for this harness; no session was created.")
+	if args.Agent != "" {
+		overrides, err := mergeAgentOverrides(args.AgentOverrides, args.Model, args.Effort)
+		if err != nil {
+			return nil, err
+		}
+		res, err := a.resolveNewAgent(ctx, NewAgentRequest{ProjectID: project.ID, Agent: args.Agent, SourceUID: args.AgentSourceUID, Revision: args.AgentRevision, Harness: args.Harness, Overrides: overrides, InheritedCapabilities: inheritedForAgent, ExecutionCWD: project.Folder})
+		if err != nil {
+			return nil, err
+		}
+		agentResolution = &res
+		binding = bindingForResolution(res, overrides, inheritedForAgent)
+		selection.Harness, selection.Model, selection.Effort = res.Config.Harness, res.Config.Model, res.Config.Effort
 	}
-	resolved := ""
-	if selection.Harness == from.Harness {
-		resolved = from.ResolvedModel
+	if agentResolution == nil {
+		catalog, err := a.catalog(ctx, selection, project.Folder, false)
+		if err != nil {
+			return nil, spawnProblem("harness", "catalog_unavailable", "Could not verify the requested model catalog.", "Retry spawn options for this harness; no session was created.")
+		}
+		resolved := ""
+		if selection.Harness == from.Harness {
+			resolved = from.ResolvedModel
+		}
+		if err := validateSpawnModel(selection, resolved, catalog); err != nil {
+			return nil, err
+		}
 	}
-	if err := validateSpawnModel(selection, resolved, catalog); err != nil {
-		return nil, err
+	if agentResolution != nil {
+		a.authoringMu.Lock()
+		defer a.authoringMu.Unlock()
+		if err := a.recheckNewAgentLocked(ctx, *agentResolution, project.ID); err != nil {
+			return nil, err
+		}
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -243,7 +282,7 @@ func (p *adapter) spawnSQLSession(ctx context.Context, args spawnArgs) (any, err
 		if err != nil {
 			return err
 		}
-		if target.Folder != project.Folder || next.Harness != selection.Harness || next.Model != selection.Model || next.Effort != selection.Effort || next.YOLO != selection.YOLO || next.TopicID != selection.TopicID || current.Harness != from.Harness || current.Model != from.Model || current.Effort != from.Effort || current.YOLO != from.YOLO {
+		if target.Folder != project.Folder || agentResolution == nil && (next.Harness != selection.Harness || next.Model != selection.Model || next.Effort != selection.Effort) || next.YOLO != selection.YOLO || next.TopicID != selection.TopicID || current.Harness != from.Harness || current.Model != from.Model || current.Effort != from.Effort || current.YOLO != from.YOLO {
 			return spawnProblem("session", "settings_changed", "Sender or project changed during validation.", "Read current options and retry; no session was created.")
 		}
 		var recovering bool
@@ -257,11 +296,24 @@ func (p *adapter) spawnSQLSession(ctx context.Context, args spawnArgs) (any, err
 		if err != nil {
 			return err
 		}
+		if agentResolution != nil && args.InheritParentCapabilities != nil && *args.InheritParentCapabilities && !reflect.DeepEqual(copySelection(inherited), copySelection(inheritedForAgent)) {
+			return spawnProblem("inheritParentCapabilities", "settings_changed", "Parent external selection changed during creation.", "Retry with the current applied external selection.")
+		}
 		s := newTopLevelSession(next.ProjectID, next.Title, next.Workspace, next.Harness, next.Model, next.Effort)
+		if agentResolution != nil {
+			s.Harness, s.Model, s.Effort = selection.Harness, selection.Model, selection.Effort
+			s.AgentConfig = agentSummary(*binding, *agentResolution)
+			inherited = copySelection(agentResolution.Config.Selection)
+		}
 		s.TopicID, s.YOLO = next.TopicID, next.YOLO
 		s.Capabilities.Desired = inherited
 		if err := st.createSession(s, a.dir); err != nil {
 			return err
+		}
+		if binding != nil {
+			if err := st.putAgentBinding(s.ID, binding); err != nil {
+				return err
+			}
 		}
 		q := QueuedMessage{ID: newID(), Text: args.Prompt, Mode: "queue", Status: "queued", Origin: &SpawnOrigin{SessionID: from.ID, Title: from.Title, SourceUserEventID: args.SourceUserEventID}}
 		if err := st.putRecord("queued_messages", sqliteOwnedKey(s.ID, q.ID), s.ID, q.ID, -1, q); err != nil {
@@ -271,6 +323,10 @@ func (p *adapter) spawnSQLSession(ctx context.Context, args spawnArgs) (any, err
 			return err
 		}
 		receipt = &SessionSpawn{Request: args, From: from.ID, SessionID: s.ID, MessageID: q.ID, SourceUserEventID: args.SourceUserEventID, OperationID: args.OperationID, Title: s.Title, Prompt: args.Prompt, Workspace: s.Workspace, TopicID: s.TopicID, Harness: s.Harness, Model: s.Model, Effort: s.Effort, YOLO: s.YOLO}
+		if agentResolution != nil {
+			receipt.Agent = &agentResolution.Capture
+			receipt.Configuration = &agentResolution.Config
+		}
 		if err := st.putRoot("session_spawns", sqliteOwnedKey(from.ID, args.OperationID), *receipt); err != nil {
 			return err
 		}

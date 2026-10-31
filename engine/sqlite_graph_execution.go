@@ -212,6 +212,9 @@ func (a *app) launchSQLGraphAgent(g *graphExecution, run GraphRun, x GraphActiva
 	ctx, cancel := context.WithCancel(g.ctx)
 	t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	turnID := newID()
+	if run.Snapshot.Version == 2 {
+		t.graphDelegation = &graphDelegationBinding{Snapshot: run.Snapshot, OwnerID: run.ConversationID, Scope: DelegationGraphScope{RunID: run.ID, NodeID: x.NodeID, ActivationID: x.ID, TurnID: turnID, WorkspaceID: x.WorkspaceID, SnapshotDigest: run.Snapshot.Revision}}
+	}
 	hooks := GraphAdapterHooks{Node: true, ReserveChoice: func(ctx context.Context, callID string, raw json.RawMessage) (any, error) {
 		return a.reserveSQLGraphChoice(ctx, run.ID, x.ID, turnID, callID, raw)
 	}, Transition: func(ctx context.Context, stage string) error {

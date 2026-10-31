@@ -568,6 +568,10 @@ func (p *adapter) markRuntimeInfrastructure() {
 }
 
 func (p *adapter) runtimeToolKey() string {
-	encoded, _ := json.Marshal(map[string]any{"automationRunId": p.automationRunID, "tools": p.bridgeTools(), "yolo": p.yolo, "capabilities": p.capabilities, "internalSkills": p.internalSkills})
+	delegationTurn := ""
+	if p.delegation != nil {
+		delegationTurn = p.delegation.parentTurnID
+	}
+	encoded, _ := json.Marshal(map[string]any{"delegationTurn": delegationTurn, "automationRunId": p.automationRunID, "tools": p.bridgeTools(), "yolo": p.yolo, "capabilities": p.capabilities, "internalSkills": p.internalSkills})
 	return string(encoded)
 }

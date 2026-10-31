@@ -63,6 +63,25 @@ func (p *adapter) openCodeGraphConfig() (string, func(), error) {
 	policyData, _ := json.Marshal(map[string]any{"url": p.bridge.url, "token": p.bridge.token, "yolo": p.yolo, "graphNode": p.graphNode(), "library": p.capabilities != nil && p.harness == "opencode"})
 	plugin = strings.Replace(plugin, "export default async function", "async function graphPlugin", 1) + "\n" +
 		strings.Replace(openCodePermissionsPlugin, "/*KLM_PERMISSION_CONFIG*/{}", string(policyData), 1)
+	_, delegationPlugin, assetErr := p.writeDelegationAssets(dir)
+	if assetErr != nil {
+		cleanup()
+		return "", nil, assetErr
+	}
+	if delegationPlugin != "" {
+		plugin = "import delegationPlugin from './delegation-opencode.mjs';\n" + strings.Replace(plugin, "export default async function", "async function policyPlugin", 1) + `
+export default async function(context) {
+  const policy = await policyPlugin(context), delegation = await delegationPlugin(context);
+  const hooks = { ...policy, ...delegation };
+  for (const key of Object.keys(policy)) if (typeof policy[key] === 'function' && typeof delegation[key] === 'function') {
+    hooks[key] = async (...args) => {
+      if (key === 'config') { await policy[key](...args); await delegation[key](...args); }
+      else { await delegation[key](...args); await policy[key](...args); }
+    };
+  }
+  return hooks;
+}`
+	}
 	if err := os.WriteFile(pluginPath, []byte(plugin), 0600); err != nil {
 		cleanup()
 		return "", nil, errors.New("Cannot write the owned graph plugin.")
@@ -987,6 +1006,11 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				body = humanError(state["error"])
 			}
 			toolName := title
+			if target == p && toolName == delegationToolName && (status == "completed" || status == "error") && p.delegation != nil {
+				if err := p.delegation.nativeResultSeen(str(part, "callID"), ""); err != nil {
+					return err
+				}
+			}
 			if discoverSubagent && strings.EqualFold(toolName, "task") {
 				kind = "subagent"
 				input, metadata := object(state["input"]), object(state["metadata"])
@@ -1106,6 +1130,9 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	}
 
 	prompt := map[string]any{"parts": payload.openCodeParts()}
+	if p.delegation != nil || p.turn.delegationChild != nil {
+		prompt["tools"] = map[string]bool{"task": false}
+	}
 	if p.capabilities != nil {
 		prompt["agent"] = p.openCodeManagedAgent()
 		if err := p.markCapabilitiesApplied(); err != nil {
@@ -1136,7 +1163,11 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	if dispatchErr != nil {
 		return dispatchErr
 	}
+	p.delegationPromptAttempted()
 	if err := h.json(ctx, http.MethodPost, sessionPath+"/prompt_async", prompt, nil); err != nil {
+		return err
+	}
+	if err := p.delegationNativeStarted(""); err != nil {
 		return err
 	}
 	if err := p.analyticsStartAt(dispatchedAt); err != nil {

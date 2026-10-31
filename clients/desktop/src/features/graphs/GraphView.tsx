@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Background, MarkerType, Panel, ReactFlow } from '@xyflow/react';
-import type { Agent } from '../agents/demo';
+import type { Agent } from '../agents/types';
 import type { GraphRunProjection } from '../../engine';
 import { resolveAgentNode } from './agent-node';
 import { CanvasControls, graphViewNodeTypes, type CanvasNode } from './GraphCanvas';

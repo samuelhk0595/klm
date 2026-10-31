@@ -179,7 +179,7 @@ func (a *app) graphCatalog(conversationID string) (any, error) {
 	}
 	a.mu.Unlock()
 	a.authoringMu.Lock()
-	catalog, err := loadAuthoring(p)
+	catalog, err := a.graphAuthoringLocked(a.ctx, p)
 	a.authoringMu.Unlock()
 	if err != nil {
 		return nil, err

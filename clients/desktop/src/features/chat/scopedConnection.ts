@@ -5,6 +5,7 @@ export type ScopeNotice = { kind: 'ready' | 'invalidate' | 'reset'; revision: st
 type Listener = (notice: ScopeNotice) => void;
 const scopes = new Map<string, Set<Listener>>();
 let source: EventSource | undefined;
+let sourceScopes = '';
 let timer: ReturnType<typeof setTimeout> | undefined;
 let delay = 1000;
 let stopped = false;
@@ -16,13 +17,18 @@ export function resumeScopedConnection() { stopped = false; if (scopes.size) cha
 function open() {
   if (stopped) return;
   timer = undefined;
+  const keys = [...scopes.keys()].sort();
+  const signature = JSON.stringify(keys);
+  // Effects can remove and re-add the same scope in one commit. Keep its stream:
+  // another ready notice would refresh catalogs and repeat that same cycle.
+  if (source && signature === sourceScopes) return;
   source?.close(); source = undefined;
   if (!scopes.size) return;
-  const keys = [...scopes.keys()].sort();
   const params = new URLSearchParams({ contract: '3' });
   keys.forEach(key => params.append('watch', key));
   const current = createClientEventSource(`${ENGINE_URL}/api/updates?${params}`);
   source = current;
+  sourceScopes = signature;
   current.onopen = () => { delay = 1000; };
   current.onmessage = event => {
     if (source !== current) return;

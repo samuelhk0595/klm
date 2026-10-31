@@ -49,6 +49,9 @@ func (st *sqliteSessionTx) putRecord(table, id, owner, mapKey string, position i
 	if err != nil {
 		return err
 	}
+	if err := st.validateDelegationWrite(table, id, owner, raw); err != nil {
+		return err
+	}
 	var fields map[string]json.RawMessage
 	if len(raw) > 0 && raw[0] == '{' {
 		if err := json.Unmarshal(raw, &fields); err != nil {
@@ -188,6 +191,14 @@ func (st *sqliteSessionTx) putRecord(table, id, owner, mapKey string, position i
 			st.changes.Sessions[owner] = []int64{}
 		}
 	}
+	if table == "pending_permissions" || table == "pending_questions" {
+		if err := st.markManagedRequestOwner(owner); err != nil {
+			return err
+		}
+	}
+	if err := st.markDelegationRecord(table, id, owner, raw); err != nil {
+		return err
+	}
 	st.markRecord(table, id, project)
 	return nil
 }
@@ -222,6 +233,19 @@ func (st *sqliteSessionTx) putSingleChild(table, owner string, value any) error 
 }
 
 func (st *sqliteSessionTx) deleteRecord(table, id string) error {
+	if delegationStorageDomain(table) {
+		return errors.New("Delegation history/receipts cannot be deleted by a state transition.")
+	}
+	if table == "native_sessions" {
+		var value nativeSession
+		err := decodeSQLiteRecord(st.ctx, st.tx, table, id, 64<<10, &value)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if value.Delegation != nil {
+			return errors.New("Instrumented native history metadata cannot be silently removed.")
+		}
+	}
 	spec, ok := sqliteDomainByTable()[table]
 	if !ok {
 		return errors.New("unknown SQL record domain")
@@ -277,6 +301,11 @@ func (st *sqliteSessionTx) deleteRecord(table, id string) error {
 	if spec.parentTable == "sessions" {
 		if _, ok := st.changes.Sessions[owner]; !ok {
 			st.changes.Sessions[owner] = []int64{}
+		}
+	}
+	if table == "pending_permissions" || table == "pending_questions" {
+		if err := st.markManagedRequestOwner(owner); err != nil {
+			return err
 		}
 	}
 	st.markRecord(table, id, project)

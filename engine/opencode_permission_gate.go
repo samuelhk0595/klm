@@ -52,6 +52,14 @@ func (p *adapter) openCodePermissionGate(ctx context.Context, raw json.RawMessag
 	if err := p.turn.ctx.Err(); err != nil {
 		return false, err
 	}
+	if p.delegation != nil {
+		if err := p.delegation.gate(ctx, call.Tool); err != nil {
+			return false, err
+		}
+		if call.Tool == delegationToolName {
+			return true, nil
+		}
+	}
 	if p.graphSealed() {
 		return false, errors.New("Graph activation is sealed.")
 	}

@@ -212,7 +212,9 @@ func (p *adapter) prepareCapabilities(s Session) error {
 	}
 	var snapshot *CapabilitySnapshot
 	var err error
-	if p.app.store != nil {
+	if p.agentPreparation != nil {
+		snapshot = p.agentPreparation.ExternalCapabilities
+	} else if p.app.store != nil {
 		snapshot, err = p.selectSQLCapabilities(s)
 		if err != nil {
 			return err
@@ -322,6 +324,9 @@ func (p *adapter) markCapabilitiesApplied() error {
 	defer p.app.mu.Unlock()
 	if p.app.store != nil {
 		return p.app.writeSQLLocked(p.turn.ctx, func(st *sqliteSessionTx) error {
+			if err := st.markAgentApplied(p.id, p.agentPreparation); err != nil {
+				return err
+			}
 			key := sqliteOwnedKey(p.id, "")
 			if err := st.putSingleChild("capability_applied", key, p.capabilities); err != nil {
 				return err

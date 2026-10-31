@@ -28,6 +28,7 @@ import { ActivityPagingContext } from './features/klm-agent/activityPaging';
 import { SessionOverlay } from './features/klm-agent/SessionOverlay';
 import { isSessionResponse, mergeSessions, prependHistory } from './features/chat/sessionState';
 import { ConversationHistory } from './features/chat/ConversationHistory';
+import { DelegationRequests } from './features/chat/DelegationRequests';
 import { SessionNavigationProvider } from './features/chat/SessionNavigation';
 import { SubagentView } from './features/chat/SubagentView';
 import { GraphPicker } from './features/chat/GraphPicker';
@@ -36,11 +37,14 @@ import { QuestionCard } from './features/chat/QuestionCard';
 import { MessageQueue } from './features/chat/MessageQueue';
 import { GraphRequestPages } from './features/chat/GraphRequestPages';
 import { PendingSubmission, readPendingSubmissions, savePendingSubmissions, type LocalSubmission } from './features/chat/PendingSubmission';
-import { MessageComposer, type ComposerDraft, type SendMode } from './features/chat/MessageComposer';
 import { chatDraftKeys, restoreChatDraftContext } from './features/chat/chatDrafts';
 import { acceptChatDeliveries, sameComposerDraft, type ChatDraftState, type DeliveryConfirmation } from './features/chat/chatAcceptance';
 import { draftStorageReady, flushDrafts, hasEngineDraft, readDraftValue, setDraftValues, useDraftStorageStatus, useEngineDraft } from './features/drafts/draftStore';
 import { beginLocalActivity, engineChangePending } from './features/engines/localActivities';
+import { type ComposerDraft, type SendMode } from './features/chat/MessageComposer';
+import { AgentMessageComposer as MessageComposer } from './features/agents/AgentMessageComposer';
+import { agentExecutionBlocked } from './features/agents/binding';
+import type { SessionCreateInput } from './features/agents/types';
 import { readConversationWindow, subscribeScope } from './features/chat/scopedConnection';
 import { DesignSystem } from './DesignSystem';
 import { ProjectRail } from './features/projects/ProjectRail';
@@ -811,6 +815,7 @@ export function App() {
   }
   function submitLocal(target: Session, message: LocalSubmission) {
     if (IS_DESKTOP && !draftStorageReady()) { setSessionErrors(current => ({ ...current, [target.id]: 'Load this engine’s drafts before sending a message.' })); return; }
+    if (agentExecutionBlocked(target)) { setSessionErrors(current => ({ ...current, [target.id]: 'Agent settings need attention before sending.' })); return; }
     const identity = currentEngineIdentity();
     const { id, draft, sources, mode } = message;
     if (submissionRequests.current.has(id)) return;
@@ -861,6 +866,7 @@ export function App() {
     submissionTails.current.set(target.id, task);
   }
   function sendMessage(target: Session, draft: ComposerDraft, sources: SourceReference[], mode: SendMode = 'steer', composerKey = target.id) {
+    if (agentExecutionBlocked(target)) return false;
     if (target.automation?.status === 'running') mode = 'steer';
     if (target.role === 'general_agent' && pending.current.has(target.id)) return false;
     if (IS_DESKTOP) {
@@ -1095,10 +1101,10 @@ export function App() {
       return null;
     } catch (error) { return errorMessage(error); }
   }
-  async function createSession(input: { projectId: string; title: string; harness: Harness['id']; model?: string; topicId?: string }): Promise<string | null> {
+  async function createSession(input: SessionCreateInput): Promise<string | null> {
     const selection = navigation.current;
     try {
-      const next = await request<SessionResponse>('/api/sessions', 'POST', input);
+      const next = await request<SessionResponse>('/api/sessions', 'POST', input, 60000, AbortSignal.timeout(60000));
       const created = 'summary' in next ? next.summary : next;
       setEngine(current => ({ ...current, sessions: mergeSessions(current.sessions, [next]) }));
       if (navigation.current === selection) {
@@ -1254,12 +1260,13 @@ export function App() {
             })}
           </div>}
           <PendingSubmission items={localMessages[session.id] ?? []} onRestore={item => restoreLocal(session, item)} onRetry={item => submitLocal(session, item)} />
+          <DelegationRequests key={`delegation-requests/${session.id}`} session={session} projectName={conversationProject?.name ?? ''} onSnapshot={receiveSession} />
           <GraphRequestPages key={`graph-requests/${session.id}`} session={session} projectName={conversationProject?.name ?? ''} onResolved={() => graphRequestResolved(session.id)} />
           <MessageQueue key={`queue/${session.id}`} session={session} disabled={!!pendingSessions[session.id]} onSnapshot={receiveSession} onInterrupt={interruptSubmissions} />
           {generalConversation && <GeneralHarnessPicker session={session} harnesses={harnesses} disabled={!!pendingSessions[session.id] || generalHarnessBlocked(session) || !!connectionError} onChange={harness => void updateSession(session, 'harness', { harness })} />}
           {generalView && !harnesses.some(harness => harness.id === session.harness && harness.available) && <p role="status" className="form-error">The selected harness is not installed.</p>}
           {!generalView && projectSessionArchived && <div className="archived-conversation-actions"><span>{currentTopic?.archived ? 'Topic archived' : 'Session archived'}</span><Button size="sm" onClick={async () => { if (currentTopic?.archived && project) { const failure = await patchTopic(project.id, currentTopic, { archived: false }); setSessionErrors(current => ({ ...current, [session.id]: failure ?? '' })); } else void patchSession(session, { archived: false }); }}>{currentTopic?.archived ? 'Restore topic' : 'Restore session'}</Button></div>}
-          <MessageComposer key={session.id} clearOnSend={!IS_DESKTOP} steeringOnly={session.automation?.status === 'running'} placeholder={overlaySession ? `Message ${session.title}` : undefined} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} onTranscription={text => setDrafts(current => {
+          <MessageComposer key={session.id} clearOnSend={!IS_DESKTOP} session={session} onSnapshot={receiveSession} steeringOnly={session.automation?.status === 'running'} placeholder={overlaySession ? `Message ${session.title}` : undefined} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} onTranscription={text => setDrafts(current => {
             const draft = current[session.id] ?? { text: '', mentions: [] };
             const separator = !draft.text || draft.text.endsWith('\n\n') ? '' : draft.text.endsWith('\n') ? '\n' : '\n\n';
             return { ...current, [session.id]: { ...draft, text: `${draft.text}${separator}${text.trim()}` } };

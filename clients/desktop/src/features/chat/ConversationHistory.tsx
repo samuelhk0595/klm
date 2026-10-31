@@ -44,6 +44,6 @@ export function ConversationHistory({ session, subagents, working, label, empty,
       }).catch(error => { if (!controller.signal.aborted) setHistoryError(error instanceof Error ? error.message : 'Could not load latest messages.'); });
     }}>Latest messages</Button>}
     {historyError && <p className="form-error" role="alert">{historyError}</p>}
-    <PendingRequestPages key={`pending/${session.id}`} session={session} onSnapshot={onSnapshot} />
+    {session.role !== 'subagent' && <PendingRequestPages key={`pending/${session.id}`} session={session} onSnapshot={onSnapshot} />}
   </div>;
 }

@@ -95,7 +95,12 @@ func TestSQLiteGenerationCleanupOwnership(t *testing.T) {
 func TestSQLiteContentGenerationMigration(t *testing.T) {
 	ctx := context.Background()
 	store, _ := sqliteSessionStore(t, 0)
-	if _, err := store.writer.Exec(`DROP TABLE event_content_publications; DROP TABLE event_content_generation_chunks; DROP TABLE event_content_generations; PRAGMA user_version=1;`); err != nil {
+	for _, table := range []string{"delegation_calls", "delegation_invocations", "delegation_children", "delegation_batches", "agent_bindings", "agent_catalog_changes", "agent_sources", "global_agents"} {
+		if _, err := store.writer.Exec("DROP TABLE data_" + table + "_chunks; DROP TABLE data_" + table); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.writer.Exec(`DROP TABLE event_content_appends; DROP TABLE event_content_publications; DROP TABLE event_content_generation_chunks; DROP TABLE event_content_generations; PRAGMA user_version=1;`); err != nil {
 		t.Fatal(err)
 	}
 	// Version-1 authority verification can still read old chunks before migration.

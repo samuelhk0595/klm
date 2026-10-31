@@ -8,8 +8,14 @@ import './session-library.css';
 import { bindDraftDiscard, flushDrafts, hasEngineDraft, useEngineDraft } from '../drafts/draftStore';
 import { IS_DESKTOP } from '../../platform';
 import { beginLocalActivity } from '../engines/localActivities';
+import { editableAgentSession } from '../agents/binding';
+import { SessionAgentDialog } from '../agents/SessionAgentDialog';
 
 export function SessionLibraryDialog({ session, onClose }: { session: Session; onClose: () => void }) {
+  if (editableAgentSession(session)) return <SessionAgentDialog session={session} onClose={onClose} libraryOnly />;
+  return <UnboundSessionLibraryDialog session={session} onClose={onClose} />;
+}
+function UnboundSessionLibraryDialog({ session, onClose }: { session: Session; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const key = `form.sessionLibrary:${session.id}`;
   const forgetDrafts = bindDraftDiscard();

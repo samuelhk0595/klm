@@ -46,8 +46,16 @@ func TestSQLiteSpawnFrozenSettingsAndReceipt(t *testing.T) {
 	owned := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{})}
 	a.runs[s.ID] = owned
 	p := &adapter{app: a, id: s.ID, turn: owned, harness: "pi"}
-	a.catalogs = map[string]catalogCache{"project/pi": {catalog: &ModelCatalog{DefaultModel: "frozen-model", Models: []ModelOption{{ID: "frozen-model"}}}, expires: time.Now().Add(time.Minute)}}
-	_, err := a.store.sessionTransaction(ctx, func(st *sqliteSessionTx) error {
+	project, err := a.store.readProjectMeta(ctx, s.ProjectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheKey, err := modelCatalogCacheKey(Session{ProjectID: s.ProjectID, Harness: "pi"}, project.Folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.catalogs = map[string]catalogCache{cacheKey: {catalog: &ModelCatalog{DefaultModel: "frozen-model", Models: []ModelOption{{ID: "frozen-model"}}}, expires: time.Now().Add(time.Minute)}}
+	_, err = a.store.sessionTransaction(ctx, func(st *sqliteSessionTx) error {
 		if _, err := st.appendEvent(s.ID, Event{ID: "human", Type: "user", Text: "Create the requested session."}); err != nil {
 			return err
 		}

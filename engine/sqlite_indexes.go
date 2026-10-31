@@ -22,6 +22,12 @@ func sqliteScalarProjection(table string) bool {
 // raw webhook bodies, credentials and immutable snapshot content stay in their
 // separate record chunks. Revisions/sequences remain canonical decimal TEXT.
 var sqliteIndexFields = map[string][]string{
+	"delegation_batches":              {"parentSessionId", "ownerConversationId", "parentTurnId", "operationId", "requestHash", "state", "delivery", "outcome", "revision", "endedAt", "graph.runId", "graph.activationId", "graph.turnId", "graph.workspaceId", "graph.snapshotDigest"},
+	"delegation_calls":                {"parentTurnId", "sessionId", "turnId", "callId", "delivery"},
+	"delegation_invocations":          {"batchId", "key", "ordinal", "childSessionId", "parentSessionId", "parentTurnId", "state", "outcome", "dispatchAttempted", "nativeAccepted", "nativeSessionId", "nativeTurnId", "resultDigest", "capture.config.harness", "graph.runId", "graph.activationId", "graph.turnId", "graph.workspaceId"},
+	"delegation_children":             {"parentSessionId", "origin", "harness", "executionCwd", "graphRunId", "workspaceId", "activeInvocationId", "quarantined"},
+	"global_agents":                   {"slug"},
+	"agent_sources":                   {"source.sourceUid", "source.id", "source.projectId", "state"},
 	"session_events":                  {"data.childSessionId", "data.automationRecoveryNotice"},
 	"capability_preparing":            {"version"},
 	"projects":                        {"name", "folder", "icon", "removed"},
@@ -90,6 +96,33 @@ func sqliteEligibilitySchema(table string) string {
 		fmt.Fprintf(&ddl, "ALTER TABLE data_%s ADD COLUMN %s TEXT NOT NULL DEFAULT ''; CREATE INDEX data_%s_lookup_%d ON data_%s(%s,id);", table, column, table, i, table, column)
 	}
 	switch table {
+	case "delegation_batches":
+		ddl.WriteString(`CREATE UNIQUE INDEX data_delegation_batches_record_unique ON data_delegation_batches(record_id);
+CREATE UNIQUE INDEX data_delegation_batches_operation ON data_delegation_batches(x_parentSessionId,x_operationId);
+CREATE UNIQUE INDEX data_delegation_batches_active_parent ON data_delegation_batches(x_parentSessionId) WHERE x_state<>'settled' OR x_delivery IN ('pending','sending','uncertain') OR x_outcome='finality_unconfirmed';
+CREATE INDEX data_delegation_batches_owner_page ON data_delegation_batches(x_ownerConversationId,created_at DESC,id);
+CREATE INDEX data_delegation_batches_graph_epoch ON data_delegation_batches(x_graph_runId,x_graph_activationId,x_graph_turnId,x_state,id);
+CREATE INDEX data_delegation_batches_recovery ON data_delegation_batches(x_state,x_delivery,id);`)
+		ddl.WriteString(`CREATE INDEX data_delegation_batches_pending_recovery ON data_delegation_batches(id) WHERE x_state<>'settled' OR x_delivery IN ('pending','sending');`)
+	case "delegation_calls":
+		ddl.WriteString(`CREATE UNIQUE INDEX data_delegation_calls_native_alias ON data_delegation_calls(x_parentTurnId,x_sessionId,x_turnId,x_callId);
+CREATE INDEX data_delegation_calls_delivery ON data_delegation_calls(owner_id,x_parentTurnId,x_delivery,position);`)
+	case "delegation_invocations":
+		ddl.WriteString(`CREATE UNIQUE INDEX data_delegation_invocations_record_unique ON data_delegation_invocations(record_id);
+CREATE UNIQUE INDEX data_delegation_invocations_member_key ON data_delegation_invocations(x_batchId,x_key);
+CREATE UNIQUE INDEX data_delegation_invocations_member_order ON data_delegation_invocations(x_batchId,x_ordinal);
+CREATE UNIQUE INDEX data_delegation_invocations_active_child ON data_delegation_invocations(x_childSessionId) WHERE x_state<>'terminal';
+CREATE INDEX data_delegation_invocations_batch_order ON data_delegation_invocations(x_batchId,CAST(x_ordinal AS INTEGER),id);
+CREATE INDEX data_delegation_invocations_graph_epoch ON data_delegation_invocations(x_graph_runId,x_graph_activationId,x_graph_turnId,x_state,id);
+CREATE INDEX data_delegation_invocations_recovery ON data_delegation_invocations(x_state,id);`)
+		ddl.WriteString(`CREATE INDEX data_delegation_invocations_pending_recovery ON data_delegation_invocations(id) WHERE x_state<>'terminal';`)
+	case "delegation_children":
+		ddl.WriteString(`CREATE UNIQUE INDEX data_delegation_children_record_unique ON data_delegation_children(record_id);
+CREATE UNIQUE INDEX data_delegation_children_lease ON data_delegation_children(x_activeInvocationId) WHERE x_activeInvocationId<>'';
+CREATE INDEX data_delegation_children_parent ON data_delegation_children(x_parentSessionId,created_at,id);
+CREATE INDEX data_delegation_children_graph_workspace ON data_delegation_children(x_graphRunId,x_workspaceId,id);`)
+	case "global_agents":
+		ddl.WriteString(`CREATE UNIQUE INDEX data_global_agents_slug ON data_global_agents(x_slug);`)
 	case "sessions":
 		ddl.WriteString(`CREATE INDEX data_sessions_project_page ON data_sessions(project_id,role,x_archived,created_at DESC,id);
 CREATE INDEX data_sessions_topic ON data_sessions(project_id,x_topicId,created_at DESC,id);

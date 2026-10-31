@@ -6,6 +6,7 @@ import { request, type EngineEvent, type Session, type SessionResponse } from '.
 import { ChatMessage, InlineMarkdownContent, MarkdownContent } from './ChatMessage';
 import { SessionEvent } from './SessionEvent';
 import { EventContent } from './EventContent';
+import { DelegationActivity, delegationLabel } from './DelegationActivity';
 
 type WorkEvent = EngineEvent & { type: 'reasoning' | 'command' | 'mcp' | 'tool' };
 type TimelineItem = { kind: 'event'; event: EngineEvent } | {
@@ -251,7 +252,7 @@ function subagentEventLabel(event: EngineEvent | undefined) {
 function SubagentActivity({ event, session, onOpen }: { event: EngineEvent; session?: Session; onOpen?: (sessionId: string) => void }) {
   const childSessionId = typeof event.data?.childSessionId === 'string' ? event.data.childSessionId : '';
   const running = ['running', 'pending', 'started'].includes(event.status ?? 'running') && (!session || session.status === 'running');
-  const detail = running ? subagentEventLabel(session?.events.at(-1)) || 'starting' : 'completed';
+  const detail = running ? subagentEventLabel(session?.events.at(-1)) || 'Starting' : delegationLabel(event.status || (session?.status === 'error' ? 'failed' : 'completed'));
   return <button type="button" className={`subagent-activity ${running ? 'is-running' : ''}`} disabled={!childSessionId || !onOpen} onClick={() => onOpen?.(childSessionId)}>
     <span className="subagent-activity-icon"><Bot aria-hidden="true" /></span>
     <span className="subagent-activity-copy"><strong>{event.title || 'Subagent'}</strong><small title={detail}>{detail}</small></span>
@@ -332,7 +333,7 @@ export function ConversationEvents({ session, subagents, onSnapshot, onEventChan
   return <div ref={root} className="conversation-events">
     <EventSequence events={visibleEvents} status={timelineStatus} updatedAt={session.updatedAt} showActiveWork={active} activeWorkStartedAt={activeWorkStartedAt} renderEvent={event => event.type === 'consultation'
       ? <ConsultationActivity event={event} output={grouped.get(String(event.data?.requestId)) ?? []} sessionId={session.id} onSnapshot={onSnapshot} />
-      : event.type === 'subagent' ? <SubagentActivity event={event} session={subagents?.find(item => item.id === event.data?.childSessionId)} onOpen={onOpenSubagent} />
+      : event.type === 'subagent' ? event.data?.managed ? event.data.kind === 'batch' ? <DelegationActivity ownerId={session.id} batchId={String(event.data.batchId)} revision={String(event.data.revision ?? '')} /> : null : <SubagentActivity event={event} session={subagents?.find(item => item.id === event.data?.childSessionId)} onOpen={onOpenSubagent} />
       : <SessionEvent event={event} onFavorite={onEventChange && event.type === 'assistant' ? value => favorite(event, value) : undefined} />} />
     {selection && onAskSide && <Button size="sm" className="selection-action" style={{ left: selection.left, top: selection.top }} onPointerDown={event => event.preventDefault()} onClick={() => {
       onAskSide(selection.messageId, selection.passage); setSelection(null); window.getSelection()?.removeAllRanges();

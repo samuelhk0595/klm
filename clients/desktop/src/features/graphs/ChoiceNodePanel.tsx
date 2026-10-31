@@ -4,7 +4,7 @@ import { Button, IconButton } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import { RadioGroup } from '../../design-system/RadioGroup';
 import { Toggle } from '../../design-system/Toggle';
-import { agentSlug as choiceSlug } from '../agents/demo';
+import { agentSlug as choiceSlug } from '../agents/types';
 import { ChoiceOutputEditor } from './ChoiceOutputEditor';
 import { ChoiceOutputPreview } from './ChoiceOutputPreview';
 import { choiceOutputFields, choiceVariables, normalizeChoiceName, outputMappingError, type ChoiceDefinition, type ChoicePayloadField } from './choice';

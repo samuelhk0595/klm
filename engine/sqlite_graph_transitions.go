@@ -216,6 +216,9 @@ func (a *app) reserveSQLGraphChoice(ctx context.Context, runID, activationID, tu
 		if r.Status != "running" || x.RunID != runID || x.Status != "running" || x.CurrentTurnID != turnID {
 			return errors.New("Activation is not accepting a Choice.")
 		}
+		if err := a.checkGraphChildrenBeforeChoice(st, x); err != nil {
+			return err
+		}
 		var feedback string
 		err = decodeSQLiteRecord(ctx, st.tx, "activation_feedback", sqliteOwnedKey(x.ID, operation), 128<<10, &feedback)
 		if err == nil {
@@ -338,6 +341,9 @@ func (a *app) transitionSQLGraphChoice(ctx context.Context, runID, activationID,
 			return errors.New("Out-of-order Choice settlement transition.")
 		}
 		if stage == "accepted" {
+			if err := a.checkGraphChildrenBeforeChoice(st, x); err != nil {
+				return err
+			}
 			_, c, err := st.capturedGraph(runID)
 			if err != nil {
 				return err

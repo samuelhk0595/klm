@@ -1,6 +1,6 @@
 import type { Edge, Viewport, XYPosition } from '@xyflow/react';
-import type { Agent } from '../agents/demo';
-import { agentSlug } from '../agents/demo';
+import type { Agent } from '../agents/types';
+import { agentSlug } from '../agents/types';
 import type { CanvasNode } from './GraphCanvas';
 import type { AgentNodeOverrides } from './agent-node';
 import { choiceOutputFields } from './choice';

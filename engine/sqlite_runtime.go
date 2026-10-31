@@ -58,6 +58,9 @@ func serveSQLiteEngine(dir string, listener net.Listener) (result error) {
 	if _, err := store.sessionTransaction(ctx, func(st *sqliteSessionTx) error { return st.initializeAnalytics() }); err != nil {
 		return err
 	}
+	if err := store.runDelegationRecoveryBarrier(ctx, recoverDelegationRuntime); err != nil {
+		return err
+	}
 	if err := recoverSQLiteRuntime(ctx, store, time.Now().UTC(), nil); err != nil {
 		return err
 	}

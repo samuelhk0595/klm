@@ -5,6 +5,7 @@ import type { ConversationCapabilities } from './features/library/api';
 import { engineIdentityGeneration } from './engineIdentity';
 import { beginLocalActivity } from './features/engines/localActivities';
 import { draftStorageReady } from './features/drafts/draftStore';
+import type { AgentConfigSummary } from './features/agents/types';
 
 export const ENGINE_URL = resolveEngineURL();
 export type Revision = string | number; // Numeric values are accepted only for existing local fixtures.
@@ -81,6 +82,8 @@ export type SessionUsage = {
 export type QueuedMessage = { id: string; text: string; mode: "queue" | "steer" | "interrupt"; status: "queued" | "steering" | "sending" | "accepted" | "interrupting" | "paused" | "uncertain"; error?: string; origin?: { sessionId: string; title: string; kind?: 'instruction' | 'question_answer' } };
 
 export type Session = {
+	delegation?: { availability: { available: boolean; code?: string; detail?: string }; waiting: boolean; actions: DelegationActions };
+  agentConfig?: AgentConfigSummary;
 	metadataOnly?: boolean;
 	detailLoaded?: boolean;
 	permissionCount?: number;
@@ -121,6 +124,13 @@ export type Session = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type DelegationActions = { send: boolean; queue: boolean; steer: boolean; interrupt: boolean; settings: boolean; stop: boolean };
+export type DelegationBatch = { id: string; parentSessionId: string; revision: string; state: string; total: number; terminal: number; remaining: number; waiting: boolean; delivery: string; outcome?: string; actions: DelegationActions };
+export type DelegationMember = { key: string; batchId: string; invocationId: string; childSessionId: string; parentSessionId: string; ownerConversationId: string; title: string; harness: string; model: string; effort: string; agentName?: string; executionState: string; outcome?: string; terminal: boolean; invocationNumber: string; reused: boolean; error?: string; resultReference?: { invocationId: string; digest: string; totalBytes: string } };
+export type DelegationMemberPage = { batch: DelegationBatch; items: DelegationMember[]; revision: string; hasMore: boolean; nextOffset: number };
+export type DelegationOutputPage = { invocationId: string; digest: string; offset: string; nextOffset: string; totalBytes: string; content: string; hasMore: boolean };
+export type DelegationRequest = { ownerSessionId: string; childSessionId: string; childTitle: string; batchId: string; invocationId: string; kind: 'permission' | 'question'; request: PermissionRequest | QuestionRequest };
 
 export type SourceReference = { sessionId: string; messageId: string; passage: string };
 
@@ -251,7 +261,7 @@ export type TranscriptionSettingsUpdate = {
 };
 
 export class EngineRequestError extends Error {
-  constructor(message: string, public readonly status: number) { super(message); }
+  constructor(message: string, public readonly status: number, public readonly details?: Record<string, unknown>) { super(message); }
 }
 
 export async function request<T>(path: string, method = 'GET', body?: unknown, timeoutMs = 15000, signal?: AbortSignal): Promise<T> {
@@ -290,7 +300,7 @@ export async function request<T>(path: string, method = 'GET', body?: unknown, t
   if (path.split('?')[0] !== '/api/state' && identityGeneration !== engineIdentityGeneration()) throw new DOMException('Engine identity changed.', 'AbortError');
   if (!response.ok) {
     const detail = result && typeof result === 'object' && 'error' in result && typeof result.error === 'string' ? result.error : `Engine request failed (${response.status}).`;
-    throw new EngineRequestError(detail, response.status);
+    throw new EngineRequestError(detail, response.status, result && typeof result === 'object' ? result as Record<string, unknown> : undefined);
   }
   if (result === null) throw new Error('The engine returned an invalid JSON response. Retry the request.');
   return normalizeEngineResponse(path, result) as T;

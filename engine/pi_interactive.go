@@ -134,7 +134,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 		cleanup := func() { _ = os.RemoveAll(extensionDir) }
 		extensionPath := filepath.Join(extensionDir, "pi-permissions.ts")
 		childExtension := ""
-		if !p.graphNode() && !p.subagent {
+		if !p.graphNode() && !p.subagent && p.delegation == nil {
 			children, err = newPiChildChannel(p)
 			if err != nil {
 				cleanup()
@@ -150,7 +150,12 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 				children = nil
 			}
 		}
-		bridgeConfig, _ := json.Marshal(map[string]any{"url": p.bridge.url, "token": p.bridge.token, "libraryUrl": p.bridge.libraryURL, "libraryToken": p.bridge.libraryToken, "graphNode": p.graphNode(), "nativeSubagents": children != nil, "nativeSubagentPath": childExtension, "tools": p.bridgeTools(), "toolTimeoutMs": linkedToolClientTimeout.Milliseconds()})
+		delegationExtension, _, assetErr := p.writeDelegationAssets(extensionDir)
+		if assetErr != nil {
+			cleanup()
+			return assetErr
+		}
+		bridgeConfig, _ := json.Marshal(map[string]any{"url": p.bridge.url, "token": p.bridge.token, "libraryUrl": p.bridge.libraryURL, "libraryToken": p.bridge.libraryToken, "graphNode": p.graphNode(), "delegation": p.delegation != nil, "nativeSubagents": children != nil, "nativeSubagentPath": childExtension, "tools": p.bridgeTools(), "toolTimeoutMs": linkedToolClientTimeout.Milliseconds()})
 		configPath := filepath.Join(extensionDir, "catalog.json")
 		if writeErr := os.WriteFile(configPath, bridgeConfig, 0600); writeErr != nil {
 			cleanup()
@@ -163,6 +168,9 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 			return errors.New("Cannot write the Pi permission extension.")
 		}
 		args := []string{"--mode", "rpc", "--offline", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes"}
+		if delegationExtension != "" {
+			args = append(args, "--extension", delegationExtension)
+		}
 		if childExtension != "" {
 			args = append(args, "--extension", childExtension)
 		}
@@ -291,6 +299,7 @@ reading:
 			if _, err := p.analyticsDispatch(); err != nil {
 				return err
 			}
+			p.delegationPromptAttempted()
 			if err := proc.Send(map[string]any{"id": "klm-prompt", "type": "prompt", "message": text}); err != nil {
 				return err
 			}
@@ -624,6 +633,9 @@ reading:
 				continue
 			}
 			if str(raw, "type") == "agent_start" {
+				if err := p.delegationNativeStarted(""); err != nil {
+					return err
+				}
 				rootStarted = true
 				p.completed, p.nativeSettled = false, false
 				statsTimer.Stop()

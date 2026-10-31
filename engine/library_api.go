@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
-
-	"github.com/pelletier/go-toml/v2"
 )
 
 func (a *app) libraryRoutes(mux *http.ServeMux) {
@@ -176,7 +174,7 @@ func (a *app) libraryDeletionPreview(kind, id string) (libraryDeletionPreview, e
 			selection = removeLibraryReference(selection, kind, id)
 			definition := agent.AgentDefinition
 			definition.Skills, definition.MCPConnections = selection.Skills, selection.MCPConnections
-			data, err := toml.Marshal(definition)
+			data, err := marshalExistingAgentDocument(p, agent.ID, definition)
 			if err != nil {
 				return result, err
 			}

@@ -209,9 +209,11 @@ func stopOwnedWindowsProcess(process syscall.Handle) error {
 	}
 	err = syscall.TerminateProcess(process, 1)
 	if errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
-		// Windows can report ACCESS_DENIED if the process exited between the
-		// nonblocking wait and TerminateProcess. Accept only a confirmed exit.
-		if state, _ := syscall.WaitForSingleObject(process, 0); state == syscall.WAIT_OBJECT_0 {
+		// Job shutdown and cmd.Cancel can race: Windows refuses another
+		// termination while exit is still in progress, before the handle is
+		// signaled. Wait on this exact owned identity, with the same bounded
+		// drainage budget, and accept only a confirmed exit.
+		if state, _ := syscall.WaitForSingleObject(process, 5000); state == syscall.WAIT_OBJECT_0 {
 			return nil
 		}
 	}

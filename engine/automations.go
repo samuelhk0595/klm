@@ -29,31 +29,32 @@ type AutomationSchedule struct {
 }
 
 type Automation struct {
-	OnceTriggeredAt string              `json:"onceTriggeredAt,omitempty"`
-	SessionMode     string              `json:"sessionMode,omitempty"`
-	SessionID       string              `json:"sessionId,omitempty"`
-	FollowUpPrompt  string              `json:"followUpPrompt,omitempty"`
-	ID              string              `json:"id"`
-	ProjectID       string              `json:"projectId"`
-	Revision        uint64              `json:"revision"`
-	OperationID     string              `json:"operationId"`
-	CreationRequest string              `json:"creationRequest,omitempty"`
-	Name            string              `json:"name"`
-	Prompt          string              `json:"prompt"`
-	Mode            string              `json:"mode"`
-	Enabled         bool                `json:"enabled"`
-	Parallel        bool                `json:"parallel"`
-	Harness         string              `json:"harness"`
-	Model           string              `json:"model"`
-	Effort          string              `json:"effort"`
-	YOLO            bool                `json:"yolo"`
-	Graphs          []string            `json:"graphs"`
-	Selection       CapabilitySelection `json:"selection"`
-	TopicID         string              `json:"topicId"`
-	Schedule        AutomationSchedule  `json:"schedule"`
-	NextScheduledAt string              `json:"nextScheduledAt,omitempty"`
-	AfterSequence   uint64              `json:"afterSequence"`
-	Deleted         bool                `json:"deleted,omitempty"`
+	AgentConfiguration *AgentExecutionCapture `json:"agentConfiguration,omitempty"` // Engine-owned run/recovery snapshot only.
+	OnceTriggeredAt    string                 `json:"onceTriggeredAt,omitempty"`
+	SessionMode        string                 `json:"sessionMode,omitempty"`
+	SessionID          string                 `json:"sessionId,omitempty"`
+	FollowUpPrompt     string                 `json:"followUpPrompt,omitempty"`
+	ID                 string                 `json:"id"`
+	ProjectID          string                 `json:"projectId"`
+	Revision           uint64                 `json:"revision"`
+	OperationID        string                 `json:"operationId"`
+	CreationRequest    string                 `json:"creationRequest,omitempty"`
+	Name               string                 `json:"name"`
+	Prompt             string                 `json:"prompt"`
+	Mode               string                 `json:"mode"`
+	Enabled            bool                   `json:"enabled"`
+	Parallel           bool                   `json:"parallel"`
+	Harness            string                 `json:"harness"`
+	Model              string                 `json:"model"`
+	Effort             string                 `json:"effort"`
+	YOLO               bool                   `json:"yolo"`
+	Graphs             []string               `json:"graphs"`
+	Selection          CapabilitySelection    `json:"selection"`
+	TopicID            string                 `json:"topicId"`
+	Schedule           AutomationSchedule     `json:"schedule"`
+	NextScheduledAt    string                 `json:"nextScheduledAt,omitempty"`
+	AfterSequence      uint64                 `json:"afterSequence"`
+	Deleted            bool                   `json:"deleted,omitempty"`
 }
 
 type AutomationTrigger struct {

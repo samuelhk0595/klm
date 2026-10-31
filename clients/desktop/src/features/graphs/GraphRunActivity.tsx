@@ -6,6 +6,8 @@ import { TabNav } from '../../design-system/TabNav';
 import { Select } from '../../design-system/Select';
 import { request, type GraphNodeActivity } from '../../engine';
 import { EventSequence } from '../chat/ConversationEvents';
+import { DelegationActivity } from '../chat/DelegationActivity';
+import { SessionEvent } from '../chat/SessionEvent';
 
 const statusLabels: Record<string, string> = { reserved: 'Pending', running: 'Running', waiting_user: 'Waiting', sealing: 'Finishing', completed: 'Completed', failed: 'Failed', interrupted: 'Interrupted' };
 
@@ -65,7 +67,7 @@ export function GraphRunActivity({ sessionId, runId, nodeId, nodeName, onClose }
       {!data ? <p className="muted graph-run-notice">{error ? 'Retrying...' : 'Loading activity...'}</p> : !activity ? <p className="muted graph-run-notice">Not started.</p> : tab === 'run' ? <div ref={log} className="graph-run-timeline" role="log" aria-label="Node events" tabIndex={0}
         onScroll={event => { const element = event.currentTarget; following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24; }}>
         {activity.hasEarlier && <Button size="sm" onClick={() => setEventOffset(activity.previousOffset)}>Earlier activity</Button>}
-        <div className="conversation-events"><EventSequence events={activity.events} status={status} updatedAt={activity.updatedAt} showActiveWork={active} activeWorkStartedAt={activity.createdAt} /></div>
+        <div className="conversation-events"><EventSequence events={activity.events} status={status} updatedAt={activity.updatedAt} showActiveWork={active} activeWorkStartedAt={activity.createdAt} renderEvent={event => event.type === 'subagent' && event.data?.managed ? event.data.kind === 'batch' ? <DelegationActivity ownerId={sessionId} batchId={String(event.data.batchId)} basePath={`/api/sessions/${encodeURIComponent(sessionId)}/graph/runs/${encodeURIComponent(runId)}/activations/${encodeURIComponent(activity.id)}/delegation`} revision={String(event.data.revision ?? '')} /> : null : <SessionEvent event={event} />} /></div>
         {activity.hasMore && <Button size="sm" onClick={() => setEventOffset(activity.nextOffset)}>Later activity</Button>}{eventOffset !== undefined && <Button size="sm" onClick={() => setEventOffset(undefined)}>Latest activity</Button>}
         {activity.error && <p className="form-error">{activity.error}</p>}
       </div> : <div className="graph-run-payload" role="region" aria-label={tab === 'input' ? 'Input payload' : 'Output payload'} tabIndex={0}>

@@ -40,6 +40,8 @@ type Event struct {
 }
 
 type Session struct {
+	AgentBinding    *SessionAgentBinding     `json:"agentBinding,omitempty"`
+	AgentConfig     *AgentConfigSummary      `json:"agentConfig,omitempty"`
 	Automation      *AutomationSession       `json:"automation,omitempty"`
 	Capabilities    ConversationCapabilities `json:"capabilities"`
 	Queue           []QueuedMessage          `json:"queue"`
@@ -75,8 +77,9 @@ type Session struct {
 }
 
 type nativeSession struct {
-	ID   string `json:"id,omitempty"`
-	Path string `json:"path,omitempty"`
+	ID         string                   `json:"id,omitempty"`
+	Path       string                   `json:"path,omitempty"`
+	Delegation *DelegationCodexManifest `json:"delegation,omitempty"`
 }
 
 const defaultTranscriptionModel = "gpt-4o-mini-transcribe"
@@ -94,14 +97,20 @@ type TranscriptionSettings struct {
 }
 
 type diskState struct {
-	EngineSettings       EngineSettings       `json:"engineSettings"`
-	Automations          []Automation         `json:"automations,omitempty"`
-	AutomationTriggers   []AutomationTrigger  `json:"automationTriggers,omitempty"`
-	AutomationRuns       []AutomationRun      `json:"automationRuns,omitempty"`
-	AutomationRecoveries []AutomationRecovery `json:"automationRecoveries,omitempty"`
-	Analytics            *AnalyticsState      `json:"analytics,omitempty"`
-	tx                   *stateTransaction
-	TopicSchema          int `json:"topicSchema,omitempty"`
+	DelegationBatches     []DelegationBatchRecord          `json:"delegationBatches,omitempty"`
+	DelegationInvocations []DelegationInvocationRecord     `json:"delegationInvocations,omitempty"`
+	DelegationChildren    map[string]DelegationChildRecord `json:"delegationChildren,omitempty"`
+	GlobalAgents          map[string]GlobalAgentRecord     `json:"globalAgents,omitempty"`
+	AgentSources          map[string]AgentSourceRecord     `json:"agentSources,omitempty"`
+	AgentCatalogChanges   []AgentCatalogChange             `json:"agentCatalogChanges,omitempty"`
+	EngineSettings        EngineSettings                   `json:"engineSettings"`
+	Automations           []Automation                     `json:"automations,omitempty"`
+	AutomationTriggers    []AutomationTrigger              `json:"automationTriggers,omitempty"`
+	AutomationRuns        []AutomationRun                  `json:"automationRuns,omitempty"`
+	AutomationRecoveries  []AutomationRecovery             `json:"automationRecoveries,omitempty"`
+	Analytics             *AnalyticsState                  `json:"analytics,omitempty"`
+	tx                    *stateTransaction
+	TopicSchema           int `json:"topicSchema,omitempty"`
 
 	ActivityBoardConfig      activityBoardConfig                `json:"activityBoardConfig,omitempty"`
 	ActivityBoardConnections map[string]activityBoardConnection `json:"activityBoardConnections,omitempty"`

@@ -63,9 +63,12 @@ func (a *app) persistSQLLocked(ctx context.Context, change func(*sqliteSessionTx
 func sqlHTTPError(w http.ResponseWriter, err error) {
 	var request *sqliteRequestError
 	var control *sessionControlError
+	var agent *AgentConfigProblem
 	switch {
 	case errors.Is(err, errSQLiteContentChanged):
 		fail(w, 409, err.Error())
+	case errors.As(err, &agent):
+		respond(w, agent.status, agent)
 	case errors.Is(err, sql.ErrNoRows):
 		fail(w, 404, "Record not found.")
 	case errors.As(err, &request):

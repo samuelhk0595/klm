@@ -17,7 +17,7 @@ import (
 
 const (
 	sqliteApplicationID = 0x4b4c4d31 // KLM1; independent of product version.
-	sqliteSchemaVersion = 2
+	sqliteSchemaVersion = 4          // Content v2, catalog v3, owned delegation v4.
 	sqliteReaderLimit   = 4
 )
 
@@ -128,6 +128,9 @@ func openSQLiteStore(ctx context.Context, path string) (*sqliteStore, error) {
 	if err == nil && (appID != sqliteApplicationID || version < 1 || version > sqliteSchemaVersion) {
 		err = fmt.Errorf("unsupported SQLite identity/schema (%x/%d); refusing startup", appID, version)
 	}
+	if err == nil {
+		err = s.validatePublicationSchemaLayout(ctx)
+	}
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -143,15 +146,32 @@ func (s *sqliteStore) enableRuntime(ctx context.Context) error {
 	if authority != "committed" {
 		return errors.New("SQLite cutover is not committed")
 	}
+	// The cutover coordinator has verified database/manifest authority before this
+	// entry point. Never upgrade an unverified or merely prepared database in open().
+	if err := s.validatePublicationSchemaLayout(ctx); err != nil {
+		return err
+	}
+	if err := s.migrateContentGenerations(ctx); err != nil {
+		return err
+	}
+	if err := s.upgradeAgentSchema(ctx); err != nil {
+		return err
+	}
+	if err := s.upgradeDelegationSchema(ctx); err != nil {
+		return err
+	}
+	if err := s.upgradeAgentReferenceIndexes(ctx); err != nil {
+		return err
+	}
+	if err := s.recoverAgentCatalogChanges(ctx); err != nil {
+		return err
+	}
 	var mode string
 	if err := s.writer.QueryRowContext(ctx, `PRAGMA journal_mode=WAL`).Scan(&mode); err != nil {
 		return err
 	}
 	if mode != "wal" {
 		return fmt.Errorf("SQLite refused WAL: %s", mode)
-	}
-	if err := s.migrateContentGenerations(ctx); err != nil {
-		return err
 	}
 	if err := s.recoverEventGenerations(ctx); err != nil {
 		return err
