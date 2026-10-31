@@ -13,6 +13,7 @@ import (
 )
 
 type turn struct {
+	protocolScope         *protocolContentScope
 	automationRecoveryIDs []string
 	analyticsID           string
 	analyticsAnchor       time.Time           // Monotonic dispatch anchor; protected by app.mu.
@@ -36,6 +37,7 @@ type turn struct {
 }
 
 type app struct {
+	contentDownloads     contentDownloadTickets
 	store                *sqliteStore // Set only by the completed SQLite startup path.
 	sqlChanges           *sqliteChangeBus
 	clientAuth           *clientAuth
@@ -109,6 +111,9 @@ func runEngine(dir string) error {
 		return err
 	}
 	defer lock.Close()
+	if err := prepareProtocolStaging(dir); err != nil {
+		return err
+	}
 	// Reserve the fixed port before loading/recovering state or starting work.
 	address, err := publicAPIListenAddress()
 	if err != nil {

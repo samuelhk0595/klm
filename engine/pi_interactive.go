@@ -178,7 +178,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 		if p.effort != "" {
 			args = append(args, "--thinking", p.effort)
 		}
-		proc, err = startInteractive(p.turn, b, args, cwd, p.runtime)
+		proc, err = startInteractive(p.turn, b, args, cwd, p.runtime, protocolLineInput{dir: p.app.dir, harness: "pi", scope: p.turn.protocolScope})
 		if err != nil {
 			cleanup()
 			if ctx.Err() != nil {
@@ -240,6 +240,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 			err = ctx.Err()
 		}
 	}()
+	proc.bindProtocolScope(p.turn.protocolScope)
 	if err := proc.Send(map[string]any{"id": "klm-state", "type": "get_state"}); err != nil {
 		return err
 	}
@@ -308,6 +309,11 @@ reading:
 			baselineDone, baselineDeadline = true, nil
 			continue
 		case <-startup:
+			if proc.ingestionInFlight() {
+				timer.Reset(startupTimeout)
+				startup = timer.C
+				continue
+			}
 			return errors.New("Pi permission bridge startup timed out.")
 		case request := <-childRequests:
 			if !prompted {
@@ -328,6 +334,10 @@ reading:
 		}
 		if !ok {
 			break
+		}
+		if !prompted && startup != nil {
+			timer.Reset(startupTimeout)
+			startup = timer.C
 		}
 		switch str(raw, "type") {
 		case "queue_update":

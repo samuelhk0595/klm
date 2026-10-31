@@ -56,27 +56,14 @@ func readSQLiteContent(ctx context.Context, q sqliteQuery, table, id, digest str
 		return page, errors.New("content offset is out of range")
 	}
 	end := min(page.TotalBytes, offset+int64(limit))
-	page.Data = make([]byte, 0, end-offset)
+	page.Data = make([]byte, end-offset)
 	if end > offset {
-		rows, err := q.QueryContext(ctx, `SELECT chunk,body FROM data_`+table+`_chunks WHERE record_key=? AND chunk>=? AND chunk<=? ORDER BY chunk`, id, offset/sqliteContentChunkBytes, (end-1)/sqliteContentChunkBytes)
+		reader, err := newSQLiteContentReader(ctx, q, table, id)
 		if err != nil {
 			return page, err
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var chunk int64
-			var body []byte
-			if err := rows.Scan(&chunk, &body); err != nil {
-				return page, err
-			}
-			startAt := max(int64(0), offset-chunk*sqliteContentChunkBytes)
-			endAt := min(int64(len(body)), end-chunk*sqliteContentChunkBytes)
-			if startAt > endAt {
-				return page, errors.New("corrupt SQLite content chunk")
-			}
-			page.Data = append(page.Data, body[startAt:endAt]...)
-		}
-		if err := rows.Err(); err != nil {
+		reader.offset = offset
+		if _, err := io.ReadFull(reader, page.Data); err != nil {
 			return page, err
 		}
 	}
@@ -94,30 +81,15 @@ func writeSQLiteRecordContent(ctx context.Context, q sqliteQuery, w io.Writer, t
 	if !sqliteKnownTable(table) {
 		return errors.New("unknown SQLite content table")
 	}
-	var expected int64
-	if err := q.QueryRowContext(ctx, `SELECT payload_bytes FROM data_`+table+` WHERE id=?`, id).Scan(&expected); err != nil {
+	reader, err := newSQLiteContentReader(ctx, q, table, id)
+	if err != nil {
 		return err
 	}
-	var total, next int64
-	for total < expected {
-		var body []byte
-		if err := q.QueryRowContext(ctx, `SELECT body FROM data_`+table+`_chunks WHERE record_key=? AND chunk=?`, id, next).Scan(&body); err != nil {
-			return err
-		}
-		if len(body) == 0 || len(body) > sqliteContentChunkBytes {
-			return errors.New("invalid SQLite content chunk")
-		}
-		n, err := w.Write(body)
-		if err != nil {
-			return err
-		}
-		if n != len(body) {
-			return io.ErrShortWrite
-		}
-		total += int64(n)
-		next++
+	total, err := io.CopyBuffer(w, reader, make([]byte, sqliteContentChunkBytes))
+	if err != nil {
+		return err
 	}
-	if total != expected {
+	if total != reader.size {
 		return errors.New("SQLite content length mismatch")
 	}
 	return nil

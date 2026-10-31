@@ -515,11 +515,15 @@ func (a *app) sqlFocusedPrompt(st *sqliteSessionTx, s Session, text string, sour
 			return err
 		}
 		for _, key := range keys {
-			var e Event
-			if err := decodeSQLiteRecord(st.ctx, st.tx, "session_events", key, maxStreamRecordBytes, &e); err != nil {
+			e, err := readSQLiteEventMetadata(st.ctx, st.tx, key)
+			if err != nil {
 				return err
 			}
-			nearby = append(nearby, map[string]string{"id": e.ID, "type": e.Type, "text": boundedText(e.Text, 2048)})
+			text, _, err := sqliteEventTextWindow(st.ctx, st.tx, key, 0, 2048)
+			if err != nil {
+				return err
+			}
+			nearby = append(nearby, map[string]string{"id": e.ID, "type": e.Type, "text": text})
 		}
 		return nil
 	}

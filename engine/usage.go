@@ -259,10 +259,13 @@ func codexSessionUsage(data map[string]any) *SessionUsage {
 // One entry per native message/step makes reconciliation and repeated SSE events
 // idempotent. Step parts take precedence over the message's last-step usage.
 type openCodeUsage struct {
-	messages    map[string]map[string]any
-	steps       map[string]map[string]map[string]any
-	windows     map[string]*int64
-	compactedAt int64
+	baseline                      bool
+	baselineInput, baselineOutput *int64
+	baselineLatest                map[string]any
+	messages                      map[string]map[string]any
+	steps                         map[string]map[string]map[string]any
+	windows                       map[string]*int64
+	compactedAt                   int64
 }
 
 func openCodeTokenCounts(tokens map[string]any) (input, output *int64) {
@@ -275,7 +278,7 @@ func openCodeTokenCounts(tokens map[string]any) (input, output *int64) {
 
 func (u *openCodeUsage) message(info map[string]any) {
 	if id := str(info, "id"); id != "" {
-		u.messages[id] = info
+		u.messages[id] = compactOpenCodeInfo(info)
 	}
 }
 
@@ -290,13 +293,39 @@ func (u *openCodeUsage) part(part map[string]any) {
 	if u.steps[messageID] == nil {
 		u.steps[messageID] = map[string]map[string]any{}
 	}
-	u.steps[messageID][partID] = object(part["tokens"])
+	u.steps[messageID][partID] = compactOpenCodeTokens(part["tokens"])
+}
+
+func (u *openCodeUsage) addBaseline(info map[string]any, value *SessionUsage) {
+	if value == nil {
+		return
+	}
+	if !u.baseline {
+		u.baseline = true
+		u.baselineInput = value.InputTokens
+		u.baselineOutput = value.OutputTokens
+	} else {
+		u.baselineInput = sumTokens(u.baselineInput, value.InputTokens)
+		u.baselineOutput = sumTokens(u.baselineOutput, value.OutputTokens)
+	}
+	created := tokenCount(object(info["time"])["created"])
+	previous := tokenCount(object(u.baselineLatest["time"])["created"])
+	if created != nil && (previous == nil || *created > *previous || *created == *previous && str(info, "id") > str(u.baselineLatest, "id")) {
+		u.baselineLatest = compactOpenCodeInfo(info)
+	}
 }
 
 func (u *openCodeUsage) snapshot() *SessionUsage {
 	var inputs, outputs []*int64
-	var latest map[string]any
+	if u.baseline {
+		inputs = append(inputs, u.baselineInput)
+		outputs = append(outputs, u.baselineOutput)
+	}
+	latest := u.baselineLatest
 	var latestTime int64 = -1
+	if created := tokenCount(object(latest["time"])["created"]); created != nil {
+		latestTime = *created
+	}
 	for id, info := range u.messages {
 		if str(info, "role") != "assistant" {
 			continue

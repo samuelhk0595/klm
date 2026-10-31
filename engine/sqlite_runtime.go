@@ -133,6 +133,15 @@ func (a *app) checkpointSQLRuntime() {
 		case <-a.ctx.Done():
 			return
 		case <-ticker.C:
+			if err := a.store.collectEventGenerations(a.ctx); err != nil {
+				if a.ctx.Err() != nil {
+					return
+				}
+				a.mu.Lock()
+				a.failStorageLocked(err)
+				a.mu.Unlock()
+				return
+			}
 			var busy, frames, done int
 			err := a.store.writer.QueryRowContext(a.ctx, `PRAGMA wal_checkpoint(PASSIVE)`).Scan(&busy, &frames, &done)
 			if err != nil {

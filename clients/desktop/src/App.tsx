@@ -1,7 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Download, Focus, GitBranch, Maximize2, Minimize2, Minus, PanelLeft, PanelRight, PanelsTopLeft } from 'lucide-react';
-import { IS_DESKTOP, IS_MOBILE_HOST, openFocus, startWindowDrag } from './platform';
-import { clientFetch } from './clientAuth';
+import { IS_DESKTOP, IS_MOBILE_HOST, openContentDownload, openFocus, startWindowDrag } from './platform';
 import { bindEngineIdentity, currentEngineIdentity, engineStorageKey } from './engineIdentity';
 import { Button, IconButton } from './design-system/Button';
 import { BottomSheet } from './design-system/BottomSheet';
@@ -878,11 +877,9 @@ export function App() {
     if (!session) return;
     const id = session.id;
     try {
-      const response = await clientFetch(`/api/sessions/${encodeURIComponent(id)}/export`, { signal: AbortSignal.timeout(60000) });
-      if (!response.ok) throw new Error('Could not export the conversation. Retry.');
-      const url = URL.createObjectURL(await response.blob());
-      const link = document.createElement('a'); link.href = url; link.download = `session-${id}.json`; link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const ticket = await request<{ path: string }>(`/api/sessions/${encodeURIComponent(id)}/export-downloads`, 'POST', {});
+      if (!/^\/api\/content-downloads\/[A-Za-z0-9_-]{43}\?contract=3$/.test(ticket.path)) throw new Error('Invalid export response.');
+      await openContentDownload(ENGINE_URL + ticket.path);
     } catch (error) { setSessionErrors(current => ({ ...current, [id]: errorMessage(error) })); }
   }
   function selectProject(next: Project) {

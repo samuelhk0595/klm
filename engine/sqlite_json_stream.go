@@ -12,48 +12,6 @@ import (
 	"unicode/utf8"
 )
 
-// A single record is consumed in fixed-size chunks. JSON strings are decoded a
-// rune at a time so literal message search never allocates a giant event/text.
-type sqliteRecordReader struct {
-	ctx                 context.Context
-	q                   sqliteQuery
-	table, id           string
-	size, offset, chunk int64
-	body                []byte
-}
-
-func newSQLiteRecordReader(ctx context.Context, q sqliteQuery, table, id string) (*sqliteRecordReader, error) {
-	if !sqliteKnownTable(table) {
-		return nil, errors.New("Unknown content domain.")
-	}
-	r := &sqliteRecordReader{ctx: ctx, q: q, table: table, id: id}
-	err := q.QueryRowContext(ctx, `SELECT payload_bytes FROM data_`+table+` WHERE id=?`, id).Scan(&r.size)
-	return r, err
-}
-func (r *sqliteRecordReader) Read(p []byte) (int, error) {
-	if len(p) == 0 {
-		return 0, nil
-	}
-	if err := r.ctx.Err(); err != nil {
-		return 0, err
-	}
-	if r.offset >= r.size {
-		return 0, io.EOF
-	}
-	if len(r.body) == 0 {
-		if err := r.q.QueryRowContext(r.ctx, `SELECT body FROM data_`+r.table+`_chunks WHERE record_key=? AND chunk=?`, r.id, r.chunk).Scan(&r.body); err != nil {
-			return 0, err
-		}
-		r.chunk++
-		if len(r.body) == 0 || len(r.body) > sqliteContentChunkBytes {
-			return 0, errors.New("Invalid record chunk.")
-		}
-	}
-	n := copy(p, r.body)
-	r.body = r.body[n:]
-	r.offset += int64(n)
-	return n, nil
-}
 func jsonSpace(r *bufio.Reader) (byte, error) {
 	for {
 		b, err := r.ReadByte()
@@ -67,9 +25,12 @@ func jsonSpace(r *bufio.Reader) (byte, error) {
 }
 func jsonStreamString(r *bufio.Reader, consume func(rune) error) error {
 	for {
-		c, _, err := r.ReadRune()
+		c, size, err := r.ReadRune()
 		if err != nil {
 			return err
+		}
+		if c < 0x20 || c == utf8.RuneError && size == 1 {
+			return errProtocolJSON
 		}
 		if c == '"' {
 			return nil
@@ -235,7 +196,7 @@ func jsonEventStrings(r *bufio.Reader, parent string, visit func(string, rune) e
 var errSQLExcerptComplete = errors.New("excerpt complete")
 
 func searchSQLiteEvent(ctx context.Context, q sqliteQuery, id, query string) (string, bool, error) {
-	reader, err := newSQLiteRecordReader(ctx, q, "session_events", id)
+	reader, err := newSQLiteContentReader(ctx, q, "session_events", id)
 	if err != nil {
 		return "", false, err
 	}

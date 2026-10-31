@@ -13,11 +13,12 @@ import (
 )
 
 type sqliteSessionChanges struct {
-	Revision    string
-	Sessions    map[string][]int64 // exact affected ordinals; metadata-only is an empty list
-	Records     map[string][]string
-	Projects    map[string]bool
-	Invalidated map[string]bool // bounded set of domains when individual IDs exceed the change budget
+	publishedContent []string
+	Revision         string
+	Sessions         map[string][]int64 // exact affected ordinals; metadata-only is an empty list
+	Records          map[string][]string
+	Projects         map[string]bool
+	Invalidated      map[string]bool // bounded set of domains when individual IDs exceed the change budget
 }
 
 type sqliteSessionTx struct {
@@ -45,6 +46,7 @@ func (s *sqliteStore) sessionTransaction(ctx context.Context, change func(*sqlit
 		if err := change(st); err != nil {
 			return err
 		}
+		changes.publishedContent = st.changes.publishedContent
 		if len(st.changes.Sessions) == 0 && len(st.changes.Records) == 0 && len(st.changes.Invalidated) == 0 {
 			changes.Revision = current
 			return nil
@@ -68,6 +70,10 @@ func (s *sqliteStore) sessionTransaction(ctx context.Context, change func(*sqlit
 	})
 	if err != nil {
 		return sqliteSessionChanges{}, err
+	}
+	for _, id := range changes.publishedContent {
+		s.setContentLive(id, false)
+		s.releaseContentStage(id)
 	}
 	return changes, nil
 }
@@ -185,7 +191,7 @@ func (st *sqliteSessionTx) eventByID(sessionID, eventID string) (Event, int64, e
 		return Event{}, 0, err
 	}
 	var e Event
-	if err := decodeSQLiteRecord(st.ctx, st.tx, "session_events", key, maxStreamRecordBytes, &e); err != nil {
+	if err := decodeSQLiteRecord(st.ctx, st.tx, "session_events", key, protocolChunkSize, &e); err != nil {
 		return e, 0, err
 	}
 	return e, ordinal, nil
@@ -233,6 +239,9 @@ func (st *sqliteSessionTx) writeEvent(sessionID string, ordinal int64, e Event, 
 			if err == nil && n != 1 {
 				return sql.ErrNoRows
 			}
+		}
+		if err == nil {
+			_, err = st.tx.ExecContext(st.ctx, `DELETE FROM event_content_publications WHERE event_key=?`, key)
 		}
 		if err == nil {
 			_, err = st.tx.ExecContext(st.ctx, `DELETE FROM data_session_events_chunks WHERE record_key=?`, key)

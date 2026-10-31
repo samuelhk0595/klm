@@ -9,6 +9,7 @@ import (
 	"math"
 	"slices"
 	"strconv"
+	"unicode/utf8"
 )
 
 const sqliteHistoryPageBytes = 2 << 20
@@ -25,6 +26,16 @@ type sqliteHistoryEvent struct {
 	ID       string              `json:"id"`
 	Event    *Event              `json:"event,omitempty"`
 	Content  *sqliteEventContent `json:"content,omitempty"`
+	Preview  *sqliteEventPreview `json:"preview,omitempty"`
+}
+
+type sqliteEventPreview struct {
+	Type           string `json:"type"`
+	Title          string `json:"title,omitempty"`
+	Status         string `json:"status,omitempty"`
+	CreatedAt      string `json:"createdAt"`
+	ConsultationID string `json:"consultationId,omitempty"`
+	Text           string `json:"textPreview,omitempty"`
 }
 
 type sqliteHistoryPage struct {
@@ -77,9 +88,9 @@ func (s *sqliteStore) readHistory(ctx context.Context, sessionID, before, after 
 		return page, err
 	}
 	page.Count = strconv.FormatInt(count, 10)
-	query := `SELECT id,record_id,position,payload_bytes,digest,revision FROM data_session_events WHERE owner_id=? AND position<? ORDER BY position DESC LIMIT ?`
+	query := `SELECT id,record_id,position,payload_bytes,digest,revision,kind,status,created_at,correlation_id FROM data_session_events WHERE owner_id=? AND position<? ORDER BY position DESC LIMIT ?`
 	if after != "" {
-		query = `SELECT id,record_id,position,payload_bytes,digest,revision FROM data_session_events WHERE owner_id=? AND position>? ORDER BY position ASC LIMIT ?`
+		query = `SELECT id,record_id,position,payload_bytes,digest,revision,kind,status,created_at,correlation_id FROM data_session_events WHERE owner_id=? AND position>? ORDER BY position ASC LIMIT ?`
 	}
 	rows, err := tx.QueryContext(ctx, query, sessionID, bound, limit)
 	if err != nil {
@@ -88,11 +99,12 @@ func (s *sqliteStore) readHistory(ctx context.Context, sessionID, before, after 
 	type meta struct {
 		key, id, digest, revision string
 		position, size            int64
+		preview                   sqliteEventPreview
 	}
 	metadata := make([]meta, 0, limit)
 	for rows.Next() {
 		var m meta
-		if err := rows.Scan(&m.key, &m.id, &m.position, &m.size, &m.digest, &m.revision); err != nil {
+		if err := rows.Scan(&m.key, &m.id, &m.position, &m.size, &m.digest, &m.revision, &m.preview.Type, &m.preview.Status, &m.preview.CreatedAt, &m.preview.ConsultationID); err != nil {
 			rows.Close()
 			return page, err
 		}
@@ -125,6 +137,21 @@ func (s *sqliteStore) readHistory(ctx context.Context, sessionID, before, after 
 			remaining -= m.size
 		} else {
 			entry.Content = &sqliteEventContent{Key: m.key, Digest: m.digest, Bytes: m.size}
+			entry.Preview = &m.preview
+			var title, preview string
+			err := tx.QueryRowContext(ctx, `SELECT coalesce(json_extract(CAST(g.header AS TEXT),'$.title'),json_extract(CAST(e.header AS TEXT),'$.title'),''),coalesce(g.text_preview,e.preview,'') FROM data_session_events d LEFT JOIN event_content_publications p ON p.event_key=d.id LEFT JOIN event_content_generations g ON g.id=p.generation_id LEFT JOIN event_stream_state e ON e.event_id=d.id WHERE d.id=?`, m.key).Scan(&title, &preview)
+			if err != nil {
+				return page, err
+			}
+			entry.Preview.Title = boundedText(title, 512)
+			if len(preview) > 4096 {
+				end := 4096
+				for end > 0 && !utf8.RuneStart(preview[end]) {
+					end--
+				}
+				preview = preview[:end]
+			}
+			entry.Preview.Text = preview
 		}
 		page.Events = append(page.Events, entry)
 	}

@@ -29,6 +29,7 @@ export type Harness = {
 };
 
 export type EngineEvent = {
+	previewText?: string;
 	content?: { sessionId: string; ordinal: string; digest: string; bytes: number; domain?: string; key?: string };
 	consultationId?: string;
   id: string;
@@ -285,7 +286,7 @@ function normalizeEngineResponse(path: string, value: unknown): unknown {
   if (object.session && typeof object.eventCount === 'string') return { ...sessionMetadata(object.session), detailLoaded: true, permissionCount: object.session.permissions?.length ?? 0, questionCount: object.session.questions?.length ?? 0, pendingMore: object.more };
   if (/^\/api\/projects(?:\/[^/?]+)?$/.test(path.split('?')[0]) && typeof object.folder === 'string') return { ...object, folders: [], archivedFolders: [] };
   if (typeof object.sessionId === 'string' && typeof object.count === 'string' && Array.isArray(object.events)) {
-    const events: EngineEvent[] = object.events.map((row: any) => row.event ?? ({ id: row.id, type: 'status', text: '', createdAt: '', content: { sessionId: object.sessionId, ordinal: row.ordinal, digest: row.content.digest, bytes: row.content.bytes } }));
+    const events: EngineEvent[] = object.events.map((row: any) => row.event ?? ({ id: row.id, type: row.preview?.type ?? 'status', title: row.preview?.title, status: row.preview?.status, consultationId: row.preview?.consultationId, previewText: row.preview?.textPreview, text: '', createdAt: row.preview?.createdAt ?? '', content: { sessionId: object.sessionId, ordinal: row.ordinal, digest: row.content.digest, bytes: row.content.bytes } }));
     const start = object.before === '' ? 0 : ordinal(object.before);
     return { sessionId: object.sessionId, revision: object.revision, startIndex: start, endIndex: start + events.length, total: ordinal(object.count), events, nextCursor: object.hasOlder ? object.before : undefined, hasMore: object.hasOlder, hasNewer: object.hasNewer } satisfies EventPage;
   }

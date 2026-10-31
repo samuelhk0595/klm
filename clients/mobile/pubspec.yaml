@@ -12,6 +12,7 @@ dependencies:
   flutter_svg: ^2.3.0
   shared_preferences: ^2.5.5
   webview_flutter: ^4.14.1
+  url_launcher: ^6.3.2
   record: ^7.1.2
   path_provider: ^2.1.5
   network_info_plus: ^8.2.2

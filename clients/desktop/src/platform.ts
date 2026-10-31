@@ -12,6 +12,24 @@ export function returnToHosts() {
   mobileBridge?.postMessage('home');
 }
 
+export async function openContentDownload(url: string) {
+  if (IS_DESKTOP) {
+    await invoke('open_content_download', { url });
+    return;
+  }
+  const downloadBridge = (window as Window & { KlmDownload?: MobileBridge }).KlmDownload;
+  if (IS_MOBILE_HOST) {
+    if (!downloadBridge) throw new Error('Update the mobile client to download content.');
+    downloadBridge.postMessage(url);
+    return;
+  }
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'event.json';
+  link.rel = 'noreferrer';
+  link.click();
+}
+
 export function resolveEngineURL() {
   const override = import.meta.env.VITE_ENGINE_URL?.trim();
   if (override) return normalizeEngineURL(override);

@@ -82,6 +82,9 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("GET /api/version", a.getVersion)
 	mux.HandleFunc("GET /api/state", a.getState)
 	if a.store != nil {
+		mux.HandleFunc("POST /api/sessions/{id}/content-downloads", a.createContentDownload)
+		mux.HandleFunc("POST /api/sessions/{id}/export-downloads", a.createSessionExportDownload)
+		mux.HandleFunc("GET /api/content-downloads/{ticket}", a.consumeContentDownload)
 		mux.HandleFunc("GET /api/activity/sessions", a.sqlSessionActivity)
 		mux.HandleFunc("GET /api/projects/{id}/sessions", a.projectSQLSessions)
 		mux.HandleFunc("GET /api/projects/{id}/topics", a.projectSQLTopics)

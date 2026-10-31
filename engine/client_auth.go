@@ -503,6 +503,12 @@ func (s *clientAuth) protect(mux *http.ServeMux, next http.Handler) http.Handler
 			next.ServeHTTP(w, r)
 			return
 		}
+		if pattern == "GET /api/content-downloads/{ticket}" {
+			// The handler consumes a short-lived, content-scoped capability and
+			// rechecks its owning client. A navigation cannot attach bearer auth.
+			next.ServeHTTP(w, r)
+			return
+		}
 		request, cleanup, ok := s.admit(w, r)
 		if !ok {
 			return

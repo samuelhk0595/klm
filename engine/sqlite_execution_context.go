@@ -288,11 +288,15 @@ func (a *app) sqlGraphConversationContext(ctx context.Context, owner string) (*S
 			return err
 		}
 		for i := len(keys) - 1; i >= 0; i-- {
-			var e Event
-			if err := decodeSQLiteRecord(ctx, tx, "session_events", keys[i], maxStreamRecordBytes, &e); err != nil {
+			e, err := readSQLiteEventMetadata(ctx, tx, keys[i])
+			if err != nil {
 				return err
 			}
-			events = append(events, map[string]string{"eventId": e.ID, "text": boundedText(e.Text, 4096)})
+			text, _, err := sqliteEventTextWindow(ctx, tx, keys[i], 0, 4096)
+			if err != nil {
+				return err
+			}
+			events = append(events, map[string]string{"eventId": e.ID, "text": text})
 		}
 		return nil
 	})

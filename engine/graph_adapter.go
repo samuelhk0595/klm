@@ -401,7 +401,22 @@ func (p *adapter) graphReservationReceipt(result any) bool {
 		Reserved      bool   `json:"reserved"`
 		ReservationID string `json:"reservationId"`
 	}
-	if json.Unmarshal([]byte(contentText(result)), &receipt) != nil || !receipt.Reserved {
+	text, err := nativeTextReader(result)
+	if err != nil {
+		return false
+	}
+	ctx := context.Background()
+	if p.turn != nil && p.turn.ctx != nil {
+		ctx = p.turn.ctx
+	}
+	policy := func(path []string) projectionAction {
+		if len(path) == 1 && path[0] != "reserved" && path[0] != "reservationId" {
+			return projectionDiscard
+		}
+		return projectionKeep
+	}
+	raw, _, err := projectProtocolJSONUsing(ctx, text, policy, 4096, errProtocolMetadata, false, nil, 0, false)
+	if err != nil || json.Unmarshal(raw, &receipt) != nil || !receipt.Reserved {
 		return false
 	}
 	p.graph.mu.Lock()
@@ -466,6 +481,9 @@ func (p *adapter) finishGraphAdapter(runErr error) GraphAdapterResult {
 	r.UncertainToolCalls = b.unresolvedMCPCallsLocked()
 	r.ToolCallsSettled = len(r.UncertainToolCalls) == 0
 	uncertainty := mcpCallUncertainty(r.UncertainToolCalls)
+	if b.codexCoverageUnknown[""] {
+		uncertainty = errors.Join(uncertainty, &graphUnconfirmedError{cause: errors.New("Native child discovery returned unsupported or oversized control metadata.")})
+	}
 	for child := range b.codexChildren {
 		if !b.codexAudited[child] || b.codexCoverageUnknown[child] {
 			uncertainty = errors.Join(uncertainty, &graphUnconfirmedError{cause: errors.New("MCP call coverage is unconfirmed for native subagent thread " + child + ".")})

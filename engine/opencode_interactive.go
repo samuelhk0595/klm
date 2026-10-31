@@ -90,6 +90,7 @@ func (p *adapter) openCodeGraphConfig() (string, func(), error) {
 }
 
 type openCodeHTTP struct {
+	scope     *protocolContentScope
 	client    *http.Client
 	base      string
 	directory string
@@ -240,9 +241,16 @@ func (h *openCodeHTTP) jsonResponse(ctx context.Context, method, path string, bo
 	defer response.Body.Close()
 	var data []byte
 	if method == http.MethodGet && strings.HasPrefix(endpoint, "/session/") && strings.HasSuffix(endpoint, "/message") && result != nil {
-		data, err = readOpenCodeHistoryJSON(response.Body)
+		data, err = readOpenCodeHistoryJSONContext(ctx, response.Body)
 	} else {
-		data, err = io.ReadAll(io.LimitReader(response.Body, openCodeResponseLimit+1))
+		limit := openCodeResponseLimit
+		if h.scope != nil {
+			limit = 1 << 20
+		}
+		data, err = io.ReadAll(io.LimitReader(response.Body, int64(limit+1)))
+		if len(data) > limit && h.scope != nil {
+			return failure(errors.New("control response exceeded the 1 MiB metadata capacity"))
+		}
 	}
 	if err != nil {
 		if errors.Is(err, errOpenCodeResponseTooLarge) || errors.Is(err, errOpenCodeHistoryWireLimit) || errors.Is(err, errOpenCodeHistoryJSON) {
@@ -267,7 +275,10 @@ func (h *openCodeHTTP) jsonResponse(ctx context.Context, method, path string, bo
 // OpenCode 1.18.30 returns the newest page in chronological order and supplies
 // X-Next-Cursor for older pages. Visit newest first so reconciliation can stop at
 // the pre-turn baseline. Only one page of historical message bodies is retained.
-func (h *openCodeHTTP) walkMessages(ctx context.Context, sessionID string, baseline map[string]bool, visit func(map[string]any) error) error {
+func (h *openCodeHTTP) walkMessages(ctx context.Context, sessionID string, baseline any, visit func(map[string]any) error) error {
+	if h.scope != nil {
+		return h.walkNativeMessages(ctx, sessionID, baseline, visit)
+	}
 	limit, before := 64, ""
 	cursors := map[string]bool{}
 	seen := map[string]bool{}
@@ -298,7 +309,11 @@ func (h *openCodeHTTP) walkMessages(ctx context.Context, sessionID string, basel
 				return errors.New("OpenCode history contained an invalid or repeated message.")
 			}
 			seen[id] = true
-			if baseline[id] {
+			old, err := protocolIDSeen(baseline, id)
+			if err != nil {
+				return err
+			}
+			if old {
 				return nil
 			}
 			parts, ok := message["parts"].([]any)
@@ -350,49 +365,44 @@ func (h *openCodeHTTP) ownsSession(ctx context.Context, id string, owned map[str
 	return false, nil
 }
 
-// SSE frames, including multi-line data fields, have the same bound as CLI JSON lines.
-func openCodeEvents(ctx context.Context, body io.Reader, events chan<- map[string]any, failed chan<- error) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 4096), openCodeFrameLimit+1)
-	var data []byte
-	frameBytes := 0
-	err := errors.New("OpenCode event stream disconnected before the turn completed.")
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		frameBytes += len(line) + 1
-		if frameBytes > openCodeFrameLimit {
-			err = errors.New("OpenCode event frame exceeded KLM's 2 MiB limit.")
-			break
-		}
-		if len(line) == 0 {
-			if len(data) > 0 {
-				var event map[string]any
-				if json.Unmarshal(data, &event) != nil || str(event, "type") == "" {
-					err = errors.New("OpenCode returned an invalid event frame.")
-					break
-				}
-				select {
-				case events <- event:
-				case <-ctx.Done():
-					return
-				}
-			}
-			data = data[:0]
-			frameBytes = 0
-		} else if bytes.HasPrefix(line, []byte("data:")) {
-			value := bytes.TrimPrefix(line[5:], []byte(" "))
-			if len(data) > 0 {
-				data = append(data, '\n')
-			}
-			data = append(data, value...)
+// Bound retained content independently of redundant wire data. Complete JSON and
+// SSE framing are validated before an event reaches the adapter state machine.
+func openCodeEvents(ctx context.Context, body io.Reader, dir string, events chan<- map[string]any, failed chan<- error, scopes ...*protocolContentScope) {
+	deliver := func(event map[string]any) error {
+		select {
+		case events <- event:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
 		}
 	}
-	if scanErr := scanner.Err(); scanErr != nil {
-		if errors.Is(scanErr, bufio.ErrTooLong) {
-			err = fmt.Errorf("OpenCode event frame exceeded KLM's 2 MiB limit: %w", scanErr)
-		} else {
-			err = fmt.Errorf("Could not read the OpenCode event stream: %w", scanErr)
+	var native []func(*protocolFrame) error
+	var lastNative *protocolFrame
+	if len(scopes) > 0 && scopes[0] != nil {
+		native = append(native, func(frame *protocolFrame) error {
+			event, err := frame.projectNative("opencode", openCodeFrameLimit, scopes[0])
+			if err != nil {
+				return err
+			}
+			err = deliver(event)
+			if err == nil {
+				if lastNative != nil && lastNative.scope != nil {
+					lastNative.scope.ack(lastNative)
+				}
+				lastNative = frame
+			}
+			return err
+		})
+	}
+	err := readProjectedSSE(ctx, body, dir, func(data []byte) error {
+		var event map[string]any
+		if json.Unmarshal(data, &event) != nil || str(event, "type") == "" {
+			return errProtocolJSON
 		}
+		return deliver(event)
+	}, native...)
+	if err == nil {
+		err = errors.New("OpenCode event stream disconnected before the turn completed.")
 	}
 	select {
 	case failed <- err:
@@ -624,6 +634,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 		}
 	}
 	h, owner := server.h, server.owner
+	h.scope = p.turn.protocolScope
 	p.app.mu.Lock()
 	p.openCodeMCPPrefixes = server.mcpPrefixes
 	p.app.mu.Unlock()
@@ -697,7 +708,8 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	p.setGraphNativeSession(sessionID)
 	p.analyticsBindNative(sessionID, "")
 	sessionPath := "/session/" + url.PathEscape(sessionID)
-	baseline := map[string]bool{}
+	baseline := newProtocolIDSet(ctx, p.app.dir)
+	defer baseline.Close()
 	usage := &openCodeUsage{messages: map[string]map[string]any{}, steps: map[string]map[string]map[string]any{}, windows: map[string]*int64{}}
 	var providers struct {
 		All []struct {
@@ -721,11 +733,15 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	metricsCancel()
 	if err := h.walkMessages(ctx, sessionID, nil, func(message map[string]any) error {
 		info := object(message["info"])
-		usage.message(info)
-		for _, value := range message["parts"].([]any) {
-			usage.part(object(value))
+		one := &openCodeUsage{messages: map[string]map[string]any{}, steps: map[string]map[string]map[string]any{}, windows: usage.windows}
+		one.message(info)
+		if err := protocolArrayEach(message["parts"], func(value any) error { one.part(object(value)); return nil }); err != nil {
+			return err
 		}
-		baseline[str(info, "id")] = true
+		usage.addBaseline(info, one.snapshot())
+		if err := baseline.Add(str(info, "id")); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		return err
@@ -747,9 +763,18 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	if !strings.HasPrefix(strings.ToLower(stream.Header.Get("Content-Type")), "text/event-stream") {
 		return errors.New("OpenCode did not provide an event stream.")
 	}
-	events := make(chan map[string]any, 64)
+	events := make(chan map[string]any)
 	streamFailed := make(chan error, 1)
-	go openCodeEvents(ctx, stream.Body, events, streamFailed)
+	streamDone := make(chan struct{})
+	go func() {
+		defer close(streamDone)
+		openCodeEvents(ctx, stream.Body, p.app.dir, events, streamFailed, p.turn.protocolScope)
+	}()
+	defer func() {
+		cancel()
+		_ = stream.Body.Close()
+		<-streamDone // Release staged files before the turn/data-directory owner exits.
+	}()
 
 	permissions := map[string]bool{}
 	questions := map[string]*atomic.Bool{}
@@ -900,19 +925,30 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	infos := map[string]map[string]any{}
 	parts := map[string]map[string]any{}
 	children := map[string]*openCodeSubagent{}
-	putPart := func(target *adapter, nativeSessionID string, targetBaseline map[string]bool, targetInfos map[string]map[string]any, part map[string]any, discoverSubagent bool) error {
+	putPart := func(target *adapter, nativeSessionID string, targetBaseline any, targetInfos map[string]map[string]any, part map[string]any, discoverSubagent bool) error {
+		if p.turn.protocolScope != nil {
+			release, err := acquireProtocolStage(ctx, protocolNormalizeSlots)
+			if err != nil {
+				return err
+			}
+			defer release()
+		}
+		if truth(part, "$klmPersisted") {
+			return nil
+		}
 		messageID, partID := str(part, "messageID"), str(part, "id")
-		if targetBaseline[messageID] || str(targetInfos[messageID], "role") != "assistant" {
+		old, err := protocolIDSeen(targetBaseline, messageID)
+		if err != nil {
+			return err
+		}
+		if old || str(targetInfos[messageID], "role") != "assistant" {
 			return nil
 		}
 		if messageID == "" || partID == "" || str(part, "sessionID") != nativeSessionID {
 			return errors.New("OpenCode returned an invalid message part.")
 		}
-		encoded, err := json.Marshal(part)
-		if err != nil || len(encoded) > openCodeFrameLimit {
-			return errors.New("OpenCode message part exceeded the 2 MiB limit.")
-		}
-		kind, title, body, status := str(part, "type"), "", str(part, "text"), "running"
+		kind, title, status := str(part, "type"), "", "running"
+		body := displayNativeText(part["text"])
 		key := "opencode/" + messageID + "/" + partID
 		var taskChild *openCodeSubagent
 		raw := map[string]any{"type": kind, "partID": partID, "messageID": messageID}
@@ -920,7 +956,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 		case "text", "reasoning":
 			if kind == "text" {
 				kind = "assistant"
-			} else if strings.TrimSpace(body) == "" {
+			} else if text, plain := body.(string); plain && strings.TrimSpace(text) == "" {
 				return nil
 			}
 			if object(part["time"])["end"] != nil || object(infos[messageID]["time"])["completed"] != nil {
@@ -929,7 +965,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			// Reasoning metadata can contain encrypted provider state; retain text only.
 		case "tool":
 			state := object(part["state"])
-			title, body, status = str(part, "tool"), contentText(state["output"]), str(state, "status")
+			title, body, status = str(part, "tool"), displayNativeText(state["output"]), str(state, "status")
 			if target == p && title == "klm_linked_graph_submit_choice" && status == "completed" {
 				target.graphChoiceToolSettled(state["output"])
 			}
@@ -973,8 +1009,12 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				}
 			} else if title == "bash" {
 				kind = "command"
-				if command := str(object(state["input"]), "command"); command != "" {
-					body = strings.TrimSuffix(command+"\n"+body, "\n")
+				command, err := nativeField(state["input"], "command")
+				if err != nil {
+					return err
+				}
+				if nativeStringPresent(command) {
+					body = trimNativeNewline(joinNativeValues(command, "\n", body))
 				}
 			} else if strings.HasPrefix(title, "mcp_") || strings.HasPrefix(title, "mcp.") || strings.Contains(title, "__") {
 				kind = "mcp"
@@ -993,10 +1033,65 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 		if err := target.put(key, kind, title, body, status, false, raw); err != nil {
 			return err
 		}
+		if status == "completed" || status == "error" {
+			ownedParts := parts
+			if target != p {
+				ownedParts = nil
+				if child := children[nativeSessionID]; child != nil {
+					ownedParts = child.parts
+				}
+			}
+			if ownedParts != nil {
+				compact := map[string]any{"id": partID, "messageID": messageID, "sessionID": nativeSessionID, "type": part["type"], "$klmPersisted": true, "state": map[string]any{"status": status}}
+				if err := cacheNativeMap(p.turn.protocolScope, "opencode-part/"+target.id, ownedParts, messageID+"/"+partID, compact); err != nil {
+					return err
+				}
+			}
+		}
 		if taskChild != nil {
 			return taskChild.updateTask(p, key, status)
 		}
 		return nil
+	}
+
+	putTextDelta := func(target *adapter, nativeID string, targetBaseline any, targetInfos map[string]map[string]any, part map[string]any, delta any, discover bool) error {
+		if truth(part, "$klmPersisted") {
+			return errors.New("OpenCode emitted a text delta after native part completion.")
+		}
+		if _, ok := delta.(string); !ok {
+			content, ok := delta.(*protocolContent)
+			if !ok || content.kind != '"' {
+				return errProtocolJSON
+			}
+		}
+		accumulated, err := appendNativeText(ctx, p.turn.protocolScope, part["text"], delta)
+		if err != nil {
+			return err
+		}
+		part["text"] = accumulated
+		if err := p.turn.protocolScope.cacheValue("opencode-part/"+target.id+"/"+str(part, "messageID")+"/"+str(part, "id"), part); err != nil {
+			return err
+		}
+		if source, ok := accumulated.(*protocolAccumulatedText); ok {
+			p.turn.protocolScope.ack(source.frame)
+		}
+		messageID, partID := str(part, "messageID"), str(part, "id")
+		old, err := protocolIDSeen(targetBaseline, messageID)
+		if err != nil {
+			return err
+		}
+		if old || str(targetInfos[messageID], "role") != "assistant" {
+			return nil
+		}
+		key := "opencode/" + messageID + "/" + partID
+		if target.keys[key] == "" {
+			return putPart(target, nativeID, targetBaseline, targetInfos, part, discover)
+		}
+		kind := str(part, "type")
+		if kind == "text" {
+			kind = "assistant"
+		}
+		return target.put(key, kind, "", displayNativeText(delta), "running", true, map[string]any{"type": part["type"], "partID": partID, "messageID": messageID})
 	}
 
 	prompt := map[string]any{"parts": payload.openCodeParts()}
@@ -1126,7 +1221,10 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 					if id == "" {
 						return errors.New("OpenCode returned a subagent message without an identifier.")
 					}
-					child.infos[id] = info
+					info = compactOpenCodeInfo(info)
+					if err := cacheNativeMap(p.turn.protocolScope, "opencode-info/"+child.adapter.id, child.infos, id, info); err != nil {
+						return err
+					}
 					child.usage.message(info)
 					if str(info, "role") == "assistant" {
 						if child.taskKey != "" {
@@ -1162,7 +1260,9 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 					if messageID == "" || partID == "" {
 						return errors.New("OpenCode returned a subagent part without identifiers.")
 					}
-					child.parts[messageID+"/"+partID] = part
+					if err := cacheNativeMap(p.turn.protocolScope, "opencode-part/"+child.adapter.id, child.parts, messageID+"/"+partID, part); err != nil {
+						return err
+					}
 					child.usage.part(part)
 					if err := putPart(child.adapter, scopedID, nil, child.infos, part, false); err != nil {
 						return err
@@ -1180,12 +1280,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 					if part == nil || (str(part, "type") != "text" && str(part, "type") != "reasoning") {
 						continue
 					}
-					delta := str(properties, "delta")
-					if len(str(part, "text"))+len(delta) > openCodeFrameLimit {
-						return errors.New("OpenCode subagent text part exceeded the 2 MiB limit.")
-					}
-					part["text"] = str(part, "text") + delta
-					if err := putPart(child.adapter, scopedID, nil, child.infos, part, false); err != nil {
+					if err := putTextDelta(child.adapter, scopedID, nil, child.infos, part, properties["delta"], false); err != nil {
 						return err
 					}
 				case "session.error":
@@ -1203,6 +1298,9 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			}
 			switch typ {
 			case "session.compacted":
+				if created := tokenCount(object(usage.baselineLatest["time"])["created"]); created != nil && *created > usage.compactedAt {
+					usage.compactedAt = *created
+				}
 				for _, info := range usage.messages {
 					if created := tokenCount(object(info["time"])["created"]); created != nil && *created > usage.compactedAt {
 						usage.compactedAt = *created
@@ -1219,11 +1317,18 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			case "message.updated":
 				info := object(properties["info"])
 				id := str(info, "id")
-				if id == "" || baseline[id] {
+				old, err := baseline.Has(id)
+				if err != nil {
+					return err
+				}
+				if id == "" || old {
 					continue
 				}
 				ownedMessage = true
-				infos[id] = info
+				info = compactOpenCodeInfo(info)
+				if err := cacheNativeMap(p.turn.protocolScope, "opencode-info/"+p.id, infos, id, info); err != nil {
+					return err
+				}
 				usage.message(info)
 				if str(info, "role") == "assistant" {
 					if err := p.resolvedSelection(str(info, "providerID")+"/"+str(info, "modelID"), str(info, "variant")); err != nil {
@@ -1246,13 +1351,19 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			case "message.part.updated":
 				part := object(properties["part"])
 				messageID, partID := str(part, "messageID"), str(part, "id")
-				if baseline[messageID] {
+				old, err := baseline.Has(messageID)
+				if err != nil {
+					return err
+				}
+				if old {
 					continue
 				}
 				if messageID == "" || partID == "" {
 					return errors.New("OpenCode returned a message part without identifiers.")
 				}
-				parts[messageID+"/"+partID] = part
+				if err := cacheNativeMap(p.turn.protocolScope, "opencode-part/"+p.id, parts, messageID+"/"+partID, part); err != nil {
+					return err
+				}
 				usage.part(part)
 				if str(part, "type") == "step-finish" {
 					if err := p.setUsage(usage.snapshot()); err != nil {
@@ -1271,12 +1382,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 					// A missing initial part is recovered from the final snapshot.
 					continue
 				}
-				delta := str(properties, "delta")
-				if len(str(part, "text"))+len(delta) > openCodeFrameLimit {
-					return errors.New("OpenCode text part exceeded the 2 MiB limit.")
-				}
-				part["text"] = str(part, "text") + delta
-				if err := putPart(p, sessionID, baseline, infos, part, true); err != nil {
+				if err := putTextDelta(p, sessionID, baseline, infos, part, properties["delta"], true); err != nil {
 					return err
 				}
 			case "session.status", "session.idle":
@@ -1293,6 +1399,15 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				// Retain only this turn, then reconcile oldest first for UI ordering.
 				var history []map[string]any
 				if err := h.walkMessages(ctx, sessionID, baseline, func(message map[string]any) error {
+					if str(object(message["info"]), "role") != "assistant" {
+						return nil
+					}
+					if h.scope != nil {
+						message = map[string]any{"info": compactOpenCodeInfo(object(message["info"]))}
+					}
+					if err := p.turn.protocolScope.cacheValue("opencode-history/"+str(object(message["info"]), "id"), message); err != nil {
+						return err
+					}
 					history = append(history, message)
 					return nil
 				}); err != nil {
@@ -1309,17 +1424,38 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 				latestCreated, latestID := float64(-1), ""
 				nativeFailure := false
 				err := p.withFinalBatch(func() error {
+					var release func()
+					defer func() {
+						if release != nil {
+							release()
+						}
+					}()
 					for i := len(history) - 1; i >= 0; i-- {
+						if release != nil {
+							release()
+							release = nil
+						}
 						message := history[i]
+						history[i] = nil
+						if h.scope != nil {
+							var readErr error
+							message, release, readErr = h.nativeMessage(ctx, sessionID, str(object(message["info"]), "id"))
+							if readErr != nil {
+								return readErr
+							}
+						}
 						info := object(message["info"])
 						id := str(info, "id")
-						if id == "" || baseline[id] || str(info, "role") != "assistant" {
+						if id == "" || str(info, "role") != "assistant" {
 							continue
 						}
 						if str(info, "sessionID") != sessionID {
 							return errors.New("OpenCode history contained a different native session.")
 						}
-						infos[id] = info
+						info = compactOpenCodeInfo(info)
+						if err := cacheNativeMap(p.turn.protocolScope, "opencode-info/"+p.id, infos, id, info); err != nil {
+							return err
+						}
 						usage.message(info)
 						if failed, err := p.openCodeFinalError(info, choiceInterrupted); failed || err != nil {
 							nativeFailure = failed
@@ -1330,6 +1466,9 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 							incomplete = true
 						}
 						created, _ := object(info["time"])["created"].(float64)
+						if number, ok := object(info["time"])["created"].(json.Number); ok {
+							created, _ = number.Float64()
+						}
 						if created > latestCreated || (created == latestCreated && id > latestID) {
 							latestCreated, latestID = created, id
 							finish := str(info, "finish")
@@ -1338,11 +1477,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 								terminalAssistant = true
 							}
 						}
-						completeParts, ok := message["parts"].([]any)
-						if !ok {
-							return errors.New("OpenCode history did not contain message parts.")
-						}
-						for _, value := range completeParts {
+						if err := protocolArrayEach(message["parts"], func(value any) error {
 							part := object(value)
 							if str(part, "messageID") != id {
 								return errors.New("OpenCode history contained an invalid message part.")
@@ -1357,6 +1492,12 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 							if err := putPart(p, sessionID, baseline, infos, part, true); err != nil {
 								return err
 							}
+							return nil
+						}); err != nil {
+							return err
+						}
+						if err := p.turn.protocolScope.cacheValue("opencode-history/"+id, nil); err != nil {
+							return err
 						}
 					}
 					return nil

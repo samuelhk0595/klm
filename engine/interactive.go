@@ -20,9 +20,13 @@ type interactiveProcess struct {
 	mu     sync.Mutex
 	err    error
 	owner  *ownedProcess
+	lines  *jsonLines
 }
 
-func startInteractive(t *turn, b binary, args []string, cwd string, runtime *sessionRuntime) (*interactiveProcess, error) {
+func startInteractive(t *turn, b binary, args []string, cwd string, runtime *sessionRuntime, projection ...protocolLineInput) (*interactiveProcess, error) {
+	if len(projection) > 0 && projection[0].harness == "codex" && projection[0].scope == nil {
+		projection = nil
+	}
 	parent := t.ctx
 	if runtime != nil {
 		parent = runtime.app.ctx
@@ -51,6 +55,11 @@ func startInteractive(t *turn, b binary, args []string, cwd string, runtime *ses
 		return nil, errors.New("Could not open harness input.")
 	}
 	frames := make(chan map[string]any, 64)
+	if len(projection) > 0 {
+		// No backlog of decoded native maps on the projected path. Producers keep
+		// at most one bounded retained frame while waiting for the consumer.
+		frames = make(chan map[string]any)
+	}
 	done := make(chan struct{})
 	p := &interactiveProcess{Frames: frames, Done: done, stdin: stdin, cancel: cancel, owner: owner}
 	lines := &jsonLines{cancel: cancel, consume: func(line []byte) error {
@@ -67,6 +76,21 @@ func startInteractive(t *turn, b binary, args []string, cwd string, runtime *ses
 			return ctx.Err()
 		}
 	}}
+	if len(projection) > 0 {
+		input := projection[0]
+		input.ctx = ctx
+		lines.projection = &input
+		lines.activeScope.Store(input.scope)
+		lines.native = func(frame map[string]any) error {
+			select {
+			case frames <- frame:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	p.lines = lines
 	cmd.Stdout = lines
 	cmd.Stderr = &cappedBuffer{}
 	started := time.Now()
@@ -81,6 +105,7 @@ func startInteractive(t *turn, b binary, args []string, cwd string, runtime *ses
 		stdin.Close()
 		_ = owner.Stop()
 		_ = cmd.Wait()
+		lines.closeStaging()
 		_ = owner.Close()
 		return nil, err
 	}
@@ -89,6 +114,7 @@ func startInteractive(t *turn, b binary, args []string, cwd string, runtime *ses
 		if ctx.Err() == nil {
 			_ = lines.flush()
 		}
+		lines.closeStaging()
 		p.err = lines.err
 		if err != nil {
 			// Only expose exit metadata, never argv, stderr or arbitrary Wait errors.
@@ -137,3 +163,15 @@ func (p *interactiveProcess) Close() error {
 }
 
 func (p *interactiveProcess) Drained() bool { return p.owner.Drained() }
+
+func (p *interactiveProcess) bindProtocolScope(scope *protocolContentScope) {
+	// Do not wait for the stdout writer's mutex: it can be handing off a final
+	// small telemetry response from an idle retained process.
+	if p.lines != nil {
+		p.lines.activeScope.Store(scope)
+	}
+}
+
+func (p *interactiveProcess) ingestionInFlight() bool {
+	return p.lines != nil && p.lines.ingesting.Load()
+}
