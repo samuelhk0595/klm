@@ -51,7 +51,19 @@ func ownedGraphCommand(ctx context.Context, cwd, executable string, args []strin
 	cmd := exec.CommandContext(ctx, executable, args...)
 	cmd.Dir = cwd
 	cmd.Stdin = nil
-	cmd.Env = append(os.Environ(), environment...)
+	cmd.Env = append(ghConfigurationEnvironment(os.Environ()), environment...)
+	// These shell startup hooks must not execute ambient code before an authored
+	// Terminal script. No payload value is interpreted as shell source.
+	if name := strings.TrimSuffix(strings.ToLower(filepath.Base(executable)), ".exe"); name == "bash" || name == "sh" {
+		filtered := cmd.Env[:0]
+		for _, entry := range cmd.Env {
+			key, _, _ := strings.Cut(entry, "=")
+			if key != "BASH_ENV" && key != "ENV" {
+				filtered = append(filtered, entry)
+			}
+		}
+		cmd.Env = filtered
+	}
 	cmd.WaitDelay = 5 * time.Second
 	var output graphOutputBuffer
 	cmd.Stdout, cmd.Stderr = &output, &output
@@ -112,6 +124,31 @@ func powerShellExecutable() (string, error) {
 	}
 	return "", errors.New("PowerShell is not installed; Terminal nodes require PowerShell.")
 }
+
+func terminalShell(node GraphNode) string {
+	if node.Shell == "" {
+		return "powershell"
+	}
+	return node.Shell
+}
+
+func terminalShellExecutable(node GraphNode) (string, error) {
+	name := terminalShell(node)
+	if name == "powershell" {
+		path, err := powerShellExecutable()
+		if err != nil {
+			return "", fmt.Errorf("Terminal %s: install PowerShell or select Bash/sh explicitly.", node.Name)
+		}
+		return path, nil
+	}
+	if name != "bash" && name != "sh" {
+		return "", fmt.Errorf("Terminal %s: unsupported shell %q.", node.Name, name)
+	}
+	if path, ok := executable(name); ok {
+		return path, nil
+	}
+	return "", fmt.Errorf("Terminal %s: shell %s is unavailable. Install it for the engine user or select an installed shell.", node.Name, name)
+}
 func encodePowerShell(script string) string {
 	units := utf16.Encode([]rune(script))
 	bytes := make([]byte, len(units)*2)
@@ -123,7 +160,8 @@ func encodePowerShell(script string) string {
 
 func (a *app) executeGraphTerminal(g *graphExecution, run GraphRun, x GraphActivation) graphCompletion {
 	completion := graphCompletion{activationID: x.ID, drained: true}
-	shell, err := powerShellExecutable()
+	node := run.Snapshot.Graph.Definition.Nodes[x.NodeID]
+	shell, err := terminalShellExecutable(node)
 	if err != nil {
 		completion.err = err
 		return completion
@@ -166,8 +204,24 @@ func (a *app) executeGraphTerminal(g *graphExecution, run GraphRun, x GraphActiv
 	}
 	// A private data channel, never interpolation of values into configured code.
 	// The only appended source is the author-owned script itself, as one context.
-	script := "[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n$payload = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($env:KLM_GRAPH_PAYLOAD_FILE, [Text.Encoding]::UTF8))\n" + run.Snapshot.Graph.Definition.Nodes[x.NodeID].Command
-	result, err := ownedGraphCommand(g.ctx, cwd, shell, []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(script)}, []string{"KLM_GRAPH_PAYLOAD_FILE=" + inputFile})
+	script, extension := node.Command, ".sh"
+	if terminalShell(node) == "powershell" {
+		extension = ".ps1"
+		script = "\ufeff[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n$payload = ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($env:KLM_GRAPH_PAYLOAD_FILE, [Text.Encoding]::UTF8))\n" + script
+	}
+	scriptFile := filepath.Join(dir, "command"+extension)
+	if err := os.WriteFile(scriptFile, []byte(script), 0600); err != nil {
+		completion.err = err
+		return completion
+	}
+	args := []string{scriptFile}
+	switch terminalShell(node) {
+	case "powershell":
+		args = []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(". $env:KLM_GRAPH_SCRIPT_FILE")}
+	case "bash":
+		args = []string{"--noprofile", "--norc", scriptFile}
+	}
+	result, err := ownedGraphCommand(g.ctx, cwd, shell, args, []string{"KLM_GRAPH_PAYLOAD_FILE=" + inputFile, "KLM_GRAPH_SCRIPT_FILE=" + scriptFile})
 	completion.drained, completion.err = result.Drained, err
 	completion.command = &result
 	if err == nil {

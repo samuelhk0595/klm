@@ -96,8 +96,8 @@ export function SessionCapabilityPicker({ value, onChange, harness, general, dis
               </button>
             </div>;
           })}
+          {inventory && category === 'skills' && <LibrarySkillsPaging inventory={inventory} query={remoteQuery} onPage={setInventory} />}
         </div>
-        {inventory && category === 'skills' && <LibrarySkillsPaging inventory={inventory} onPage={setInventory} />}
         {general && category === 'skills' && <div className="session-picker-system"><LockKeyhole aria-hidden="true" /><span><strong>skill-library-manager</strong><small>System managed · Always included</small></span></div>}
       </div>
       <section className="session-picker-detail" aria-label="Item details">

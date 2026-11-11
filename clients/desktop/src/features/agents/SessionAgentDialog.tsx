@@ -30,7 +30,7 @@ export function SessionAgentDialog({ session, onClose, onSnapshot, libraryOnly =
   const { catalog, loading, error: modelError, refresh } = useModelCatalog(session.projectId, session.harness, session.id, !libraryOnly);
   const dirty = Object.keys(patch).length > 0;
   const stale = !!base && !!live.agent && (base.revision !== live.agent.revision || base.execution.token !== live.agent.execution.token || base.sourceStatus !== live.agent.sourceStatus);
-  const locked = session.automation?.status === 'running';
+  const locked = false;
   const modelLocked = session.status === 'running' || locked;
   const resetFields = base?.overriddenFields.filter(field => !libraryOnly || field === 'skills' || field === 'mcpConnections') ?? [];
   const compatible = !!base && (libraryOnly || modelLocked && !Object.hasOwn(patch, 'model') && !Object.hasOwn(patch, 'effort') || compatibleAgentConfiguration(base.desired, patch, catalog));

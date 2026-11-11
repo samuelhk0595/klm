@@ -1,21 +1,9 @@
 name: Issue Writing
 enabled: true
-initial_node: 3c7f25c2-ba60-40f4-8e8e-dbee26c07048
+initial_node: d2f2d072-c39e-4db5-a8fa-f3e017ac344f
 nodes:
-    3c7f25c2-ba60-40f4-8e8e-dbee26c07048:
+    d2f2d072-c39e-4db5-a8fa-f3e017ac344f:
         type: agent
-        name: Issue Writing
-        agent: issue-writer
-        choices:
-            - work-done
-choices:
-    work-done:
-        name: work_done
-        description: Called when the work is fully done
-        input:
-            summary:
-                type: string
-                required: true
-        output:
-            summary: '{{choice.summary}}'
-        terminal: true
+        name: Organizer
+        agent: issues-triage
+choices: {}

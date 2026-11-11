@@ -95,6 +95,11 @@ func (v sqliteValidation) validateAutomations() error {
 		if r.Status == "running" && (s.Automation == nil || s.Automation.RunID != r.ID) {
 			return errors.New("invalid active automation owner")
 		}
+		if g := r.GraphGrant; g != nil {
+			if g.ProjectID != r.ProjectID || g.AutomationID != r.AutomationID || g.RunID != r.ID || g.ConfigurationDigest == "" || !slices.Equal(g.Graphs, r.Snapshot.Graphs) {
+				return errors.New("invalid automation graph grant capture")
+			}
+		}
 		if !slices.Contains([]string{"", "initial", "follow_up"}, r.PromptKind) || !slices.Contains([]string{"running", "succeeded", "failed", "execution_failed", "interrupted_by_user"}, r.Status) || !slices.Contains([]string{"", "succeeded", "failed"}, r.Decision) {
 			return errors.New("invalid automation run state")
 		}

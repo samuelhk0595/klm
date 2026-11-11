@@ -1,14 +1,9 @@
 name: Run project
 enabled: true
-initial_node: fadb8408-7d5a-49fe-8b64-c7087db9aca7
+initial_node: 66d563ab-e84a-4e23-8c4e-c6b4b72e90f1
 nodes:
-    fadb8408-7d5a-49fe-8b64-c7087db9aca7:
-        type: terminal
-        name: Run Engine
-        command: |-
-            .\engine\klm-dev.exe stop
-            go -C engine build -tags dev -o klm-dev.exe .
-            if ($LASTEXITCODE -eq 0) { .\engine\klm-dev.exe start }
-        output:
-            summary: Engine running
+    66d563ab-e84a-4e23-8c4e-c6b4b72e90f1:
+        type: agent
+        name: Dummy
+        agent: generic-agent
 choices: {}

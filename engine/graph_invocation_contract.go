@@ -34,7 +34,7 @@ type graphActivityUpdateArgs struct {
 func graphAuthorizationSchema() map[string]any {
 	return map[string]any{
 		"type": "array", "minItems": 1,
-		"description": "References to real user messages authorizing this graph/activity in the owning main conversation. This records activity scope, not semantic proof of consent or harness/tool permission grants.",
+		"description": "Omit only in the owning automation turn for a graph selected in its captured configuration. Otherwise references to real user messages authorizing this graph/activity in the main conversation. Not a harness/tool permission grant.",
 		"items": map[string]any{
 			"type": "object", "additionalProperties": false, "required": []string{"eventId", "text"},
 			"properties": map[string]any{

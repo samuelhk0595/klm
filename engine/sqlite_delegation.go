@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -233,7 +234,11 @@ func (st *sqliteSessionTx) validateDelegationWrite(table, id, owner string, raw 
 		}
 	case "delegation_invocations":
 		var next DelegationInvocationRecord
-		if err := json.Unmarshal(raw, &next); err != nil {
+		// Match decodeSQLiteRecord: MCP schemas in Capture contain any values.
+		// Preserve numbers so unchanged captures compare equally without rounding.
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		if err := decoder.Decode(&next); err != nil {
 			return err
 		}
 		if next.ID != id {

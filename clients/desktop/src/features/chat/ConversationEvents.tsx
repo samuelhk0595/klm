@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { FileCode2, FilePenLine, MessagesSquare, Plug, Search, SquareTerminal, Wrench, type LucideIcon } from 'lucide-react';
 import { AgentWork, type AgentWorkActivity, type AgentWorkItemStatus, type AgentWorkStatus, type AgentWorkThought, type AgentWorkTone } from '../../design-system/AgentWork';
 import { Button } from '../../design-system/Button';
@@ -8,6 +8,7 @@ import { SessionEvent } from './SessionEvent';
 import { EventContent } from './EventContent';
 import { DelegationActivity, delegationLabel } from './DelegationActivity';
 import { SubagentActivity } from './SubagentActivity';
+import { HistoryPagingContext } from './HistoryPagingContext';
 
 type WorkEvent = EngineEvent & { type: 'reasoning' | 'command' | 'mcp' | 'tool' };
 type TimelineItem = { kind: 'event'; event: EngineEvent } | {
@@ -153,7 +154,8 @@ function activityPresentation(event: WorkEvent): { icon: LucideIcon; tone: Agent
   return { icon: Wrench, tone: 'muted' };
 }
 
-const ConversationWork = memo(function ConversationWork({ item }: { item: Extract<TimelineItem, { kind: 'work' }> }) {
+const ConversationWork = memo(function ConversationWork({ item, first, last }: { item: Extract<TimelineItem, { kind: 'work' }>; first: boolean; last: boolean }) {
+  const paging = useContext(HistoryPagingContext);
   const durationLabel = useWorkDuration(item.startedAt, item.completedAt, item.status === 'running');
   const thoughts: AgentWorkThought[] = item.events.filter(event => event.type === 'reasoning').map(event => ({
     id: event.id,
@@ -174,8 +176,8 @@ const ConversationWork = memo(function ConversationWork({ item }: { item: Extrac
       details: <EventDetails event={event} />,
     };
   });
-  return <AgentWork status={item.status} durationLabel={durationLabel} thoughts={thoughts} activities={activities} />;
-}, (before, after) => before.item.status === after.item.status && before.item.startedAt === after.item.startedAt && before.item.completedAt === after.item.completedAt && before.item.events.length === after.item.events.length && before.item.events.every((event, index) => event === after.item.events[index]));
+  return <AgentWork status={item.status} durationLabel={durationLabel} thoughts={thoughts} activities={activities} itemsBefore={first ? paging?.('before') : undefined} itemsAfter={last ? paging?.('after') : undefined} />;
+}, (before, after) => before.first === after.first && before.last === after.last && before.item.status === after.item.status && before.item.startedAt === after.item.startedAt && before.item.completedAt === after.item.completedAt && before.item.events.length === after.item.events.length && before.item.events.every((event, index) => event === after.item.events[index]));
 
 function ActiveWorkPlaceholder({ startedAt }: { startedAt?: string }) {
   const durationLabel = useWorkDuration(startedAt, undefined, true);
@@ -190,13 +192,21 @@ export function EventSequence({ events, status, updatedAt, renderEvent, showActi
   showActiveWork?: boolean;
   activeWorkStartedAt?: string;
 }) {
-  const items = useMemo(() => projectTimeline(events, status, updatedAt), [events, status, updatedAt]);
+  const groups = useRef(new Map<string, string>());
+  const items = useMemo(() => projectTimeline(events, status, updatedAt).map(item => {
+    if (item.kind !== 'work') return item;
+    const previous = item.events.map(event => groups.current.get(event.id)).find(Boolean);
+    return previous ? { ...item, id: previous } : item;
+  }), [events, status, updatedAt]);
+  useLayoutEffect(() => {
+    groups.current = new Map(items.flatMap(item => item.kind === 'work' ? item.events.map(event => [event.id, item.id] as const) : []));
+  }, [items]);
   const hasActiveWork = items.some(item => item.kind === 'work' && item.status === 'running');
   const lastItem = items.at(-1);
   const responding = lastItem?.kind === 'event' && lastItem.event.type === 'assistant';
   return <>
-    {items.map(item => {
-      if (item.kind === 'work') return <div key={`work/${item.id}`} data-history-anchor={item.id}><ConversationWork item={item} /></div>;
+    {items.map((item, index) => {
+      if (item.kind === 'work') return <div key={`work/${item.id}`} data-history-anchor={item.id} data-history-events={item.events.map(event => event.id).join(' ')}><ConversationWork item={item} first={index === 0} last={index === items.length - 1} /></div>;
       const content = item.event.content ? <EventContent event={item.event} /> : renderEvent ? renderEvent(item.event) : <SessionEvent event={item.event} />;
       return content == null ? null : <div key={item.event.id} data-history-anchor={item.event.id}>{content}</div>;
     })}
@@ -240,7 +250,7 @@ function ConsultationActivity({ event, output, sessionId, onSnapshot }: { event:
       {event.data?.delivery === 'failed' && <p className="form-error">Answer continuation failed.</p>}
       {(active || pendingDelivery) && <Button size="sm" disabled={cancelling} onClick={() => void cancel()}>{cancelling ? 'Cancelling...' : 'Cancel request'}</Button>}
       {error && <p role="alert" className="form-error">{error}</p>}
-      {!!output.length && <details className="consultation-output"><summary>Agent activity</summary><div><EventSequence events={output} status={active ? 'running' : failure ? 'error' : 'idle'} updatedAt={output.at(-1)?.createdAt ?? event.createdAt} /></div></details>}
+      {!!output.length && <details className="consultation-output"><summary>Agent activity</summary><div><HistoryPagingContext.Provider value={undefined}><EventSequence events={output} status={active ? 'running' : failure ? 'error' : 'idle'} updatedAt={output.at(-1)?.createdAt ?? event.createdAt} /></HistoryPagingContext.Provider></div></details>}
     </div>
   </details>;
 }

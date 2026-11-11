@@ -22,6 +22,14 @@ import (
 const modelCatalogTimeout = 45 * time.Second
 const modelCatalogLoadError = "Could not discover harness models. Check the installation and provider configuration for the engine's OS account, then refresh."
 
+func catalogFailureMessage(err error) string {
+	var inspection *openCodeInspectionFailure
+	if errors.As(err, &inspection) {
+		return modelCatalogLoadError + " " + inspection.Error()
+	}
+	return modelCatalogLoadError
+}
+
 type ModelOption struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name"`
@@ -233,7 +241,7 @@ func (a *app) getModels(w http.ResponseWriter, r *http.Request) {
 	}
 	catalog, err := a.catalog(r.Context(), s, cwd, r.URL.Query().Get("refresh") == "true")
 	if err != nil {
-		fail(w, 502, modelCatalogLoadError)
+		fail(w, 502, catalogFailureMessage(err))
 		return
 	}
 	respond(w, 200, catalog)
@@ -484,7 +492,7 @@ func openCodeCatalog(ctx context.Context, b binary, cwd string) (*ModelCatalog, 
 	defer os.RemoveAll(dir)
 	profile := &adapter{app: &app{dir: dir}, turn: &turn{ctx: ctx}, cwd: cwd, harness: "opencode", capabilities: &CapabilitySnapshot{Skills: []SkillSnapshot{}}}
 	config := map[string]any{}
-	env, err := profile.configureOpenCodeLibrary(config, dir)
+	env, err := profile.configureOpenCodeLibrary(config, dir, b.node)
 	if err != nil {
 		return nil, err
 	}

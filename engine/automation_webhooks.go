@@ -21,6 +21,8 @@ func supportedAutomationWebhook(eventType, action string) bool {
 		case "opened", "closed", "deleted", "edited", "assigned", "milestoned":
 			return true
 		}
+	case "issue_comment":
+		return action == "created" || action == "edited" || action == "deleted"
 	}
 	return false
 }
@@ -61,7 +63,7 @@ func validateAutomationWebhook(v Automation) error {
 		return errors.New("Choose a supported GitHub webhook event.")
 	}
 	unavailable := "{{issue.number}}"
-	if w.EventType == "issues" {
+	if w.EventType == "issues" || w.EventType == "issue_comment" {
 		unavailable = "{{pr.number}}"
 	}
 	check := func(prompt string) error {
@@ -108,10 +110,12 @@ func automationWebhookVariables(e WebhookStoredEvent) map[string]string {
 		return nil
 	}
 	number, reference := payload.Number, "pr.number"
-	if e.EventType == "issues" {
-		if len(payload.Issue.PullRequest) != 0 {
+	if e.EventType == "issues" || e.EventType == "issue_comment" {
+		if e.EventType == "issues" && len(payload.Issue.PullRequest) != 0 {
 			return nil
 		}
+		// General PR comments also use GitHub's issue object. Keep one reference
+		// available for both comment targets so a shared prompt can handle either.
 		number, reference = payload.Issue.Number, "issue.number"
 	}
 	if number <= 0 {

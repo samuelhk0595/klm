@@ -113,7 +113,7 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, c
 
   function sessionRow(session: Session, archived = false, topicIsArchived = false) {
     const runtime = sessionRuntimeState(session);
-    return <div key={session.id} className={`session-row ${session.id === activeId ? 'is-active' : ''} ${sessionMenu === session.id ? 'has-open-menu' : ''} ${dragging?.kind === 'session' && dragging.id === session.id ? 'is-dragging' : ''}`} draggable={!archived && !busyAction}
+    return <div key={session.id} data-history-anchor={`session:${session.id}`} className={`session-row ${session.id === activeId ? 'is-active' : ''} ${sessionMenu === session.id ? 'has-open-menu' : ''} ${dragging?.kind === 'session' && dragging.id === session.id ? 'is-dragging' : ''}`} draggable={!archived && !busyAction}
       onDragStart={event => {
         if (event.target instanceof HTMLElement && event.target.closest('.menu-anchor')) { event.preventDefault(); return; }
         event.stopPropagation(); suppressClick.current = true; setSessionMenu(''); setTopicMenu(''); setDrop(null);
@@ -160,7 +160,7 @@ export function WorkspaceSidebar({ project, sessions, activeId, activeSection, c
         if (item.kind === 'session') { const session = sessions.find(session => session.id === item.id); if (session) void moveSession(session, target); }
         else { const topic = activeTopics.find(topic => topic.id === item.id); if (topic && topic.id !== target.id) reorderTopic(topic, after ? activeTopics[index + 1]?.id ?? '' : target.id); }
       }}>
-      <div className={`workspace-folder-row topic-heading ${group.topic && !archived && topicMenu === group.id ? 'has-open-menu' : ''}`}>
+      <div data-history-anchor={`topic:${collapseKey}`} className={`workspace-folder-row topic-heading ${group.topic && !archived && topicMenu === group.id ? 'has-open-menu' : ''}`}>
         <button className="workspace-folder" title={group.name} aria-expanded={expanded} draggable={!!group.topic && !archived && !busyAction && search === null}
           onDragStart={event => { event.stopPropagation(); suppressClick.current = true; setSessionMenu(''); setTopicMenu(''); setDragging({ kind: 'topic', id: group.id }); setDrop(null); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('application/x-klm-topic', group.id); }} onDragEnd={endDrag}
           onClick={() => { if (search === null && !suppressClick.current) onCollapsedChange(current => ({ ...current, [collapseKey]: current[collapseKey] === false })); }}>{expanded ? <ChevronDown /> : <ChevronRight />}<span>{group.name}</span></button>

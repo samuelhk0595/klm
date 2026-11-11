@@ -4,10 +4,12 @@ Release Linux amd64 supports the existing `klm start`, `stop`, `pair`, and
 `revoke-clients` commands. The daemon and restart helper detach from the terminal;
 control uses a same-UID Unix socket, not HTTP or a PID file. Other non-Windows
 platforms remain unsupported. This is engine/API delivery only: **no frontend
-server, harness installation, provider login, Linux graph containment or ai-jail**.
-Ordinary managed chats now have a nonroot subreaper/pidfd lifetime implementation;
-its focused native/runtime and real messaging acceptance remains pending. Graph
-execution and protected MCP secret storage remain unavailable on Linux. This adds
+server, Linux desktop/installer, automatic provider login or ai-jail**.
+Managed chats and graphs now share the nonroot subreaper/pidfd lifetime mechanism.
+Graph admission probes the supervisor; each node/Terminal/Git command has an owned
+domain and confirmed termination remains required. Protected MCP secret storage
+uses an engine-specific AES-256-GCM key. Focused native/runtime and real messaging
+acceptance remains pending in `../../V0_6_2_IMPLEMENTATION_PROGRESS.md`. This adds
 no cgroup delegation, syscall filter, namespace or host privilege. See
 `../../LINUX_ORDINARY_TURN_SUPPORT_HANDOFF.md` before publishing the candidate.
 
@@ -129,3 +131,50 @@ Rollback only this hostname's route/configuration and this unit. Stop the engine
 retain protected user data and do not remove the runtime home or other sites.
 Build evidence and outstanding acceptance are in
 `LINUX_VPS_IMPLEMENTATION_PROGRESS.md`. No deployment is implied by these files.
+
+## 0.6.2 runtime configuration and recovery
+
+- Supported target remains **Linux amd64 glibc**. No ARM64 or Alpine/musl install
+  support, Linux Activity Board credential backend or engine-hosted frontend.
+- Graphs require kernel/user-policy support for subreaper, pidfd_open and
+  pidfd_send_signal. A failed helper handshake reports unavailable capability;
+  do not bypass the preflight. Fork/Join and worktrees retain existing policies.
+  Pi, OpenCode and Codex still require separate real-model lifecycle validation.
+- Terminal YAML uses `shell: powershell`, `bash` or `sh`. Older missing fields
+  remain PowerShell; select sh/Bash explicitly before using Linux shell syntax.
+  Payload data is available at `$KLM_GRAPH_PAYLOAD_FILE`; no jq/Python is required
+  for commands that do not parse JSON. There is no executable fallback.
+- Install/login to `gh` as the engine user only when requested. Harnesses resolve
+  absolute GH_CONFIG_DIR from the engine's original environment: explicit
+  GH_CONFIG_DIR, then XDG_CONFIG_HOME/gh, then ~/.config/gh. Tokens and GH_HOST keep
+  gh's native precedence. Do not copy credentials to temporary OpenCode profiles.
+- OpenCode inspection reports module/open/schema/query/timeout categories and a
+  diagnostic ID with the effective Node path/version. Sanitized engine logs record
+  duration/category/exit and stderr length, not native stderr, auth data or rows.
+- Native Pi delegation still needs compatible pi-subagents 0.70.0. Foreground SDK
+  children and local background runners stay descendants of the parent's supervisor;
+  the parent waits for native settlement and closes the domain at the boundary.
+  This does not enable both native and engine-owned delegation paths together.
+- Native picking is optional: a graphical host environment and Zenity or KDialog
+  must already exist. It opens on the engine host, never a remote browser. No
+  display/backend on a VPS means use the normal remote directory browser.
+
+### MCP key and backups
+
+MCP manual secrets, stdio secret environment and OAuth tokens/refresh share an
+authenticated AES-256-GCM envelope. The random 32-byte key is stored separately at
+`<engine-data-dir>/mcp-secrets/credentials.key`. The key directory must be owned by
+the engine user with mode 0700; the regular, single-link key must be mode 0600.
+Creation is exclusive/atomic, and existing links, unsafe ownership/modes and invalid
+key length are refused rather than repaired or overwritten. Dev/release directories
+have independent keys. No graphical keyring/D-Bus session is required.
+
+Back up the consistent SQLite database **and this matching key** using equivalent
+private access controls, then restore them together. Ordinary configuration exports
+and run snapshots contain only credential IDs, not the key/plaintext. A missing key
+with dependent credentials is never regenerated. Missing/incorrect key, unsupported
+envelope and integrity failures leave ciphertext intact; restore the matching key
+or explicitly disconnect/re-authenticate as appropriate. DPAPI blobs from Windows
+are not portable and need new authentication on Linux. Do not include the key in
+logs, harness environments or release artifacts. This protects storage at rest;
+it does not isolate secrets from a process already running as the engine user.

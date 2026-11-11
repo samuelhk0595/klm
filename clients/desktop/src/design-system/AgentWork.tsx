@@ -33,6 +33,8 @@ export type AgentWorkProps = Omit<ComponentPropsWithoutRef<'section'>, 'children
   thoughts?: readonly AgentWorkThought[];
   activities?: readonly AgentWorkActivity[];
   streamedResponse?: string;
+  itemsBefore?: ReactNode;
+  itemsAfter?: ReactNode;
 };
 
 function MatrixLoader() {
@@ -73,10 +75,11 @@ function ActivityRow({ activity }: { activity: AgentWorkActivity }) {
   ) : <li className="agent-work__activity" data-work-id={activity.id}>{row}</li>;
 }
 
-export function AgentWork({ status, durationLabel, label, thoughts = [], activities = [], streamedResponse, className, ...props }: AgentWorkProps) {
+export function AgentWork({ status, durationLabel, label, thoughts = [], activities = [], streamedResponse, itemsBefore, itemsAfter, className, ...props }: AgentWorkProps) {
   const [expanded, setExpanded] = useState(status === 'running');
   const detailsId = useId();
   const itemsRef = useRef<HTMLDivElement>(null);
+  const followingItems = useRef(true);
   const hasDetails = thoughts.length > 0 || activities.length > 0;
   const itemCount = thoughts.length + activities.length;
   const response = streamedResponse?.trim() ? streamedResponse : undefined;
@@ -86,7 +89,7 @@ export function AgentWork({ status, durationLabel, label, thoughts = [], activit
   }, [status]);
 
   useEffect(() => {
-    if (status !== 'running' || !expanded || itemCount <= 5) return;
+    if (status !== 'running' || !expanded || itemCount <= 5 || !followingItems.current) return;
     const frame = window.requestAnimationFrame(() => {
       const items = itemsRef.current;
       if (items) items.scrollTop = items.scrollHeight;
@@ -114,7 +117,8 @@ export function AgentWork({ status, durationLabel, label, thoughts = [], activit
       </button>
       {hasDetails && expanded ? (
         <div className="agent-work__details" id={detailsId}>
-          <div className={`agent-work__items${itemCount > 5 ? ' agent-work__items--scrollable' : ''}`} ref={itemsRef}>
+          <div className={`agent-work__items${itemCount > 5 ? ' agent-work__items--scrollable' : ''}`} ref={itemsRef} tabIndex={itemCount > 5 ? 0 : undefined} onScroll={event => { const element = event.currentTarget; followingItems.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24; }}>
+            {itemsBefore}
             {thoughts.map(thought => (
               <div className="agent-work__thought" key={thought.id} data-work-id={thought.id}>
                 {thought.details ? <LazyDisclosure className="agent-work__thought-disclosure" details={thought.details}>
@@ -123,6 +127,7 @@ export function AgentWork({ status, durationLabel, label, thoughts = [], activit
               </div>
             ))}
             {activities.length > 0 ? <ul className="agent-work__activities" role="list">{activities.map(activity => <ActivityRow activity={activity} key={activity.id} />)}</ul> : null}
+            {itemsAfter}
           </div>
         </div>
       ) : null}

@@ -16,6 +16,9 @@ export const webhookTriggers: (AutomationWebhook & { label: string })[] = [
   { eventType: 'issues', action: 'edited', label: 'Issue edited' },
   { eventType: 'issues', action: 'assigned', label: 'Issue assigned' },
   { eventType: 'issues', action: 'milestoned', label: 'Issue added to milestone' },
+  { eventType: 'issue_comment', action: 'created', label: 'Issue or PR comment created' },
+  { eventType: 'issue_comment', action: 'edited', label: 'Issue or PR comment edited' },
+  { eventType: 'issue_comment', action: 'deleted', label: 'Issue or PR comment deleted' },
 ];
 export const webhookConfig = (automation: Automation): AutomationWebhook => automation.webhook ?? webhookTriggers[0];
 

@@ -49,15 +49,19 @@ engine/project scope before pagination. Background execution does not depend on
 open clients or subscriptions.
 
 Interactive histories and paged lists request up to 25 items per page and load
-additional pages near the relevant scroll edge, without ordinary pagination
+additional pages about 300 px before the relevant scroll edge, without ordinary pagination
 buttons. A history item is a persisted event, including reasoning and tools;
 rendered work groups need not occupy 25 rows. Chat history opens at the newest
-tail and pages in both directions, keeping its bounded 200-event window and
-preserving the reading anchor. Streaming follows only at the real tail. Session
+tail and pages in both directions, keeping a separate bounded 200-event window
+per mounted reader, including compact work groups' internal scroll regions.
+Each reader preserves its reading anchor and measured space for evicted rows;
+one reader's navigation does not move or block another. Streaming follows only
+at the real tail. Session
 and topic lists accumulate metadata instead of dropping earlier pages after four
 loads. Closed pickers and collapsed lists do not trigger automatic pagination;
-errors retain explicit Retry recovery. Large single-event content still uses
-its separate byte/chunk contract. Implementation and pending manual checks are
+errors retain explicit Retry recovery. Large single-event content opens explicitly
+and loads further chunks in its own scroll region, preserving UTF-8 boundaries
+and its separate byte/chunk contract. Implementation and pending manual checks are
 recorded in `AUTOMATIC_PAGINATION_FIX_PROGRESS.md`.
 
 On the first upgrade, exact existing `state.json`, `stream.sealed`, `stream.journal`,
@@ -100,8 +104,11 @@ selects that child, or the current directory when none is selected. Directory
 aliases retain their lexical paths;
 bounded or skipped listings are disclosed. Native picking is a secondary explicit
 action only when advertised by the engine, never inferred from client locality or
-OS. A directory's context menu (also available from Directory actions) offers
-New folder, requiring an explicit name and Create confirmation. It creates one
+OS. Linux advertises native picking only with a graphical host context and
+Zenity/KDialog; a headless engine retains the in-app browser. Native dialogs belong
+to the engine host. A directory's context menu (also available from Directory
+actions) offers New folder, requiring an explicit name and Create confirmation.
+It creates one
 child under the displayed directory with the engine user's permissions, without
 overwriting an existing entry or registering a project. The picker opens the new
 folder after confirmed creation; uncertain delivery requires explicit refresh,
@@ -318,7 +325,10 @@ classifications in the conversation do not classify the current run.
 
 Webhook automations select one GitHub event/action: `pull_request/opened`,
 `pull_request/ready_for_review`, or `issues` with `opened`, `closed`, `deleted`,
-`edited`, `assigned` or `milestoned`. Missing selection on existing automations
+`edited`, `assigned` or `milestoned`, or `issue_comment` with `created`, `edited`
+or `deleted` for general comments on both issues and pull requests. Comment triggers
+use `{{issue.number}}` for either target's number; inline review comments are a
+separate GitHub event and do not match. Missing selection on existing automations
 retains `pull_request/opened`. Triggers are scoped by the receiving project rather
 than repository. Changing activation or the selected event requires the accepted
 queue to drain first. Admission rejects prompt references absent from the accepted
@@ -344,14 +354,24 @@ cancels pending triggers and retains active runs and their normal sessions. Hist
 contains session-title links only, without run dates/status, and refresh retains
 the loaded page window.
 
-Active automation composers accept steering at model boundaries. Send now and
-configuration edits are blocked. Questions and permissions remain answerable.
-Confirmed Stop cancels the model, records interruption by the user after confirmed
-shutdown, and returns the session to normal chat. Two turn-bound main-agent tools
+Automation conversations use the ordinary composer, FIFO queue, Send now, settings
+and Stop controls. Steering keeps the current capture. Enqueueing alone does not
+interrupt a run; dispatch of a new conversation input transactionally releases its
+automation ownership as `interrupted_by_user`. Queued input precedes an unstarted
+classification reminder. Stop and Send now wait for confirmed owned shutdown and
+do not stop independent graphs. Completed outcomes remain unchanged. Library and
+model edits apply at normal turn boundaries; explicit live YOLO edits keep their
+normal policy, separately from the immutable admitted capture. Two turn-bound main-agent tools
 record satisfied/unsatisfied objectives; native completion alone is not success.
 One automatic classification reminder is allowed; a second unclassified completion
 becomes an execution failure. Tools are absent from children, side/general chats
-and completed runs. Graph allowlists do not replace existing authorization gates.
+and completed runs. Saving the automation's graph selection authorizes those graphs
+within its objective. Each newly admitted run captures project, automation/run ID,
+configuration revision/digest and selected graphs; activities retain that provenance
+after the automation ends. The owning turn may omit human-message references. Other
+turns still need real human-message authorization, and no graph grant authorizes
+sessions, Library edits, skill installation, tool permissions or question replies.
+Existing runs without a capture are not retroactively granted authorization.
 
 Startup preserves interrupted sessions, marks their runs as execution failures and
 records missed schedule intervals. KLM Agent receives a durable recovery request
@@ -750,8 +770,11 @@ This does not move frontend hosting into the engine: Windows Tauri retains its
 bundled UI and can target a remote engine. An initial Ubuntu deployment exercised
 start/stop, protected socket permissions, HTTPS and real browser pairing, then
 stopped at the first blocker: no harness executables installed. Native Tauri
-remote pairing, harness/provider execution, Linux graph containment and ai-jail
-remain unvalidated/unimplemented as applicable. Detailed evidence and operational
+remote pairing, harness/provider execution and ai-jail
+remain unvalidated/unimplemented as applicable. Linux graph supervision now reuses
+the subreaper/pidfd ownership domain, with an actual helper handshake before
+admission and confirmed domain drainage before Choice acceptance. This mechanism
+is implemented, not Linux runtime acceptance. Detailed evidence and operational
 limits are in `LINUX_VPS_IMPLEMENTATION_PROGRESS.md`.
 
 ### Global harness installation
@@ -772,8 +795,8 @@ replayed. Verified inventory changes refresh connected selectors without restart
 the engine. Global packages are shared by dev/release engines. Linux ordinary
 managed chats now have a nonroot subreaper/pidfd ownership path, with explicit
 failure when teardown cannot be confirmed. Version pins, exclusive profiles and
-role/Library controls remain mandatory; graph execution and protected MCP
-credential storage remain unsupported on Linux. Focused Linux runtime and real
+role/Library controls remain mandatory. Linux amd64 graph execution and protected
+MCP credential storage are implemented in 0.6.2, with focused Linux runtime and real
 messaging acceptance are still required; installation/discovery alone is not acceptance.
 Runtime/manual acceptance remains pending and the originating-assistant review/
 correction workflow is in progress; scope, limitations and checks are in
@@ -823,6 +846,14 @@ data and the real execution directory remain in place. Organization, well-known
 remote-config authentication and administrator-managed OpenCode config require a
 separate compatible path and are explicitly refused rather than silently imported.
 
+OpenCode inspection uses the harness-resolved Node and a read-only SQLite probe.
+Module availability, database opening, schema, organization query, timeout and
+caller cancellation have distinct outcomes; safe diagnostic IDs correlate errors
+with executable/version/duration logs without auth contents or native stderr.
+Pi, OpenCode and Codex pin `GH_CONFIG_DIR` from the original engine environment
+before isolated configuration projection, respecting explicit GH/XDG configuration
+and native token/host precedence. Credentials are not copied into harness profiles.
+
 Codex keeps its native home/auth/history and approval/sandbox flow, disables native
 model-side skill discovery plus plugin/app/hook/delegation sources, and supplies
 only selected captured skill metadata for on-demand file loading. Its app-server
@@ -842,7 +873,10 @@ only the managed harness/profile and gateways are retired. The session process
 container and its workloads (including browsers and development servers) survive
 ordinary turn boundaries. Stop during an active turn and the existing 40-minute
 timeout with no remaining workload retire the runtime. Graph nodes retain their
-immediate shutdown rules. Changing selection during execution still waits for the next
+immediate shutdown rules. Automation turns retire their owned runtime at settlement
+to establish drainage instead of confusing an idle OpenCode server with unfinished
+work. Native Pi delegation also retires its complete process domain when the parent
+settles. Changing selection during execution still waits for the next
 complete turn. Other versions/configuration variants fail preparation explicitly.
 The mandatory general-agent installation guidance remains independent of external
 selection and is delivered as engine-owned role context on all three harnesses.
@@ -878,14 +912,20 @@ Gateway workers participate in graph sealing/drainage. Lost transport remains
 uncertain and calls are not automatically repeated.
 
 OAuth supports discovery, public dynamic registration or a configured client ID,
-Authorization Code/PKCE, user-bound Windows credential protection, serialized
+Authorization Code/PKCE, Windows DPAPI or Linux headless AES-256-GCM credential protection, serialized
 refresh and local disconnect. Remote/mobile clients require a provider-accepted
 HTTPS redirect reaching the dedicated public API callback; browser localhost is
 not substituted for the engine. The mobile web flow uses explicit same-tab
 navigation and a return-to-Library link. Providers' embedded-WebView policies and
 real desktop/mobile login still require human validation. The public personal-use
 API requires paired-client access; the callback retains its independent OAuth
-state/transaction validation.
+state/transaction validation. Linux stores its random engine-specific key outside
+SQLite in `<data-dir>/mcp-secrets/credentials.key` (directory 0700, file 0600), with
+exclusive atomic creation, ownership/link checks and a versioned authenticated
+envelope. Restore database and key together with equivalent access protection;
+missing keys with dependent ciphertext are not regenerated. Ordinary exports do
+not include the key, and Windows DPAPI blobs require reauthentication on Linux.
+This is protection at rest, not isolation from processes running as the engine user.
 
 Missing/offline MCP connections warn the model and user while retaining selection.
 Invalid selected skills, corrupted snapshots and isolation failures stop preparation.
@@ -1412,7 +1452,9 @@ initial node ID, type and name, plus the associated agent's name and description
 when available. The orchestrator prepares the task for that entry role (for example,
 planning rather than implementation), while preserving the user's overall goal
 in the objective. This uses existing agent descriptions, not a new input schema
-or the full graph topology. Selection alone is not authorization. One run
+or the full graph topology. Normal chat selection alone is not authorization;
+the captured graph selection in an owning automation turn is its separate persisted
+configuration authorization. One run
 may be active per conversation, independently of the invoking chat turn. The
 orchestrator receives results and assesses whether the objective was satisfied
 before success-dependent activities proceed. Corrective attempts retain the approved
@@ -1426,7 +1468,10 @@ that directory; omission is not express consent. Explicit `original` and
 `workspace.authorizationEventId` is not mandatory. Activity `authorization`
 retains `{eventId,text}` references to existing `user` events in the invoking
 conversation, providing traceability rather than semantic proof or a permission
-grant. Tool schemas must describe the nested authorization/workspace contracts
+grant. Automation configuration authorization instead records source
+`automation_configuration` with the engine-captured project, automation, run,
+revision/digest and selected graphs; legacy message-only entries remain readable.
+Tool schemas must describe the nested authorization/workspace contracts
 completely. Orchestrator instructions apply defined defaults and ask only when
 missing information or ambiguity blocks execution. This supersedes the earlier
 mandatory workspace question, while retaining the user's fresh/reuse decision for
@@ -1442,8 +1487,13 @@ does not dispatch the destination. Invalid submissions and normal endings withou
 a Choice share a three-violation limit per activation. The engine's built-in blocked
 escape remains distinct from an author-defined Choice with the same name.
 
-Terminal executes one noninteractive PowerShell script in its inherited directory,
-with `$payload` supplied as data. Output mapping can use `command.result`; a nonzero
+Terminal persists an explicit PowerShell, Bash or sh shell and executes a private
+noninteractive script in its inherited directory. Legacy missing shell always means
+PowerShell, including on Linux. New nodes default to PowerShell on Windows and sh
+on Linux, based on the engine. Missing executables fail preflight without fallback.
+`KLM_GRAPH_PAYLOAD_FILE` is a private JSON data file; PowerShell also supplies
+`$payload`. Bash/sh startup hooks are neutralized, without adding `set -e` or a
+mandatory JSON parser. Output mapping can use `command.result`; a nonzero
 exit still follows that mapping, while infrastructure failure fails the run. Fork
 starts parallel branches with explicit payloads and either separate worktrees or
 the inherited workspace. Join waits for all incoming deliveries and delegates
@@ -1455,12 +1505,16 @@ route answers to the originating native session. Session grants remain local to
 that node session. Shutdown/restart records interrupted runs without automatic
 resumption, while retaining scheduled activities and pending result notifications.
 
-Windows mechanisms for Pi, OpenCode and Codex are implemented and admitted by the
+Windows and Linux amd64 mechanisms for Pi, OpenCode and Codex are implemented and admitted by the
 capability preflight, but `RuntimeValidated=false`: real model tasks and native
 session continuation still require human validation. OpenCode requires its owned
 plugin handshake and a healthy server, but graph execution is not blocked by the
 harness version. Protocol incompatibilities surface as runtime failures instead
-of requiring prior version approval. Unix graph execution is not enabled.
+of requiring prior version approval. Linux admission requires a working owned
+subreaper/pidfd supervisor. Agents, Terminal, Git/worktrees, Fork/Join and native
+continuation use owned process domains; loss or unconfirmed drainage fails finality.
+Linux model execution, continuation and Windows regressions remain human checks in
+`V0_6_2_IMPLEMENTATION_PROGRESS.md`.
 
 The managed Library adapter's positive allowlist supersedes native MCP inheritance
 only on its validated compatibility path, as described above. The following remains

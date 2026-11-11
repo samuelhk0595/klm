@@ -8,7 +8,7 @@ import (
 	"fmt"
 )
 
-func (s *sqliteStore) readTurnSession(ctx context.Context, id string) (Session, nativeSession, int, error) {
+func (s *sqliteStore) readTurnSession(ctx context.Context, id string, owningRun ...string) (Session, nativeSession, int, error) {
 	var session Session
 	var native nativeSession
 	var count int
@@ -31,9 +31,17 @@ func (s *sqliteStore) readTurnSession(ctx context.Context, id string) (Session, 
 		}
 		if run, err := st.activeAutomation(id); err != nil {
 			return err
-		} else if run != nil {
+		} else if run != nil && (len(owningRun) == 0 || owningRun[0] == run.ID) {
 			session.Harness, session.Model, session.Effort, session.YOLO = run.Snapshot.Harness, run.Snapshot.Model, run.Snapshot.Effort, run.Snapshot.YOLO
+			if run.LiveYOLO != nil {
+				session.YOLO = *run.LiveYOLO
+			}
 			session.Capabilities.Desired = copySelection(run.Snapshot.Selection)
+		} else if len(owningRun) > 0 {
+			if owningRun[0] != "" {
+				return errors.New("Automation ownership changed before turn preparation.")
+			}
+			session.Automation = nil // turn-local view; keep persisted attribution intact
 		}
 		return tx.QueryRowContext(ctx, `SELECT size FROM record_collections WHERE parent_table='sessions' AND parent_id=? AND field='events'`, id).Scan(&count)
 	})
@@ -168,7 +176,7 @@ func (p *adapter) selectSQLCapabilities(s Session) (*CapabilitySnapshot, error) 
 		}
 		return snapshot, nil
 	}
-	if s.Automation != nil && s.Automation.Status == "running" {
+	if p.automationRunID != "" {
 		return p.sqlAutomationSnapshot(s)
 	}
 	for attempt := 0; attempt < 2; attempt++ {

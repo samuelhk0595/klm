@@ -34,6 +34,9 @@ func (st *sqliteSessionTx) sessionYOLO(s Session) (bool, error) {
 		return false, err
 	}
 	if r != nil {
+		if r.LiveYOLO != nil {
+			return *r.LiveYOLO, nil
+		}
 		return r.Snapshot.YOLO, nil
 	}
 	return s.YOLO, nil

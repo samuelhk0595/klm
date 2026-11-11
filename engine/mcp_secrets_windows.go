@@ -8,7 +8,7 @@ import (
 	"unsafe"
 )
 
-func protectMCPCredential(data []byte) ([]byte, error) {
+func protectMCPCredential(data []byte, _ ...mcpCredentialStorage) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, errors.New("Empty credential.")
 	}
@@ -21,7 +21,7 @@ func protectMCPCredential(data []byte) ([]byte, error) {
 	return append([]byte{}, unsafe.Slice(out.Data, int(out.Size))...), nil
 }
 
-func unprotectMCPCredential(data []byte) ([]byte, error) {
+func unprotectMCPCredential(data []byte, _ ...mcpCredentialStorage) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, errors.New("Empty credential.")
 	}

@@ -5,32 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 )
 
 func (st *sqliteSessionTx) firstReadyGraph(owner string) (string, error) {
-	var allowed []string
-	limited := false
-	if run, err := st.activeAutomation(owner); err != nil {
-		return "", err
-	} else if run != nil {
-		limited = true
-		allowed = run.Snapshot.Graphs
-	}
 	query := `SELECT a.id FROM data_graph_activities a WHERE a.x_conversationId=? AND a.status IN ('ready','scheduled') AND NOT EXISTS(SELECT 1 FROM data_graph_dependencies d LEFT JOIN data_graph_activities p ON p.id=d.scalar_value WHERE d.owner_id=a.id AND (p.id IS NULL OR p.status<>'succeeded'))`
 	args := []any{owner}
-	if limited {
-		if len(allowed) == 0 {
-			return "", nil
-		}
-		marks := []string{}
-		for _, id := range allowed {
-			marks = append(marks, "?")
-			args = append(args, id)
-		}
-		query += ` AND a.x_graphId IN (` + strings.Join(marks, ",") + `)`
-	}
 	query += ` ORDER BY (a.x_correction<>'') DESC,CAST(a.x_priority AS INTEGER) DESC,length(a.x_order),a.x_order,a.position LIMIT 1`
 	var id string
 	err := st.tx.QueryRowContext(st.ctx, query, args...).Scan(&id)
@@ -52,7 +32,7 @@ func (st *sqliteSessionTx) graphStoredAuthorization(activity GraphActivity) erro
 		if err := decodeSQLiteRecord(st.ctx, st.tx, "graph_authorization", id, 256<<10, &auth); err != nil {
 			return err
 		}
-		return st.graphAuthorization(activity.ConversationID, []GraphAuthorization{auth})
+		return st.validateGraphActivityAuthorization(activity, auth)
 	})
 }
 func (a *app) scheduleSQLGraphActivitiesLocked() error {
@@ -139,9 +119,6 @@ func (a *app) startReservedSQLGraphActivity(ctx context.Context, owner, id strin
 		if err := st.graphStoredAuthorization(activity); err != nil {
 			return err
 		}
-		if err := st.graphAllowed(owner, activity.GraphID); err != nil {
-			return err
-		}
 		latest, err := st.latestGraphRun(id)
 		if err != nil {
 			return err
@@ -168,7 +145,7 @@ func (a *app) startReservedSQLGraphActivity(ctx context.Context, owner, id strin
 	}
 	for _, node := range compiled.Definition.Nodes {
 		if node.Type == "terminal" {
-			if _, err := powerShellExecutable(); err != nil {
+			if _, err := terminalShellExecutable(node); err != nil {
 				return fail(err)
 			}
 			if err := CheckGraphAdapter("pi"); err != nil {

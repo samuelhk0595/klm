@@ -158,7 +158,7 @@ func (a *app) startReservedGraphActivity(ctx context.Context, id string) error {
 	}
 	for _, node := range compiled.Definition.Nodes {
 		if node.Type == "terminal" {
-			if _, err = powerShellExecutable(); err != nil {
+			if _, err = terminalShellExecutable(node); err != nil {
 				return fail(err)
 			}
 			if err = CheckGraphAdapter("pi"); err != nil {

@@ -55,8 +55,20 @@ func lockDataDir(path string) (*os.File, error) {
 // commands use the dedicated subreaper below, never group ancestry as kill authority.
 func configureProcess(cmd *exec.Cmd) { cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} }
 func killTree(p *os.Process) error   { return syscall.Kill(-p.Pid, syscall.SIGKILL) }
-func pickerCommand(context.Context) (*exec.Cmd, error) {
-	return nil, errors.New("native directory picker is currently Windows-only")
+func pickerCommand(ctx context.Context) (*exec.Cmd, error) {
+	backend := linuxDirectoryPickerBackend()
+	if backend == "" {
+		return nil, errors.New("Native directory picker requires a graphical engine host and Zenity or KDialog. Use the directory browser.")
+	}
+	args := []string{"--file-selection", "--directory", "--title=Choose project directory"}
+	if backend == "kdialog" {
+		args = []string{"--getexistingdirectory", ".", "--title", "Choose project directory"}
+	}
+	cmd := exec.CommandContext(ctx, backend, args...)
+	configureProcess(cmd)
+	cmd.Cancel = func() error { return killTree(cmd.Process) }
+	cmd.WaitDelay = 2 * time.Second
+	return cmd, nil
 }
 
 const linuxSupervisorMode = "__klm_linux_supervisor"
@@ -104,9 +116,12 @@ type ownedProcess struct {
 func linuxSupervisionAvailable() error {
 	fd, err := unix.PidfdOpen(os.Getpid(), 0)
 	if err != nil {
-		return errors.New("Linux managed chats require pidfd support for the engine user.")
+		return errors.New("Linux managed execution requires pidfd_open support for the engine user.")
 	}
-	unix.Close(fd)
+	defer unix.Close(fd)
+	if err := unix.PidfdSendSignal(fd, 0, nil, 0); err != nil {
+		return errors.New("Linux managed execution requires pidfd_send_signal support for the engine user.")
+	}
 	return nil
 }
 func newRuntimeProcessGroup() (*runtimeProcessGroup, error) {

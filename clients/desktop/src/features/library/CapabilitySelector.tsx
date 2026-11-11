@@ -37,7 +37,7 @@ export function CapabilitySelector({ value, onChange, harness, general = false, 
       </div>)}
       {selection.skills.filter(id => !inventory.skills.some(s => s.id === id)).map(id => <div className="library-selection-row" key={id}><Toggle label={`${id} · ${inventory.search || inventory.skillsHasMore || inventory.skillsWindowStart ? 'Selected' : 'Missing'}`} checked disabled={disabled} onCheckedChange={() => onChange({ ...selection, skills: selection.skills.filter(s => s !== id) })} /></div>)}
       {!inventory.skills.length && <p className="muted">No user skills installed.</p>}
-      <LibrarySkillsPaging inventory={inventory} onPage={setInventory} />
+      <LibrarySkillsPaging inventory={inventory} query={remoteSearch} onPage={setInventory} />
       <h4>MCP connections</h4>
       {inventory.connections.map(connection => {
         const selected = selection.mcpConnections.find(c => c.connectionId === connection.id);
