@@ -64,7 +64,14 @@ function DelegationHistory({ childId, title, onClose }: { childId: string; title
     const controller = new AbortController(); let busy = false, again = false; let timer: ReturnType<typeof setTimeout> | undefined;
     async function refresh() {
       if (busy) { again = true; return; } if (document.hidden || controller.signal.aborted) return; busy = true;
-      try { const result = await readConversationWindow(childId, current.current, controller.signal); if (!controller.signal.aborted) { const next = mergeSessions(current.current ? [current.current] : [], [result], true)[0]; current.current = next; setSession(next); setError(''); } }
+      try {
+        const requested = current.current;
+        const result = await readConversationWindow(childId, requested, controller.signal);
+        if (!controller.signal.aborted) {
+          if (current.current?.history?.startIndex !== requested?.history?.startIndex || current.current?.events.length !== requested?.events.length) { again = true; return; }
+          const next = mergeSessions(current.current ? [current.current] : [], [result], true)[0]; current.current = next; setSession(next); setError('');
+        }
+      }
       catch (cause) { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not read child history.'); }
       finally { busy = false; if (again && !controller.signal.aborted) { again = false; timer = setTimeout(() => { timer = undefined; void refresh(); }, 150); } }
     }

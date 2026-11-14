@@ -12,7 +12,9 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -35,7 +37,27 @@ func decode(w http.ResponseWriter, r *http.Request, value any) bool {
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()
 	if err := d.Decode(value); err != nil {
-		fail(w, http.StatusBadRequest, "Invalid JSON request body or body too large.")
+		message := "Invalid JSON request body."
+		var tooLarge *http.MaxBytesError
+		var wrongType *json.UnmarshalTypeError
+		var syntax *json.SyntaxError
+		switch {
+		case errors.As(err, &tooLarge):
+			message = "JSON request body exceeds 512 KiB."
+		case errors.As(err, &wrongType):
+			message = "Invalid JSON type"
+			if wrongType.Field != "" {
+				message += " for " + wrongType.Field
+			}
+			message += ": expected " + wrongType.Type.String() + "."
+		case errors.As(err, &syntax):
+			message = "Invalid JSON request body near byte " + strconv.FormatInt(syntax.Offset, 10) + "."
+		case errors.Is(err, io.EOF):
+			message = "A JSON request body is required."
+		case strings.HasPrefix(err.Error(), "json: unknown field ") && len(err.Error()) <= 256:
+			message = "Unknown JSON request field " + strings.TrimPrefix(err.Error(), "json: unknown field ") + "."
+		}
+		fail(w, http.StatusBadRequest, message)
 		return false
 	}
 	if err := d.Decode(&struct{}{}); err != io.EOF {
@@ -1471,6 +1493,11 @@ func (a *app) directory(w http.ResponseWriter, r *http.Request) {
 	cmd.Stdout = &output
 	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
+		var exit *exec.ExitError
+		if runtime.GOOS == "linux" && ctx.Err() == nil && errors.As(err, &exit) && exit.ExitCode() == 1 {
+			respond(w, 200, map[string]any{"path": nil})
+			return
+		}
 		if ctx.Err() != nil {
 			fail(w, 408, "Directory picker timed out or was cancelled.")
 		} else {
@@ -1479,6 +1506,9 @@ func (a *app) directory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := strings.TrimPrefix(output.String(), "\ufeff")
+	if runtime.GOOS == "linux" {
+		path = strings.TrimSuffix(strings.TrimSuffix(path, "\n"), "\r")
+	}
 	if path == "" {
 		respond(w, 200, map[string]any{"path": nil})
 		return

@@ -14,6 +14,7 @@ import (
 )
 
 type turn struct {
+	automationRunID       string // explicit admitted owner; never inferred from session metadata
 	protocolScope         *protocolContentScope
 	graphDelegation       *graphDelegationBinding
 	delegation            *delegationExecution

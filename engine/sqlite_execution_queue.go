@@ -148,9 +148,8 @@ func (a *app) scheduleSQLMessagesLocked() {
 	}
 	ids, err := sqliteQueryIDs(a.ctx, a.store.readers, `SELECT s.id FROM data_sessions s LEFT JOIN data_projects p ON p.id=s.project_id LEFT JOIN data_sessions parent ON parent.id=s.parent_id
  LEFT JOIN data_topics topic ON topic.owner_id=s.project_id AND topic.record_id=CASE WHEN s.role='side_agent' THEN parent.x_topicId ELSE s.x_topicId END
- WHERE s.status<>'running' AND s.role IN ('','side_agent','general_agent') AND s.x_graphRunId='' AND s.x_archived<>'true' AND coalesce(topic.x_archived,'')<>'true'
+ WHERE s.role IN ('','side_agent','general_agent') AND s.x_graphRunId='' AND s.x_archived<>'true' AND coalesce(topic.x_archived,'')<>'true'
  AND (s.role='general_agent' OR p.x_removed<>'true') AND (s.role<>'side_agent' OR parent.x_archived<>'true')
- AND NOT EXISTS(SELECT 1 FROM data_automation_runs r WHERE r.session_id=s.id AND r.status='running')
  AND (EXISTS(SELECT 1 FROM data_queued_messages q WHERE q.owner_id=s.id AND q.status='steering') OR (SELECT q.status FROM data_queued_messages q WHERE q.owner_id=s.id ORDER BY q.position LIMIT 1)='queued')
  ORDER BY s.id LIMIT 100`)
 	if err != nil {
@@ -175,17 +174,19 @@ func (a *app) scheduleSQLMessagesLocked() {
 			if err != nil {
 				return err
 			}
-			if run, err := st.activeAutomation(id); err != nil {
-				return err
-			} else if run != nil {
-				return nil
-			}
 			archived, err := st.effectivelyArchived(meta)
 			if err != nil {
 				return err
 			}
 			if archived {
 				return nil
+			}
+			batch, err := st.activeDelegation(id)
+			if err != nil {
+				return err
+			}
+			if batch != nil {
+				return controlError(409, "Recover subagents in this conversation before continuing.")
 			}
 			queue, err := st.queue(id)
 			if err != nil {
@@ -253,7 +254,13 @@ func (a *app) scheduleSQLMessagesLocked() {
 			return
 		}
 		if bound {
-			if err := a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error { meta.Status = "running"; return st.putSessionMeta(meta) }); err != nil {
+			if err := a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
+				if err := st.releaseAutomationForInput(&meta); err != nil {
+					return err
+				}
+				meta.Status = "running"
+				return st.putSessionMeta(meta)
+			}); err != nil {
 				return
 			}
 			ctx, cancel := context.WithCancel(a.ctx)
@@ -267,6 +274,9 @@ func (a *app) scheduleSQLMessagesLocked() {
 			continue
 		}
 		if err := a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
+			if err := st.releaseAutomationForInput(&meta); err != nil {
+				return err
+			}
 			for _, q := range messages {
 				if err := st.appendQueuedUser(id, q); err != nil {
 					return err
@@ -424,11 +434,6 @@ func (a *app) changeSQLQueuedLocked(id, messageID string, remove, retry bool, or
 			return err
 		}
 		if !remove {
-			if run, err := st.activeAutomation(id); err != nil {
-				return err
-			} else if run != nil {
-				return controlError(409, "Only steering is available during an automation run.")
-			}
 			if archived, err := st.effectivelyArchived(s); err != nil {
 				return err
 			} else if archived {
@@ -691,11 +696,6 @@ func (a *app) admitSQLMessage(r *http.Request, id, identity, text, mode string, 
 			return err
 		} else if archived {
 			return controlError(409, "Restore the conversation and its topic before sending messages.")
-		}
-		if run, err := st.activeAutomation(id); err != nil {
-			return err
-		} else if run != nil && mode != "steer" {
-			return controlError(409, "Only steering is available during an automation run.")
 		}
 		queue, err := st.queue(id)
 		if err != nil {

@@ -59,7 +59,7 @@ func graphConversationFactory(a *app, t *turn, s Session) (*GraphAdapterHooks, e
 	}
 	if mutable {
 		tools = append(tools,
-			graphTool("graph_invoke", "Invoke or schedule an expressly authorized graph activity. Selection alone is not authorization. Omitted workspace uses the project folder (original) without confirmation.", map[string]any{"operationId": textField, "graphId": textField, "objective": textField, "task": textField, "authorization": graphAuthorizationSchema(), "workspace": graphWorkspaceSchema(), "dependencies": map[string]any{"type": "array", "items": textField}, "priority": integer}, "operationId", "graphId", "objective", "task", "authorization"),
+			graphTool("graph_invoke", "Invoke or schedule an authorized graph activity. In the owning automation turn, selected graphs are authorized by captured configuration: omit authorization. Otherwise supply real human-message references. Omitted workspace uses the project folder (original).", map[string]any{"operationId": textField, "graphId": textField, "objective": textField, "task": textField, "authorization": graphAuthorizationSchema(), "workspace": graphWorkspaceSchema(), "dependencies": map[string]any{"type": "array", "items": textField}, "priority": integer}, "operationId", "graphId", "objective", "task"),
 			graphTool("graph_assess", "Assess whether a completed run met its authorized objective; normal completion is not semantic success.", map[string]any{"activityId": textField, "runId": textField, "operationId": textField, "expectedVersion": integer, "satisfied": map[string]any{"type": "boolean"}, "reason": textField}, "activityId", "runId", "operationId", "expectedVersion", "satisfied", "reason"),
 			graphTool("graph_update_activity", "Versioned activity update. Retry retains the activity authorization and needs concrete correction, a self-contained task and an explicit fresh/reuse decision after a prior run.", map[string]any{"activityId": textField, "operationId": textField, "expectedVersion": integer, "action": map[string]any{"type": "string", "enum": []string{"retry", "await_user", "abandon", "reprioritize", "change_dependencies"}}, "task": textField, "correction": textField, "workspace": graphWorkspaceSchema(), "userEventId": map[string]any{"type": "string", "description": "Real user event required for abandon, reprioritize or change_dependencies; not a workspace default justification or replacement activity authorization."}, "priority": integer, "dependencies": map[string]any{"type": "array", "items": textField}}, "activityId", "operationId", "expectedVersion", "action"))
 	}
@@ -125,7 +125,7 @@ func graphConversationFactory(a *app, t *turn, s Session) (*GraphAdapterHooks, e
 	}
 	t.prompt = prompt + "\n" + t.prompt
 	hooks := &GraphAdapterHooks{Node: false, Tools: tools, Call: func(ctx context.Context, name string, raw json.RawMessage) (any, error) {
-		return a.graphConversationCall(ctx, owner, mutable, name, raw)
+		return a.graphConversationCall(context.WithValue(ctx, graphCallingTurnKey{}, t), owner, mutable, name, raw)
 	}}
 	if t.graphNotificationID != "" {
 		hooks.Finished = func(result GraphAdapterResult) { a.graphNotificationFinished(t.graphNotificationID, result) }

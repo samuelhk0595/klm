@@ -43,6 +43,7 @@ const (
 	DelegationDeliveryDelivered DelegationDelivery = "delivered"
 	DelegationDeliveryUncertain DelegationDelivery = "uncertain"
 	DelegationDeliveryCancelled DelegationDelivery = "cancelled"
+	DelegationDeliveryAbandoned DelegationDelivery = "abandoned"
 )
 
 // Graph scope belongs to an activation, not merely to a reusable native session.
@@ -66,28 +67,36 @@ type DelegationNativeCall struct {
 // Parent-scoped operation receipt. Growing membership/call aliases/results are
 // separate records; the root is not an ever-growing embedded history.
 type DelegationBatchRecord struct {
-	Version               int                    `json:"version"`
-	ID                    string                 `json:"id"`
-	ParentSessionID       string                 `json:"parentSessionId"`
-	OwnerConversationID   string                 `json:"ownerConversationId"`
-	ParentTurnID          string                 `json:"parentTurnId"`
-	OperationID           string                 `json:"operationId"`
-	RequestHash           string                 `json:"requestHash"`
-	Revision              string                 `json:"revision"`
-	NativeCall            DelegationNativeCall   `json:"nativeCall"`
-	Calls                 []DelegationNativeCall `json:"calls,omitempty"` // split child collection: retry aliases
-	Graph                 *DelegationGraphScope  `json:"graph,omitempty"`
-	State                 DelegationBatchState   `json:"state"`
-	Delivery              DelegationDelivery     `json:"delivery"`
-	DeliveryTurnID        string                 `json:"deliveryTurnId,omitempty"`
-	Outcome               DelegationOutcome      `json:"outcome,omitempty"`
-	ExpectedChildren      int                    `json:"expectedChildren"`
-	CancellationRequested bool                   `json:"cancellationRequested,omitempty"`
-	ResultDigest          string                 `json:"resultDigest,omitempty"`
-	Error                 string                 `json:"error,omitempty"`
-	CreatedAt             string                 `json:"createdAt"`
-	UpdatedAt             string                 `json:"updatedAt"`
-	EndedAt               string                 `json:"endedAt,omitempty"`
+	Version               int                         `json:"version"`
+	ID                    string                      `json:"id"`
+	ParentSessionID       string                      `json:"parentSessionId"`
+	OwnerConversationID   string                      `json:"ownerConversationId"`
+	ParentTurnID          string                      `json:"parentTurnId"`
+	OperationID           string                      `json:"operationId"`
+	RequestHash           string                      `json:"requestHash"`
+	Revision              string                      `json:"revision"`
+	NativeCall            DelegationNativeCall        `json:"nativeCall"`
+	Calls                 []DelegationNativeCall      `json:"calls,omitempty"` // split child collection: retry aliases
+	Graph                 *DelegationGraphScope       `json:"graph,omitempty"`
+	State                 DelegationBatchState        `json:"state"`
+	Delivery              DelegationDelivery          `json:"delivery"`
+	DeliveryTurnID        string                      `json:"deliveryTurnId,omitempty"`
+	Outcome               DelegationOutcome           `json:"outcome,omitempty"`
+	ExpectedChildren      int                         `json:"expectedChildren"`
+	CancellationRequested bool                        `json:"cancellationRequested,omitempty"`
+	ResultDigest          string                      `json:"resultDigest,omitempty"`
+	Error                 string                      `json:"error,omitempty"`
+	CreatedAt             string                      `json:"createdAt"`
+	UpdatedAt             string                      `json:"updatedAt"`
+	EndedAt               string                      `json:"endedAt,omitempty"`
+	Recovery              *DelegationRecoveryDecision `json:"recovery,omitempty"`
+}
+
+// A human decision ends the parent's wait, never rewrites execution evidence or
+// releases a quarantined child's lease. It is not a successful native delivery.
+type DelegationRecoveryDecision struct {
+	OperationID string `json:"operationId"`
+	ResolvedAt  string `json:"resolvedAt"`
 }
 
 type DelegationUncertainCall struct {
@@ -178,6 +187,9 @@ func (s *DelegationGraphScope) Validate() error {
 }
 
 func (r DelegationBatchRecord) Validate() error {
+	if r.Recovery != nil && (r.State != DelegationSettled || r.Graph != nil || r.Delivery != DelegationDeliveryAbandoned || !delegationText(r.Recovery.OperationID, 200) || r.Recovery.ResolvedAt == "") || r.Delivery == DelegationDeliveryAbandoned && r.Recovery == nil {
+		return errors.New("Invalid explicit delegation recovery decision.")
+	}
 	if r.Version != delegationRecordVersion || r.ID == "" || r.ParentSessionID == "" || r.OwnerConversationID == "" || r.ParentTurnID == "" || r.CreatedAt == "" || r.UpdatedAt == "" || !delegationRevision(r.Revision) {
 		return errors.New("Invalid delegation batch identity or version.")
 	}
@@ -194,7 +206,7 @@ func (r DelegationBatchRecord) Validate() error {
 			return errors.New("Settled delegation batch requires its immutable result digest.")
 		}
 		switch r.Delivery {
-		case DelegationDeliveryPending, DelegationDeliverySending, DelegationDeliveryDelivered, DelegationDeliveryUncertain, DelegationDeliveryCancelled:
+		case DelegationDeliveryPending, DelegationDeliverySending, DelegationDeliveryDelivered, DelegationDeliveryUncertain, DelegationDeliveryCancelled, DelegationDeliveryAbandoned:
 		default:
 			return errors.New("Invalid delegation result delivery state.")
 		}
@@ -335,6 +347,10 @@ func advanceDelegationDelivery(r DelegationBatchRecord, next DelegationDelivery)
 	}
 	allowed := r.Delivery == DelegationDeliveryPending && (next == DelegationDeliverySending || next == DelegationDeliveryCancelled) ||
 		r.Delivery == DelegationDeliverySending && (next == DelegationDeliveryDelivered || next == DelegationDeliveryUncertain || next == DelegationDeliveryCancelled)
+	if next == DelegationDeliveryAbandoned && r.Delivery != DelegationDeliveryAbandoned {
+		// The repository validates the explicit decision and drained membership.
+		allowed = r.Recovery != nil
+	}
 	if !allowed {
 		return r, errors.New("Invalid or repeated delegation delivery transition.")
 	}

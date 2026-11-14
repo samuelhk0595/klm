@@ -320,9 +320,18 @@ preview uses `POST /api/projects/{id}/automations/preview` with the schedule obj
 `GET/PATCH /api/settings/engine` exposes revisioned `timeZone` (IANA, initially America/Sao_Paulo).
 The same zone drives scheduling and Analytics; persisted instants remain UTC.
 
+Automation writes use decimal-string revisions and sequences, including a new
+configuration's `"revision":"0"` and `"afterSequence":"0"`. The editor explicitly
+serializes the save contract rather than returning arbitrary read metadata or UI
+labels. JSON rejection distinguishes an incorrect field type, an unknown field,
+invalid syntax and the 512 KiB request limit; diagnostics never echo field values.
+Pause/activate applies the returned configuration and revision before another edit.
+
 Each webhook automation selects `webhook: {eventType, action}`: `pull_request` with
 `opened` or `ready_for_review`, or `issues` with `opened`, `closed`, `deleted`,
-`edited`, `assigned` or `milestoned`. An omitted webhook retains `pull_request/opened`
+`edited`, `assigned` or `milestoned`, or `issue_comment` with `created`, `edited`
+or `deleted` for general issue and pull request comments. Inline review comments
+(`pull_request_review_comment`) do not match. An omitted webhook retains `pull_request/opened`
 for existing automations and snapshots. Only matching newly released project-local
 events received after creation, reactivation or a trigger change can enqueue it.
 Activation/event changes return 409 while accepted triggers remain queued, so old
@@ -330,17 +339,42 @@ events cannot execute against a different event's prompt. Admission leaves a tri
 blocked and unconsumed if its prompt references are absent from the event's variables;
 the queue reports the reason. An explicitly empty organization value is valid.
 References are `{{pr.number}}` for PRs or `{{issue.number}}` for issues, plus
-`{{organization.name}}` and `{{repository.name}}`; no repository
-binding or raw payload is supplied. A durable FIFO is independent of chat messages.
+`{{organization.name}}` and `{{repository.name}}`. For `issue_comment`, use
+`{{issue.number}}` for both issue and PR numbers (from the payload's `issue.number`);
+`{{pr.number}}` is unavailable. Comment bodies and raw payloads are not inserted.
+No repository binding or raw payload is supplied. A durable FIFO is independent of chat messages.
 Parallel runs are webhook-only; schedules always serialize. Pausing rejects new
 automatic triggers while accepted triggers proceed; deletion cancels pending
 triggers and preserves sessions and active snapshots.
 
-During a run, chat input is steering-only. Stop requires the exact `automationRunId`
-after the UI's confirmation. Outcome tools exist only for that run's main turn and
+For comment triggers, enable **Issue comments** in the GitHub webhook's event
+selection, then choose the corresponding **Issue or PR comment** action in the
+automation editor. Manual acceptance should cover creating, editing and deleting
+a general comment on both an issue and a PR, confirming the rendered number and
+one run per matching delivery. Inline review comments should not start these runs.
+
+During a run, chat uses the ordinary composer, queue, Send now, settings and Stop.
+Steering keeps its capture. Queue acceptance alone does not interrupt the current
+run; dispatch transactionally records `interrupted_by_user` before admitting the
+new turn. Queued input precedes unstarted reminders. Stop uses normal shutdown;
+optional `automationRunId` remains an expected-owner guard. Completed results are
+preserved, and independent graphs are not stopped. Outcome tools exist only for that run's main turn and
 are finalized after settlement. Normal completion without classification gets one
-reminder, then an execution failure. Questions, permissions, graph authorization
-and managed profile gates retain their existing contracts.
+reminder, then an execution failure. Successful automation turns retire the runtime
+and confirm owned-process drainage, including an idle OpenCode server. A failed
+shutdown never becomes invented drainage evidence.
+
+For new runs, the saved selected graphs authorize execution within the automation
+objective. `graphGrant` captures project/automation/run IDs, configuration revision
+and digest, and graphs. `graph_invoke` may omit `authorization` only from the exact
+owning automation turn; the engine supplies a persisted `automation_configuration`
+authorization entry. Tool input cannot supply that source or an arbitrary run ID.
+The scheduler and loader validate persisted provenance against its original run,
+even after chat ownership ends. Ordinary chats still need real `{eventId,text}`
+references. Existing message-only entries remain readable; old/incomplete runs are
+not backfilled with grants. Changes affect later admissions, not existing captures.
+Questions, permissions, independent-session creation, Library changes and retry
+fresh/reuse decisions keep their separate gates.
 
 Interrupted runs and missed downtime intervals generate durable KLM Agent recovery
 entries. The singleton consults the user when its harness is configured and it is
@@ -1807,7 +1841,13 @@ activations always resolve their own directories/worktrees.
 
 Streamable HTTP uses JSON/SSE protocol sessions, not legacy HTTP+SSE. Credentials
 are secret environment/header/bearer values or OAuth credentials protected with
-Windows per-user DPAPI in private engine state. APIs return presence only. Editing
+Windows per-user DPAPI or Linux AES-256-GCM in private engine state. Linux's
+engine-specific key lives outside SQLite at `mcp-secrets/credentials.key` with
+0700/0600 directory/file protection, exclusive atomic creation and owner/link checks.
+Missing dependent keys are not regenerated; invalid envelopes/integrity are explicit
+errors. Back up/restore database and matching key together. Ordinary exports exclude
+the key; Windows blobs need new Linux authentication. This is storage-at-rest
+protection, not same-user process isolation. APIs return presence only. Editing
 uses omitted secrets = keep, `secrets` = replace the set, `removeSecrets` = remove.
 Config changes invalidate the catalog and apply at the next complete turn; retained
 active snapshots keep their configuration and protected credential references.
@@ -1991,7 +2031,8 @@ selectors update without engine restart or page reload. Installation/selection
 does not imply provider authentication or runtime validation. Linux amd64 ordinary
 managed chats use the nonroot subreaper/pidfd supervisor; profile/version checks
 remain mandatory and failed/lost supervision cannot be reported as confirmed Stop.
-Graph execution and protected MCP credential storage remain unavailable on Linux.
+Linux graph execution and protected MCP credential storage are implemented in 0.6.2;
+graph admission requires a successful supervisor handshake and confirmed drainage.
 The integrated path awaits Linux native/runtime and real UI messaging acceptance;
 see `../LINUX_ORDINARY_TURN_SUPPORT_HANDOFF.md` for the exact candidate and checks.
 See `../HARNESS_INSTALLATION_IMPLEMENTATION_PROGRESS.md` for checks, unresolved
@@ -2314,12 +2355,18 @@ can still contain sensitive project information and is shown/stored as content;
 this is not a general-purpose content redaction system. Protect the data directory
 with user-only OS permissions. State is plaintext, not encrypted.
 
-The native directory picker is Windows-only. It runs a fixed PowerShell
+The Windows native directory picker runs a fixed PowerShell
 `-NoProfile -NonInteractive -STA` WinForms `FolderBrowserDialog` script with UTF-8
 stdout and no user interpolation. Dialogs are serialized, have a five-minute
 timeout including queue time, and return only an existing absolute path or null
 on dismissal. Request cancellation/shutdown kills the owned picker process tree.
-Other platforms return 501 for this endpoint; Unix support has not been validated.
+Linux advertises this secondary action only with DISPLAY/WAYLAND_DISPLAY and an
+installed Zenity or KDialog executable. It executes directory-only argument arrays,
+handles exit-1 dismissal as cancellation, validates the returned absolute directory
+and kills the picker process group on request timeout/cancellation. The dialog is
+on the engine host. A headless engine advertises no native picker; remote browsing
+remains available. Other platforms return 501. Linux graphical runtime acceptance
+is pending.
 
 ## Validation Scope
 
@@ -2342,12 +2389,14 @@ The main conversation's private harness bridge exposes `graph_catalog`,
 read-only tools. There is no public HTTP invocation or orchestrator Stop tool.
 Selecting a graph, selecting None and opening Graph never execute or cancel work.
 
-Invocation records an express user-message authorization reference, self-contained
+Normal chat invocation records an express user-message authorization reference, self-contained
 task, objective and resolved workspace decision. `authorization` is a list of
 `{eventId,text}` references grounding the activity. Each event must exist, have type
 `user`, and belong to the invoking conversation. The reference is traceability,
 not semantic proof of consent or a native permission grant. The orchestrator
-instructions enforce the distinction.
+instructions enforce the distinction. In an owning automation turn only, selected
+graphs instead use the admitted configuration grant described under Project
+automations; the engine supplies its persisted provenance, never synthetic messages.
 Activities use versions and operation IDs; duplicate operations do not dispatch
 another run. Ready correction takes priority, then explicit priority and request
 order. Dependencies wait for an explicit satisfied assessment of their objective;
@@ -2368,8 +2417,9 @@ invocation. Incomplete nested `graph_invoke` schemas had left the agent guessing
 - Explicit `workspace.mode: "original"` and `"new_worktree"` remain available.
   `original` uses the registered project directory and its actual file state,
   including when it is already a worktree. It does not take an arbitrary `path`.
-- `workspace.authorizationEventId` is not mandatory. Activity `authorization`
-  remains required with the `{eventId,text}` shape above; it is not replaced by
+- `workspace.authorizationEventId` is not mandatory. Outside an owning automation
+  configuration grant, activity `authorization` remains required with the
+  `{eventId,text}` shape above; it is not replaced by
   `scope` or by a required workspace-choice event.
 - Publish complete nested schemas through MCP and Pi, with field types,
   required/optional fields, mode/attempt enums, defaults, descriptions and reuse
@@ -2407,8 +2457,16 @@ per activation: two corrections, failure on the third. The core persists
 reservation/sealed/drained/accepted phases. No acceptance callback dispatches work;
 the supervisor continues only after the adapter's final `Finished` callback.
 
-Terminal runs one noninteractive PowerShell script in the inherited workspace.
-`$payload` is loaded from a private UTF-8 JSON file; values are never pasted into
+Terminal persists `shell: powershell|bash|sh` in YAML/JSON/canvas/run snapshots.
+Absent shell in older definitions/snapshots always means PowerShell, even on Linux.
+New nodes explicitly use the engine's default (Windows PowerShell, Linux sh); Bash
+is selectable. Older editor saves preserve an existing shell instead of dropping it.
+Preflight reports the node/shell and recovery when its executable is missing, with
+no fallback or PowerShell requirement for a Bash/sh-only graph. Scripts run from
+private files in the inherited workspace. PowerShell keeps its encoded constant
+launcher and `$payload`; Bash runs `--noprofile --norc`, and sh is noninteractive.
+`BASH_ENV`/`ENV` are removed. Neither `set -e` nor a JSON-parser dependency is added.
+`KLM_GRAPH_PAYLOAD_FILE` points to private JSON data; values are never pasted into
 the script. The output mapper supports local `payload.<field>`, `command.result`
 and `run.input.task` references. Stdout/stderr are combined in observed order and
 bounded to 64 KiB UTF-8 with explicit truncation metadata. A nonzero shell exit
@@ -2447,6 +2505,17 @@ Adapter preflight is authoritative per harness/platform. Implemented mechanisms
 are exposed by `GraphAdapterCapabilities`; they are not a claim of native runtime
 validation. Unconfirmed node/tool-call completion keeps a run in `ending` with a
 concrete diagnostic instead of releasing its slot as if termination were confirmed.
+
+Linux amd64 admission exercises a trusted supervisor handshake (subreaper,
+pidfd_open and pidfd_send_signal); every activation/Terminal/Git command has its own
+owned domain. Existing Fork/Join, worktree and native-continuation executors use
+these same boundaries. Codex seals through confirmed domain termination, while
+Pi/OpenCode also retain their pre-tool gates. Supervisor loss/timeout or uncertain
+MCP finality does not release success dependencies. This is process ownership,
+not an OS sandbox or proof of remote-task completion. `runtimeValidated` remains
+false. Native Pi foreground/background delegation uses the parent's supervised
+domain and retires it at parent settlement; missing pi-subagents remains optional.
+The native path is independent of the engine's `subagent_run` path.
 
 ### External MCP lifecycle boundary — approved 2026-09-13
 

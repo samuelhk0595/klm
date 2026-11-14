@@ -35,7 +35,7 @@ var openCodeGraphPlugin string
 //go:embed opencode-permissions-plugin.mjs
 var openCodePermissionsPlugin string
 
-func (p *adapter) openCodeGraphConfig() (string, func(), error) {
+func (p *adapter) openCodeGraphConfig(node ...string) (string, func(), error) {
 	config := map[string]any{}
 	if existing := os.Getenv("OPENCODE_CONFIG_CONTENT"); strings.TrimSpace(existing) != "" && !(p.capabilities != nil && p.harness == "opencode") {
 		if json.Unmarshal([]byte(existing), &config) != nil || config == nil {
@@ -48,7 +48,7 @@ func (p *adapter) openCodeGraphConfig() (string, func(), error) {
 	}
 	cleanup := func() { _ = os.RemoveAll(dir) }
 	if p.capabilities != nil && p.harness == "opencode" {
-		p.openCodeLibraryEnv, err = p.configureOpenCodeLibrary(config, dir)
+		p.openCodeLibraryEnv, err = p.configureOpenCodeLibrary(config, dir, node...)
 		if err != nil {
 			cleanup()
 			return "", nil, err
@@ -454,7 +454,7 @@ func (p *adapter) startOpenCodeServer(b binary, cwd string, ctx context.Context)
 		return errors.New("OpenCode server redirects are not allowed.")
 	}}
 	cleanup := func() {}
-	graphConfig, cleanup, err := p.openCodeGraphConfig()
+	graphConfig, cleanup, err := p.openCodeGraphConfig(b.node)
 	if err != nil {
 		transport.CloseIdleConnections()
 		return nil, err
@@ -631,7 +631,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 	var native nativeSession
 	if p.app.store != nil {
 		var readErr error
-		s, native, _, readErr = p.app.store.readTurnSession(p.turn.ctx, p.id)
+		s, native, _, readErr = p.app.store.readTurnSession(p.turn.ctx, p.id, p.automationRunID)
 		if readErr != nil {
 			p.app.mu.Unlock()
 			return readErr
@@ -685,7 +685,7 @@ func (p *adapter) runOpenCode(b binary, cwd string, payload submission) (err err
 			// A successful ordinary turn keeps its real idle runtime visible.
 			// beginSessionRuntime retires this managed profile before the next turn;
 			// Stop during execution and the normal idle timeout still dispose it.
-			if err != nil || p.failed || !p.completed || t.ctx.Err() != nil || !server.Alive() {
+			if p.automationRunID != "" || err != nil || p.failed || !p.completed || t.ctx.Err() != nil || !server.Alive() {
 				shutdownErr := p.runtime.shutdown()
 				p.processesDrained = shutdownErr == nil
 				err = errors.Join(err, shutdownErr)

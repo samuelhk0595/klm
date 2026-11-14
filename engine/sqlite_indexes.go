@@ -99,7 +99,7 @@ func sqliteEligibilitySchema(table string) string {
 	case "delegation_batches":
 		ddl.WriteString(`CREATE UNIQUE INDEX data_delegation_batches_record_unique ON data_delegation_batches(record_id);
 CREATE UNIQUE INDEX data_delegation_batches_operation ON data_delegation_batches(x_parentSessionId,x_operationId);
-CREATE UNIQUE INDEX data_delegation_batches_active_parent ON data_delegation_batches(x_parentSessionId) WHERE x_state<>'settled' OR x_delivery IN ('pending','sending','uncertain') OR x_outcome='finality_unconfirmed';
+CREATE UNIQUE INDEX data_delegation_batches_active_parent ON data_delegation_batches(x_parentSessionId) WHERE x_delivery<>'abandoned' AND (x_state<>'settled' OR x_delivery IN ('pending','sending','uncertain') OR x_outcome='finality_unconfirmed');
 CREATE INDEX data_delegation_batches_owner_page ON data_delegation_batches(x_ownerConversationId,created_at DESC,id);
 CREATE INDEX data_delegation_batches_graph_epoch ON data_delegation_batches(x_graph_runId,x_graph_activationId,x_graph_turnId,x_state,id);
 CREATE INDEX data_delegation_batches_recovery ON data_delegation_batches(x_state,x_delivery,id);`)

@@ -153,7 +153,7 @@ func (a *app) globalAgentModels(w http.ResponseWriter, r *http.Request) {
 	}
 	catalog, err := a.agentAuthoringModels(r.Context(), "", r.PathValue("harness"), cwd, r.URL.Query().Get("refresh") == "true")
 	if err != nil {
-		agentHTTPError(w, agentProblem(502, "catalog_unavailable", "model", modelCatalogLoadError))
+		agentHTTPError(w, agentProblem(502, "catalog_unavailable", "model", catalogFailureMessage(err)))
 		return
 	}
 	respond(w, 200, catalog)
@@ -198,7 +198,7 @@ func (a *app) saveCatalogAgent(w http.ResponseWriter, r *http.Request) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(55 * time.Second))
 	catalog, err := a.agentAuthoringModels(r.Context(), projectID, body.Agent.DefaultHarness, cwd, false)
 	if err != nil {
-		agentHTTPError(w, agentProblem(502, "catalog_unavailable", "model", modelCatalogLoadError))
+		agentHTTPError(w, agentProblem(502, "catalog_unavailable", "model", catalogFailureMessage(err)))
 		return
 	}
 	option := catalog.find(body.Agent.Model)

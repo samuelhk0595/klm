@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
 import { Input } from '../../design-system/Input';
 import { Textarea } from '../../design-system/Textarea';
+import { Select } from '../../design-system/Select';
 import type { TerminalDefinition } from './terminal';
 import { ChoiceOutputEditor } from './ChoiceOutputEditor';
 import { ChoiceOutputPreview } from './ChoiceOutputPreview';
@@ -27,9 +28,10 @@ export function TerminalNodePanel({ terminal, payloadFields = [], onSave, onClos
   }}>
     <form className="graph-choice-form" onSubmit={event => {
       event.preventDefault();
-      if (valid) { onSave({ name: draft.name.trim(), command: draft.command, outputFields: draft.outputFields.map(field => ({ ...field, name: normalizeChoiceName(field.name, true) })) }); clearDraft(draft); }
+      if (valid) { onSave({ name: draft.name.trim(), command: draft.command, shell: draft.shell ?? 'powershell', outputFields: draft.outputFields.map(field => ({ ...field, name: normalizeChoiceName(field.name, true) })) }); clearDraft(draft); }
     }}>
       <div className="graph-agent-panel-header"><h2 id={`${id}-title`}>Terminal command</h2><IconButton label="Close terminal settings" onClick={onClose}><X /></IconButton></div>
+      <div className="graph-agent-panel-field"><label>Shell</label><Select label="Shell" variant="field" value={draft.shell ?? 'powershell'} onChange={event => setDraft(current => ({ ...current, shell: event.target.value as TerminalDefinition['shell'] }))}><option value="powershell">PowerShell</option><option value="bash">Bash</option><option value="sh">sh</option></Select></div>
       <div className="graph-agent-panel-field"><label htmlFor={`${id}-name`}>Name</label><Input id={`${id}-name`} autoFocus required maxLength={80} placeholder="Update repository" value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} /></div>
       <div className="graph-agent-panel-field"><label htmlFor={`${id}-command`}>Command</label><Textarea id={`${id}-command`} className="graph-terminal-command-input" required rows={7} placeholder="git pull" spellCheck={false} autoCapitalize="none" autoCorrect="off" value={draft.command} onChange={event => setDraft(current => ({ ...current, command: event.target.value }))} /></div>
       <ChoiceOutputEditor fields={draft.outputFields} variables={outputVariables('terminal', payloadFields)} payloadContext onChange={outputFields => setDraft(current => ({ ...current, outputFields }))} />

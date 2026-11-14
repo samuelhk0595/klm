@@ -28,6 +28,7 @@ func (a *app) scheduleSQLGraphNotificationsLocked() error {
 			var native nativeSession
 			folder := ""
 			ready := false
+			automationRunID := ""
 			data := map[string]any{}
 			err := a.store.readSnapshot(a.ctx, func(tx *sql.Tx) error {
 				st := &sqliteSessionTx{ctx: a.ctx, tx: tx}
@@ -38,7 +39,14 @@ func (a *app) scheduleSQLGraphNotificationsLocked() error {
 					return nil
 				}
 				var err error
-				session, err = st.spawnSource(notice.ConversationID)
+				var input bool
+				if err := tx.QueryRowContext(a.ctx, `SELECT EXISTS(SELECT 1 FROM data_queued_messages WHERE owner_id=? AND status IN ('queued','steering','interrupting'))`, notice.ConversationID).Scan(&input); err != nil {
+					return err
+				}
+				if input {
+					return nil
+				}
+				session, err = st.sessionMeta(notice.ConversationID)
 				if err != nil {
 					return err
 				}
@@ -71,6 +79,15 @@ func (a *app) scheduleSQLGraphNotificationsLocked() error {
 					data["activity"], err = sqlGraphWire(activity)
 					if err != nil {
 						return err
+					}
+					if activity.AutomationRunID != "" {
+						original, err := st.activeAutomation(session.ID)
+						if err != nil {
+							return err
+						}
+						if original != nil && original.ID == activity.AutomationRunID {
+							automationRunID = original.ID
+						}
 					}
 				}
 				if notice.RunID != "" {
@@ -137,7 +154,7 @@ func (a *app) scheduleSQLGraphNotificationsLocked() error {
 				return err
 			}
 			ctx, cancel := context.WithCancel(a.ctx)
-			t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{}), graphNotificationID: id}
+			t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{}), graphNotificationID: id, automationRunID: automationRunID}
 			a.runs[session.ID] = t
 			a.wg.Add(1)
 			go a.execute(t, session, native, b, cwd, submission{Text: prompt})

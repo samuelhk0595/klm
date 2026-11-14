@@ -17,7 +17,7 @@ import (
 
 const (
 	sqliteApplicationID = 0x4b4c4d31 // KLM1; independent of product version.
-	sqliteSchemaVersion = 4          // Content v2, catalog v3, owned delegation v4.
+	sqliteSchemaVersion = 5          // Content v2, catalog v3, delegation v4, explicit recovery v5.
 	sqliteReaderLimit   = 4
 )
 
@@ -158,6 +158,9 @@ func (s *sqliteStore) enableRuntime(ctx context.Context) error {
 		return err
 	}
 	if err := s.upgradeDelegationSchema(ctx); err != nil {
+		return err
+	}
+	if err := s.upgradeDelegationRecoverySchema(ctx); err != nil {
 		return err
 	}
 	if err := s.upgradeAgentReferenceIndexes(ctx); err != nil {

@@ -183,6 +183,12 @@ export function GraphCanvas({ agents, graph, graphs, projectId, onSaved, onClose
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [saveError, setSaveError] = useState('');
+  const [terminalShell, setTerminalShell] = useState<TerminalDefinition['shell']>();
+  useEffect(() => {
+    let active = true;
+    request<{ defaultTerminalShell: TerminalDefinition['shell'] }>('/api/filesystem/roots').then(result => { if (active) setTerminalShell(result.defaultTerminalShell); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
   const [layoutError, setLayoutError] = useEngineDraft(`${key}.layoutError`, '');
   const [saved, setSaved] = useState('');
   const layoutQueue = useRef<Promise<unknown>>(Promise.resolve());
@@ -274,11 +280,12 @@ export function GraphCanvas({ agents, graph, graphs, projectId, onSaved, onClose
   }
 
   function addTerminal(position?: XYPosition) {
+    if (!terminalShell) { setSaveError('Engine shell settings are unavailable. Reload the graph before adding a Terminal node.'); return; }
     const placeholder = nodes.find(node => node.type === 'initialPlaceholder');
     if (!position && !placeholder) return;
     const node: CanvasNode = {
       id: crypto.randomUUID(), type: 'terminal', position: position ?? placeholder!.position,
-      data: { initial: !position, terminal: { name: '', command: '' } },
+      data: { initial: !position, terminal: { name: '', command: '', shell: terminalShell } },
       draggable: true, selectable: false, connectable: true, deletable: false,
     };
     setNodes(current => position ? [...current, node] : current.map(item => item.type === 'initialPlaceholder' ? node : item));

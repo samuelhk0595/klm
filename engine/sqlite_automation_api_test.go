@@ -67,7 +67,18 @@ func TestSQLiteAutomationManagementHTTP(t *testing.T) {
 	if len(listed["items"].([]any)) != 1 {
 		t.Fatal("list omitted automation")
 	}
-	call("GET", path+"/"+id, nil, 200)
+	edited := call("GET", path+"/"+id, nil, 200)
+	edited["name"], edited["mode"] = "Edited fixture", "webhook"
+	edited["webhook"] = map[string]string{"eventType": "issue_comment", "action": "created"}
+	edited = call("PATCH", path+"/"+id, map[string]any{"automation": edited}, 200)
+	edited["webhook"] = map[string]string{"eventType": "issue_comment", "action": "edited"}
+	edited = call("PATCH", path+"/"+id, map[string]any{"automation": edited}, 200)
+	if edited["name"] != "Edited fixture" || edited["webhook"].(map[string]any)["action"] != "edited" {
+		t.Fatal("full configuration edit was not saved", edited)
+	}
+	edited["mode"] = "schedule"
+	edited = call("PATCH", path+"/"+id, map[string]any{"automation": edited}, 200)
+	rev = edited["revision"].(string)
 	manual := call("POST", path+"/"+id+"/run-now", map[string]string{"operationId": "manual-once", "revision": rev}, 202)
 	manualRetry := call("POST", path+"/"+id+"/run-now", map[string]string{"operationId": "manual-once", "revision": "0"}, 202)
 	if manualRetry["triggerId"] != manual["triggerId"] {

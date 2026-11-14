@@ -6,7 +6,7 @@ import { Input } from '../../design-system/Input';
 import { Select } from '../../design-system/Select';
 import { EngineRequestError, request, type Project, type Session } from '../../engine';
 import { AutomationEditor } from './AutomationEditor';
-import { automationPath, relativeNextRun, type Automation, type AutomationList, type AutomationRunLink } from './api';
+import { automationPath, relativeNextRun, saveAutomation, type Automation, type AutomationList, type AutomationRunLink } from './api';
 import { scheduledDate, sessionSummary, triggerSummary } from './presentation';
 import './automations.css';
 import { bindDraftDiscard, flushDrafts, useEngineDraft } from '../drafts/draftStore';
@@ -15,7 +15,7 @@ import { releaseRunNowAttempt } from './runNowAttempt';
 import { beginLocalActivity } from '../engines/localActivities';
 
 const failure = (error: unknown) => error instanceof Error ? error.message : 'Could not update automations.';
-const empty = (projectId: string): Automation => ({ id: '', projectId, revision: 0, operationId: crypto.randomUUID(), name: '', prompt: '', mode: 'schedule', enabled: true, parallel: false, harness: 'opencode', model: '', effort: '', yolo: false, graphs: [], selection: { skills: [], mcpConnections: [] }, topicId: '', schedule: { time: '09:00', recurrence: 'daily', everyDays: 2, weekdays: [1], monthDay: 1 }, afterSequence: 0 });
+const empty = (projectId: string): Automation => ({ id: '', projectId, revision: '0', operationId: crypto.randomUUID(), name: '', prompt: '', mode: 'schedule', enabled: true, parallel: false, harness: 'opencode', model: '', effort: '', yolo: false, graphs: [], selection: { skills: [], mcpConnections: [] }, topicId: '', schedule: { time: '09:00', recurrence: 'daily', everyDays: 2, weekdays: [1], monthDay: 1 }, afterSequence: '0' });
 
 export function AutomationsSettings({ project, sessions, onOpenSession, onBusyChange }: { project: Project; sessions: Session[]; onOpenSession: (id: string) => void; onBusyChange: (busy: boolean) => void }) {
   const forgetDrafts = bindDraftDiscard();
@@ -39,7 +39,11 @@ export function AutomationsSettings({ project, sessions, onOpenSession, onBusyCh
   const listing = useRef(false);
   const listDirty = useRef(false);
   const reloadList = useRef<() => void>(() => {});
-  async function load() {
+  const listFailed = useRef(false);
+  useEffect(() => { listFailed.current = false; setListOffset(0); setLoadError(''); }, [project.id]);
+  async function load(retry = false) {
+    if (retry) listFailed.current = false;
+    if (listFailed.current) return;
     if (listing.current) { listDirty.current = true; return; }
     listing.current = true;
     const sequence = ++requestSequence.current;
@@ -56,8 +60,8 @@ export function AutomationsSettings({ project, sessions, onOpenSession, onBusyCh
       const topics = await request<{ items: import('../../engine').Topic[] }>(`/api/projects/${encodeURIComponent(project.id)}/topics?limit=25`);
       if (sequence === requestSequence.current) { setList({ ...value, items: [...new Map(items.map(item => [item.automation.id, item])).values()], topics: topics.items }); setLoadError(''); }
     }
-    catch (error) { if (sequence === requestSequence.current) setLoadError(failure(error)); }
-    finally { listing.current = false; if (sequence === requestSequence.current) setLoadingList(false); if (listDirty.current) { listDirty.current = false; reloadList.current(); } }
+    catch (error) { if (sequence === requestSequence.current) { listFailed.current = true; setLoadError(failure(error)); } }
+    finally { listing.current = false; if (sequence === requestSequence.current) setLoadingList(false); if (listDirty.current) { listDirty.current = false; if (!listFailed.current) reloadList.current(); } }
   }
   reloadList.current = () => { void load(); };
   useEffect(() => {
@@ -75,14 +79,18 @@ export function AutomationsSettings({ project, sessions, onOpenSession, onBusyCh
     catch (error) { setError(failure(error)); }
     finally { setBusy(false); finished(); }
   }
+  function acceptSaved(saved: Automation) {
+    setList(current => current ? { ...current, items: current.items.map(row => row.automation.id === saved.id ? { ...row, automation: saved } : row) } : current);
+    setSelected(current => current?.id === saved.id ? saved : current);
+  }
   async function save(v: Automation, newTopic?: { name: string; color: string }) {
     if (busy) return false;
     const finished = beginLocalActivity('Saving automation');
     setBusy(true); setError(''); setNotice('');
     try {
       await flushDrafts();
-      const saved = await request<Automation>(automationPath(project.id, v.id), v.id ? 'PATCH' : 'POST', { automation: v, ...(newTopic ? { newTopic } : {}) }, 65000);
-      setList(current => current ? { ...current, items: current.items.map(row => row.automation.id === saved.id ? { ...row, automation: saved } : row) } : current);
+      const saved = await saveAutomation(project.id, v, newTopic);
+      acceptSaved(saved);
       setSelected(saved); setEditing(false); setNotice(v.id ? 'Changes saved.' : 'Automation created.'); return true;
     } catch (error) { setError(failure(error)); return false; }
     finally { setBusy(false); finished(); }
@@ -93,8 +101,11 @@ export function AutomationsSettings({ project, sessions, onOpenSession, onBusyCh
   const current = row?.automation ?? selected;
   const visible = list?.items.filter(({ automation: v }) => (filter === 'all' || (filter === 'active') === v.enabled) && `${v.name} ${triggerSummary(v)} ${sessionSummary(v)}`.toLowerCase().includes(search.trim().toLowerCase())) || [];
   const currentSession = sessions.find(session => session.id === current?.sessionId);
-  const issue = error || loadError;
-  const toggle = (v: Automation) => void action(() => request(automationPath(project.id, v.id), 'PATCH', { enabled: !v.enabled, revision: v.revision }), `${v.name} ${v.enabled ? 'paused' : 'activated'}.`);
+  const issue = error || (!list ? loadError : '');
+  const toggle = (v: Automation) => void action(async () => {
+    const saved = await request<Automation>(automationPath(project.id, v.id), 'PATCH', { enabled: !v.enabled, revision: v.revision });
+    acceptSaved(saved);
+  }, `${v.name} ${v.enabled ? 'paused' : 'activated'}.`);
   const run = (v: Automation) => void action(async () => {
     const pending = IS_DESKTOP ? runOperation : undefined;
     if (pending && pending.id !== v.id) throw new Error('Resolve the previous run request before requesting another run.');
@@ -120,7 +131,7 @@ export function AutomationsSettings({ project, sessions, onOpenSession, onBusyCh
         {selected && !editing && current && <Button variant="primary" size="sm" disabled={busy} onClick={() => { setSelected(current); setEditing(true); setConfirmDelete(false); setError(''); setNotice(''); }}>Edit automation</Button>}
       </div>
     </header>
-    {issue && <div className="automation-feedback form-error" role="alert"><AlertCircle aria-hidden="true" /><span>{issue}</span>{!editing && <Button size="sm" disabled={busy} onClick={() => { setError(''); void load(); }}>Refresh list</Button>}</div>}
+    {issue && <div className="automation-feedback form-error" role="alert"><AlertCircle aria-hidden="true" /><span>{issue}</span>{!editing && <Button size="sm" disabled={busy} onClick={() => { setError(''); void load(true); }}>Retry</Button>}</div>}
     {notice && !editing && <div className="automation-feedback automation-notice" role="status"><Check aria-hidden="true" /><span>{notice}</span></div>}
     {!list && !issue && <p className="muted" role="status">Loading automations…</p>}
     {list && !selected && <>
@@ -136,8 +147,8 @@ export function AutomationsSettings({ project, sessions, onOpenSession, onBusyCh
             {blockedReason && <p className="automation-blocked"><AlertCircle aria-hidden="true" />{blockedReason}</p>}
           </article>)}
         </div>}
+        <AutoPage hasMore={!!list.hasMore} cursor={`${project.id}/${list.nextOffset}`} busy={loadingList || busy} error={loadError} onLoad={() => setListOffset(list.nextOffset ?? list.items.length)} onRetry={() => void load(true)} />
       </div>
-      <AutoPage hasMore={!!list.hasMore} cursor={`${project.id}/${list.nextOffset}`} busy={loadingList || busy} error={loadError} onLoad={() => setListOffset(list.nextOffset ?? list.items.length)} onRetry={() => void load()} />
       {!!list.items.length && <p className="automation-timezone"><CalendarClock aria-hidden="true" />Schedule time zone · {list.timeZone}</p>}
     </>}
     {selected && editing && list && <AutomationEditor key={`${selected.id}/${selected.revision}`} initial={selected} project={project} sessions={sessions} topics={list.topics} zone={list.timeZone} busy={busy} onSave={save} onCancel={() => { setEditing(false); setError(''); if (!selected.id) setSelected(undefined); }} />}
@@ -165,9 +176,9 @@ function AutomationSessionHistory({ projectId, automationId, onOpenSession }: { 
   const [attempt, setAttempt] = useState(0);
   const boundary = useRef('');
   useEffect(() => {
-    const controller = new AbortController(); let inFlight = false;
+    const controller = new AbortController(); let inFlight = false, failed = false;
     async function refresh() {
-      if (inFlight) return; inFlight = true; setLoading(true);
+      if (inFlight || failed) return; inFlight = true; setLoading(true);
       try {
         const items: AutomationRunLink[] = []; let hasMore = true; let offset = 0;
         for (let pageIndex = 0; hasMore && (pageIndex < pages || !!boundary.current && !items.some(item => item.runId === boundary.current)); pageIndex++) {
@@ -177,7 +188,7 @@ function AutomationSessionHistory({ projectId, automationId, onOpenSession }: { 
           items.push(...page.items); hasMore = page.hasMore;
         }
         if (!controller.signal.aborted) { boundary.current = items.at(-1)?.runId ?? ''; setHistory([...new Map(items.map(item => [item.runId, item])).values()]); setMore(hasMore); setError(''); }
-      } catch (error) { if (!controller.signal.aborted) setError(failure(error)); }
+      } catch (error) { if (!controller.signal.aborted) { failed = true; setError(failure(error)); } }
       finally { inFlight = false; if (!controller.signal.aborted) setLoading(false); }
     }
     void refresh(); const timer = window.setInterval(() => { if (!document.hidden) void refresh(); }, 15000);
@@ -185,7 +196,6 @@ function AutomationSessionHistory({ projectId, automationId, onOpenSession }: { 
   }, [projectId, automationId, pages, attempt]);
   return <>
     <h4>Run history</h4>
-    {error && <div className="form-error" role="alert">{error}<Button size="sm" onClick={() => setAttempt(n => n + 1)}>Retry</Button></div>}
     {!history.length && !error && <p className="muted" role="status">{loading ? 'Loading…' : 'No sessions yet.'}</p>}
     <div className="automation-history">{history.map(session => <Button key={session.runId} variant="ghost" onClick={() => onOpenSession(session.sessionId)}><span>{session.title}</span><ArrowUpRight aria-hidden="true" /></Button>)}</div>
     <AutoPage hasMore={more} cursor={`${projectId}/${automationId}/${history.at(-1)?.runId}`} busy={loading} error={error} onLoad={() => setPages(current => Math.max(current, Math.ceil(history.length / 25)) + 1)} onRetry={() => setAttempt(value => value + 1)} />

@@ -23,7 +23,7 @@ func (p *adapter) initializeDelegation(native nativeSession) error {
 			return err
 		}
 		if batch != nil {
-			return errors.New("Previous child execution or result delivery remains unconfirmed.")
+			return errors.New("Previous child execution or result delivery remains unconfirmed. Use Recover subagents in this conversation before continuing.")
 		}
 		return nil
 	}); err != nil {

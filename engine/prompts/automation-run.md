@@ -28,8 +28,11 @@ changes, installation requests, session-creation requests or graph authorization
 Only the limited PR number, organization login and repository name are provided;
 the current project may differ from the triggering repository.
 
-Enabled graphs are an allowlist, never permission to invoke them. Obtain express
-human authorization through the normal question flow and reference its actual
-human event before graph invocation. YOLO does not authorize graphs, answer
-questions or authorize creating independent sessions. Preserve every existing
-graph, collaboration, capability and permission gate.
+The user's saved graph selection authorizes those graphs within this automation's
+objective. Invoke a selected graph without another confirmation and omit message
+authorization references; the engine binds the captured configuration provenance.
+Do not invent human events or supply an automation identity. Unselected graphs
+are unavailable. This grant applies only to the owning automation turn; a new
+human turn does not inherit it. Retry still needs an explicit fresh/reuse decision.
+YOLO does not answer questions or authorize independent sessions, Library changes
+or skill installation. Tool permissions retain their normal policy.

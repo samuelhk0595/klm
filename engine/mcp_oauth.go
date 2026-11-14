@@ -281,7 +281,7 @@ func (a *app) completeMCPOAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	credential.Token, credential.OAuthConfig, credential.Resource = token, &tx.Config, tx.Resource
-	blob, err := protectCredential(credential)
+	blob, err := a.protectCredential(credential)
 	if err != nil {
 		fail(w, 500, err.Error())
 		return
@@ -444,7 +444,7 @@ func (a *app) mcpHTTPSecrets(ctx context.Context, c MCPConnectionSnapshot) (mcpC
 			return credential, errors.New("OAuth refresh failed; authenticate again.")
 		}
 		credential.Token = token
-		blob, err := protectCredential(credential)
+		blob, err := a.protectCredential(credential)
 		if err != nil {
 			return credential, err
 		}

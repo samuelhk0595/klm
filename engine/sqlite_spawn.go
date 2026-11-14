@@ -17,6 +17,9 @@ func (st *sqliteSessionTx) spawnSource(id string) (Session, error) {
 		return s, err
 	} else if run != nil {
 		s.Harness, s.Model, s.Effort, s.YOLO = run.Snapshot.Harness, run.Snapshot.Model, run.Snapshot.Effort, run.Snapshot.YOLO
+		if run.LiveYOLO != nil {
+			s.YOLO = *run.LiveYOLO
+		}
 	}
 	return s, nil
 }

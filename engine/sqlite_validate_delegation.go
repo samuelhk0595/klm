@@ -286,6 +286,9 @@ func (v sqliteValidation) validateDelegationBatch(id string) error {
 		if batch.State == DelegationSettled && item.State != DelegationInvocationTerminal {
 			return errors.New("Settled delegation batch still has active members.")
 		}
+		if batch.Recovery != nil && (!item.Finality.ProcessesDrained || !item.Finality.ToolCallsSettled || len(item.Finality.UncertainToolCalls) != 0) {
+			return errors.New("Delegation recovery requires confirmed process and tool drainage.")
+		}
 	}
 	initial := false
 	after := ""

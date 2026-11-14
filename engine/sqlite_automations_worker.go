@@ -281,6 +281,7 @@ func (a *app) admitSQLAutomationLocked(id string) (*AutomationRun, bool, error) 
 			config.SessionID = s.ID
 		}
 		r := AutomationRun{ID: newID(), AutomationID: v.ID, ProjectID: v.ProjectID, SessionID: s.ID, Snapshot: config, PromptKind: promptKind, Capabilities: trigger.Capabilities, Trigger: trigger, Status: "running", StartedAt: now()}
+		r.GraphGrant = &AutomationGraphGrant{ProjectID: r.ProjectID, AutomationID: r.AutomationID, RunID: r.ID, Revision: config.Revision, ConfigurationDigest: automationConfigurationDigest(config), Graphs: append([]string{}, config.Graphs...)}
 		if !creating && trigger.Snapshot == nil {
 			if binding, err := st.agentBinding(s.ID); err != nil {
 				return err
@@ -366,7 +367,7 @@ func (a *app) startSQLAutomationTurnLocked(run AutomationRun, text string) error
 	if a.runs[run.SessionID] != nil {
 		return nil
 	}
-	s, native, _, err := a.store.readTurnSession(a.ctx, run.SessionID)
+	s, native, _, err := a.store.readTurnSession(a.ctx, run.SessionID, run.ID)
 	if err != nil {
 		return err
 	}
@@ -396,7 +397,7 @@ func (a *app) startSQLAutomationTurnLocked(run AutomationRun, text string) error
 		return err
 	}
 	ctx, cancel := context.WithCancel(a.ctx)
-	t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{}), automationRunID: run.ID}
 	a.runs[s.ID] = t
 	a.wg.Add(1)
 	go a.execute(t, s, native, b, cwd, submission{Text: text})
@@ -416,9 +417,19 @@ func (a *app) continueSQLAutomationLocked(id string) error {
 		if r.Status != "running" || !r.NeedsContinuation || a.runs[r.SessionID] != nil {
 			return nil
 		}
+		var input bool
+		if err := st.tx.QueryRowContext(st.ctx, `SELECT EXISTS(SELECT 1 FROM data_queued_messages WHERE owner_id=? AND status IN ('queued','steering','interrupting'))`, r.SessionID).Scan(&input); err != nil {
+			return err
+		}
+		if input {
+			return nil
+		}
 		s, err := st.sessionMeta(r.SessionID)
 		if err != nil {
 			return err
+		}
+		if s.Automation == nil || s.Automation.RunID != r.ID || s.Automation.Status != "running" {
+			return nil
 		}
 		archived, err := st.effectivelyArchived(s)
 		if err != nil {

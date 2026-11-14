@@ -82,7 +82,7 @@ export type SessionUsage = {
 export type QueuedMessage = { id: string; text: string; mode: "queue" | "steer" | "interrupt"; status: "queued" | "steering" | "sending" | "accepted" | "interrupting" | "paused" | "uncertain"; error?: string; origin?: { sessionId: string; title: string; kind?: 'instruction' | 'question_answer' } };
 
 export type Session = {
-	delegation?: { availability: { available: boolean; code?: string; detail?: string }; waiting: boolean; actions: DelegationActions };
+	delegation?: { availability: { available: boolean; code?: string; detail?: string }; waiting: boolean; actions: DelegationActions; recovery?: DelegationRecovery };
   agentConfig?: AgentConfigSummary;
 	metadataOnly?: boolean;
 	detailLoaded?: boolean;
@@ -126,6 +126,7 @@ export type Session = {
 };
 
 export type DelegationActions = { send: boolean; queue: boolean; steer: boolean; interrupt: boolean; settings: boolean; stop: boolean };
+export type DelegationRecovery = { batchId: string; revision: string; canRecover: boolean; reason?: string };
 export type DelegationBatch = { id: string; parentSessionId: string; revision: string; state: string; total: number; terminal: number; remaining: number; waiting: boolean; delivery: string; outcome?: string; actions: DelegationActions };
 export type DelegationMember = { key: string; batchId: string; invocationId: string; childSessionId: string; parentSessionId: string; ownerConversationId: string; title: string; harness: string; model: string; effort: string; agentName?: string; latestActivity?: string; executionState: string; outcome?: string; terminal: boolean; invocationNumber: string; reused: boolean; error?: string; resultReference?: { invocationId: string; digest: string; totalBytes: string } };
 export type DelegationMemberPage = { batch: DelegationBatch; items: DelegationMember[]; revision: string; hasMore: boolean; nextOffset: number };

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AutoPage } from '../pagination/AutoPage';
-import { captureScrollAnchor } from '../pagination/scrollAnchor';
+import { prepareWindowChange } from '../chat/historyWindow';
 import { Panel } from '@xyflow/react';
 import { X } from 'lucide-react';
 import { Button, IconButton } from '../../design-system/Button';
@@ -10,6 +10,8 @@ import { request, type GraphNodeActivity } from '../../engine';
 import { EventSequence } from '../chat/ConversationEvents';
 import { DelegationActivity } from '../chat/DelegationActivity';
 import { SessionEvent } from '../chat/SessionEvent';
+import { HistoryPagingContext } from '../chat/HistoryPagingContext';
+import { GraphEventPage } from './GraphEventPage';
 
 const statusLabels: Record<string, string> = { reserved: 'Pending', running: 'Running', waiting_user: 'Waiting', sealing: 'Finishing', completed: 'Completed', failed: 'Failed', interrupted: 'Interrupted' };
 
@@ -30,25 +32,27 @@ export function GraphRunActivity({ sessionId, runId, nodeId, nodeName, onClose }
   const [attempt, setAttempt] = useState(0);
   const identity = `${sessionId}/${runId}/${nodeId}/${activationId}`;
   const previousIdentity = useRef(identity);
-  const direction = useRef<'before' | 'after'>('before');
-  const [navigation, setNavigation] = useState<'before' | 'after'>('before');
-  const [gesture, setGesture] = useState(0);
-  const explicit = useRef(false);
-  const lastGesture = useRef(0);
-  const touchY = useRef(0);
-  function navigate(next: 'before' | 'after') {
-    direction.current = next; setNavigation(next);
-    if (Date.now() - lastGesture.current > 350) { lastGesture.current = Date.now(); explicit.current = true; setGesture(value => value + 1); }
-  }
-  function pageEvents(offset: number | undefined) {
-    if ((snapshot.current?.activation?.events.length ?? 0) >= 200 && log.current && log.current.scrollHeight <= log.current.clientHeight + 1 && !explicit.current) return;
-    explicit.current = false; following.current = false; setEventOffset(offset);
+  const nodeIdentity = `${sessionId}/${runId}/${nodeId}`;
+  const previousNode = useRef(nodeIdentity);
+  const paging = useRef(false);
+  function pageEvents(offset: number, explicit: boolean) {
+    if (paging.current) return; paging.current = true;
+    if (explicit) following.current = false;
+    consumedOffset.current = undefined; setEventOffset(offset); setAttempt(value => value + 1);
   }
   const consumedOffset = useRef<number | undefined>(undefined);
   useEffect(() => {
     const controller = new AbortController();
     let timer: number | undefined;
-    if (previousIdentity.current !== identity) { snapshot.current = null; setData(null); following.current = true; previousIdentity.current = identity; }
+    if (previousNode.current !== nodeIdentity) {
+      snapshot.current = null; setData(null); setActivationOffset(0); setActivationId(''); setEventOffset(undefined); previousNode.current = nodeIdentity;
+    }
+    if (previousIdentity.current !== identity) {
+      // Selection owns the event window, not the accumulated activation catalog.
+      snapshot.current = snapshot.current ? { ...snapshot.current, activation: null } : null;
+      setData(snapshot.current); following.current = true; consumedOffset.current = undefined;
+      restore.current = undefined; previousIdentity.current = identity;
+    }
     setError('');
     async function refresh() {
       let complete = false;
@@ -84,7 +88,16 @@ export function GraphRunActivity({ sessionId, runId, nodeId, nodeName, onClose }
           }
         }
         if (!controller.signal.aborted) {
-          if (log.current && !following.current) restore.current = captureScrollAnchor(log.current);
+          if (log.current && old && result.activation?.id === old.id) {
+            const next = result.activation;
+            const change = prepareWindowChange(log.current,
+              { events: old.events, startIndex: old.offset ?? 0 },
+              { events: next.events, startIndex: next.offset ?? 0, hasEarlier: next.hasEarlier, hasLater: next.hasMore });
+            consumedOffset.current = eventOffset;
+            if (!change) return;
+            restore.current = change;
+          }
+          if (result.activation?.hasMore) following.current = false;
           snapshot.current = result; setData(result); setError('');
           consumedOffset.current = eventOffset;
         }
@@ -92,7 +105,7 @@ export function GraphRunActivity({ sessionId, runId, nodeId, nodeName, onClose }
         complete = true;
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : 'Could not load node activity.');
       } finally {
-        if (!controller.signal.aborted) setBusy(false);
+        if (!controller.signal.aborted) { paging.current = false; setBusy(false); }
         if (!controller.signal.aborted && !complete) timer = window.setTimeout(() => void refresh(), 1000);
       }
     }
@@ -105,6 +118,7 @@ export function GraphRunActivity({ sessionId, runId, nodeId, nodeName, onClose }
   useLayoutEffect(() => {
     restore.current?.(); restore.current = undefined;
     if (tab === 'run' && following.current && !activity?.hasMore && log.current) log.current.scrollTop = log.current.scrollHeight;
+    log.current?.dispatchEvent(new Event('klm:history-position'));
   }, [tab, activity]);
 
   return <Panel position="bottom-center" className="graph-run-activity-position nodrag nopan nowheel">
@@ -118,13 +132,13 @@ export function GraphRunActivity({ sessionId, runId, nodeId, nodeName, onClose }
       {!!data && data.activations.length > 0 && <div className="graph-run-activation-picker">Activation <SearchSelect label="Activation" value={activationId} onChange={value => { setActivationId(value); setEventOffset(undefined); }} options={[{ value: '', label: 'Latest' }, ...data.activations.map(item => ({ value: item.id, label: `#${item.occurrence} · ${statusLabels[item.status] ?? item.status}` }))]} footer={<AutoPage hasMore={!!data.hasMore} cursor={`${identity}/${data.nextOffset}`} busy={busy} error={error} onLoad={() => setActivationOffset(data.nextOffset ?? activationOffset + 25)} onRetry={() => setAttempt(value => value + 1)} />} /></div>}
       {error && <p role="alert" className="form-error graph-run-notice">{error}<Button size="sm" onClick={() => setAttempt(value => value + 1)}>Retry</Button></p>}
       {!data ? <p className="muted graph-run-notice">{error ? 'Retrying...' : 'Loading activity...'}</p> : !activity ? <p className="muted graph-run-notice">Not started.</p> : tab === 'run' ? <div ref={log} className="graph-run-timeline" role="log" aria-label="Node events" tabIndex={0}
-        onWheel={event => navigate(event.deltaY < 0 ? 'before' : 'after')}
-        onKeyDown={event => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) navigate('before'); else if (['ArrowDown', 'PageDown', 'End'].includes(event.key)) navigate('after'); }}
-        onTouchStart={event => { touchY.current = event.touches[0]?.clientY ?? 0; }} onTouchMove={event => { const y = event.touches[0]?.clientY ?? touchY.current; navigate(y > touchY.current ? 'before' : 'after'); touchY.current = y; }}
-        onScroll={event => { const element = event.currentTarget; following.current = !activity.hasMore && element.scrollHeight - element.scrollTop - element.clientHeight < 24; }}>
-        <AutoPage hasMore={!!activity.hasEarlier && (activity.events.length < 200 || navigation === 'before')} cursor={`${identity}/before/${activity.offset}/${gesture}`} busy={busy} error={error} onLoad={() => pageEvents(activity.previousOffset)} onRetry={() => setAttempt(value => value + 1)} />
-        <div className="conversation-events"><EventSequence events={activity.events} status={status} updatedAt={activity.updatedAt} showActiveWork={active} activeWorkStartedAt={activity.createdAt} renderEvent={event => event.type === 'subagent' && event.data?.managed ? event.data.kind === 'batch' ? <DelegationActivity ownerId={sessionId} batchId={String(event.data.batchId)} basePath={`/api/sessions/${encodeURIComponent(sessionId)}/graph/runs/${encodeURIComponent(runId)}/activations/${encodeURIComponent(activity.id)}/delegation`} revision={String(event.data.revision ?? '')} /> : null : <SessionEvent event={event} />} /></div>
-        <AutoPage hasMore={!!activity.hasMore && (activity.events.length < 200 || navigation === 'after')} cursor={`${identity}/after/${activity.nextOffset}/${gesture}`} busy={busy} error={error} onLoad={() => pageEvents(activity.nextOffset)} onRetry={() => setAttempt(value => value + 1)} />
+        onScroll={event => {
+          const element = event.currentTarget;
+          following.current = !activity.hasMore && element.scrollHeight - element.scrollTop - element.clientHeight < 24;
+        }}>
+        <GraphEventPage activity={activity} identity={identity} direction="before" busy={busy} error={error} onLoad={pageEvents} onRetry={() => setAttempt(value => value + 1)} />
+        <HistoryPagingContext.Provider value={direction => <GraphEventPage activity={activity} identity={identity} direction={direction} busy={busy} error={error} onLoad={pageEvents} onRetry={() => setAttempt(value => value + 1)} />}><div className="conversation-events"><EventSequence events={activity.events} status={status} updatedAt={activity.updatedAt} showActiveWork={active} activeWorkStartedAt={activity.createdAt} renderEvent={event => event.type === 'subagent' && event.data?.managed ? event.data.kind === 'batch' ? <DelegationActivity ownerId={sessionId} batchId={String(event.data.batchId)} basePath={`/api/sessions/${encodeURIComponent(sessionId)}/graph/runs/${encodeURIComponent(runId)}/activations/${encodeURIComponent(activity.id)}/delegation`} revision={String(event.data.revision ?? '')} /> : null : <SessionEvent event={event} />} /></div></HistoryPagingContext.Provider>
+        <GraphEventPage activity={activity} identity={identity} direction="after" busy={busy} error={error} onLoad={pageEvents} onRetry={() => setAttempt(value => value + 1)} />
         {activity.error && <p className="form-error">{activity.error}</p>}
       </div> : <div className="graph-run-payload" role="region" aria-label={tab === 'input' ? 'Input payload' : 'Output payload'} tabIndex={0}>
         {tab === 'input' ? <>

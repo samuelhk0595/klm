@@ -25,9 +25,6 @@ func (st *sqliteSessionTx) finishAutomation(r *AutomationRun, status, reason str
 			s.Status = "error"
 		}
 		s.Automation.Status = status
-		if _, err := st.recoverQueue(s.ID, "Automation finished. Send this message when ready."); err != nil {
-			return err
-		}
 		e := event("status", "Automation: "+status+". "+reason)
 		e.Data = map[string]any{"automationId": r.AutomationID, "runId": r.ID}
 		if _, err := st.appendEvent(s.ID, e); err != nil {
@@ -51,7 +48,7 @@ func (p *adapter) settleSQLAutomation(st *sqliteSessionTx, runErr error) error {
 	case p.turn.stopErr != nil || !p.processesDrained:
 		r.Reason = "Process shutdown could not be confirmed. Stop this conversation again to recover."
 		return st.putRoot("automation_runs", r.ID, *r)
-	case r.StopRequested:
+	case r.StopRequested || p.turn.restartMessageID != "":
 		return st.finishAutomation(r, "interrupted_by_user", "Stopped by user.")
 	case runErr != nil || p.failed || !p.completed || p.turn.ctx.Err() != nil:
 		if p.app.closing {
@@ -76,9 +73,25 @@ func (p *adapter) settleSQLAutomation(st *sqliteSessionTx, runErr error) error {
 		if err != nil {
 			return err
 		}
-		s.Status = "running"
+		s.Status = "idle"
 		return st.putSessionMeta(s)
 	}
+}
+
+// Called only at dispatch, under the conversation lock and in the same SQL
+// transaction as input admission. Enqueueing/steering alone never transfers ownership.
+func (st *sqliteSessionTx) releaseAutomationForInput(s *Session) error {
+	r, err := st.activeAutomation(s.ID)
+	if err != nil || r == nil {
+		return err
+	}
+	if err := st.finishAutomation(r, "interrupted_by_user", "Replaced by a new conversation input."); err != nil {
+		return err
+	}
+	if s.Automation != nil && s.Automation.RunID == r.ID {
+		s.Automation.Status = "interrupted_by_user"
+	}
+	return nil
 }
 
 func (p *adapter) finishSQLTurnLocked(runErr error) error {

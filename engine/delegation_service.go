@@ -136,6 +136,9 @@ func (c *delegationExecution) prepare(request DelegationRunRequest, callID, nati
 		if existing.RequestHash != hash {
 			return delegationRejected("operation_conflict", "operationId belongs to a different accepted request.")
 		}
+		if existing.Recovery != nil {
+			return delegationRejected("operation_conflict", "This batch was explicitly recovered without replay. Use a new operationId for new work.")
+		}
 		if !c.ownsBatch(*existing) {
 			return delegationRejected("operation_conflict", "operationId belongs to another graph activation/turn.")
 		}

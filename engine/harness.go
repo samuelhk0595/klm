@@ -192,13 +192,16 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	defer a.wg.Done()
 	defer t.cancel()
 	t.ctx = protocolDirectoryContext(t.ctx, a.dir)
+	if a.store != nil {
+		t.ctx = context.WithValue(t.ctx, automationTurnContextKey{}, t.automationRunID)
+	}
 	t.protocolScope = &protocolContentScope{dir: a.dir, ctx: t.ctx}
 	defer t.protocolScope.Close()
 	a.mu.Lock()
 	var reservationErr error
 	reasoningStart := 0
 	if a.store != nil {
-		current, continuation, count, readErr := a.store.readTurnSession(t.ctx, s.ID)
+		current, continuation, count, readErr := a.store.readTurnSession(t.ctx, s.ID, t.automationRunID)
 		reservationErr = readErr
 		if readErr == nil {
 			s, native, reasoningStart = current, continuation, count
@@ -230,7 +233,11 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	p.subagent = s.Role == sessionRoleSubagent
 	p.agentPreparation = specialist
 	if s.Automation != nil && s.Automation.Status == "running" && s.Role == "" && s.ParentID == "" && s.GraphRunID == "" {
-		p.automationRunID = s.Automation.RunID
+		if a.store != nil {
+			p.automationRunID = t.automationRunID
+		} else {
+			p.automationRunID = s.Automation.RunID
+		}
 	}
 	var stopCancellation func() bool
 	err := reservationErr
@@ -362,6 +369,11 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 		var bridge *linkedBridge
 		if err == nil {
 			err = p.initializeDelegation(native)
+		}
+		if err == nil {
+			var recovery string
+			recovery, err = p.delegationRecoveryContext()
+			payload.Text = recovery + payload.Text
 		}
 		bridgeErr := err
 		if bridgeErr == nil {

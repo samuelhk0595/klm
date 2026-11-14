@@ -1,0 +1,7 @@
+name = 'Generic agent'
+enabled = true
+default_harness = 'opencode'
+model = 'openai/gpt-6-luna-fast'
+effort = 'low'
+prompt = 'Você é um agente de código'
+source_uid = 'ba39b04d04cee5e710c3d73757a0465d'

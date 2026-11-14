@@ -94,6 +94,10 @@ func (a *app) refreshAutomationAgentLocked(automationID string) (*automationAgen
 }
 
 func (a *app) prepareAutomationAgent(ctx context.Context, s Session) (*AgentTurnPreparation, bool, error) {
+	expected, scoped := ctx.Value(automationTurnContextKey{}).(string)
+	if scoped && expected == "" {
+		return nil, false, nil
+	}
 	var run *AutomationRun
 	err := a.store.readSnapshot(ctx, func(tx *sql.Tx) error {
 		var err error
@@ -102,6 +106,9 @@ func (a *app) prepareAutomationAgent(ctx context.Context, s Session) (*AgentTurn
 	})
 	if err != nil || run == nil || run.Snapshot.AgentConfiguration == nil {
 		return nil, false, err
+	}
+	if scoped && run.ID != expected {
+		return nil, true, errors.New("Automation owner changed during specialist preparation.")
 	}
 	frozen := *run.Snapshot.AgentConfiguration
 	if run.Capabilities != nil {

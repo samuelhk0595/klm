@@ -5,15 +5,17 @@ import { request, type DelegationRequest, type PermissionRequest, type QuestionR
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { subscribeScope } from './scopedConnection';
+import { DelegationRecovery } from './DelegationRecovery';
 
 type Page = { items: DelegationRequest[]; hasMore: boolean; nextAfterId: string };
 export function DelegationRequests({ session, projectName, onSnapshot }: { session: Session; projectName: string; onSnapshot: (value: SessionResponse) => void }) {
   const [page, setPage] = useState<Page>(); const [error, setError] = useState(''); const [pages, setPages] = useState(1); const [reload, setReload] = useState(0); const [loading, setLoading] = useState(false);
+  const [showLoading, setShowLoading] = useState(false);
   useEffect(() => {
     const controller = new AbortController(); let busy = false, again = false; let timer: ReturnType<typeof setTimeout> | undefined;
-    async function refresh() {
+    async function refresh(showLoading = false) {
       if (busy) { again = true; return; } if (controller.signal.aborted || document.hidden) return; busy = true;
-      setLoading(true);
+      setLoading(true); setShowLoading(showLoading);
       try {
         let after = ''; let result: Page = { items: [], hasMore: false, nextAfterId: '' }; const items: DelegationRequest[] = [];
         for (let index = 0; index < pages; index++) {
@@ -29,13 +31,14 @@ export function DelegationRequests({ session, projectName, onSnapshot }: { sessi
     const schedule = () => { if (!timer) timer = setTimeout(() => { timer = undefined; void refresh(); }, 150); };
     const unsubscribe = subscribeScope('conversation', session.id, schedule);
     const visible = () => { if (!document.hidden) void refresh(); }; document.addEventListener('visibilitychange', visible);
-    void refresh(); return () => { controller.abort(); clearTimeout(timer); unsubscribe(); document.removeEventListener('visibilitychange', visible); };
+    void refresh(true); return () => { controller.abort(); clearTimeout(timer); unsubscribe(); document.removeEventListener('visibilitychange', visible); };
   }, [session.id, pages, reload]);
   const resolved = (value: SessionResponse) => { onSnapshot(value); setReload(value => value + 1); };
-  return <>{!!page?.items.length && <div className="permission-queue" aria-label="Child requests">{page.items.map(item => item.kind === 'permission'
+  return <>{session.delegation?.recovery && <DelegationRecovery key={`${session.id}/${session.delegation.recovery.batchId}/${session.delegation.recovery.revision}`} sessionId={session.id} recovery={session.delegation.recovery} onSnapshot={resolved} />}
+    {!!page?.items.length && <div className="permission-queue" aria-label="Child requests">{page.items.map(item => item.kind === 'permission'
     ? <PermissionCard key={`${item.childSessionId}/${item.request.id}`} permission={item.request as PermissionRequest} sessionId={session.id} projectName={projectName} origin={`Subagent · ${item.childTitle || item.childSessionId.slice(0, 8)}`} onResolved={resolved} />
     : <QuestionCard key={`${item.childSessionId}/${item.request.id}`} question={item.request as QuestionRequest} sessionId={session.id} origin={`Subagent · ${item.childTitle || item.childSessionId.slice(0, 8)}`} onResolved={resolved} />)}</div>}
-    <AutoPage hasMore={!!page?.hasMore} cursor={`${session.id}/${page?.nextAfterId}`} busy={loading} error={error} onLoad={() => setPages(value => value + 1)} onRetry={() => setReload(value => value + 1)} />
+    <AutoPage hasMore={!!page?.hasMore} cursor={`${session.id}/${page?.nextAfterId}`} busy={loading} loading={loading && showLoading} error={error} onLoad={() => setPages(value => value + 1)} onRetry={() => setReload(value => value + 1)} />
     {error && <p className="form-error" role="alert">{error}<Button size="sm" onClick={() => setReload(value => value + 1)}>Retry</Button></p>}
   </>;
 }
