@@ -126,7 +126,7 @@ func sameSettledDelegationPayload(previous, next DelegationBatchRecord) bool {
 	var a, b map[string]any
 	_ = json.Unmarshal(left, &a)
 	_ = json.Unmarshal(right, &b)
-	for _, key := range []string{"delivery", "deliveryTurnId", "revision", "updatedAt", "cancellationRequested"} {
+	for _, key := range []string{"delivery", "deliveryTurnId", "revision", "updatedAt", "cancellationRequested", "recovery"} {
 		delete(a, key)
 		delete(b, key)
 	}
@@ -220,6 +220,9 @@ func (st *sqliteSessionTx) validateDelegationWrite(table, id, owner string, raw 
 			}
 		}
 		if old.State == DelegationSettled {
+			if old.Recovery != nil && !reflect.DeepEqual(old.Recovery, next.Recovery) {
+				return errors.New("Delegation recovery decision is immutable.")
+			}
 			if !sameSettledDelegationPayload(old, next) {
 				return errors.New("Settled delegation result is immutable.")
 			}
@@ -227,7 +230,9 @@ func (st *sqliteSessionTx) validateDelegationWrite(table, id, owner string, raw 
 				return errors.New("Cancellation intent cannot be cleared.")
 			}
 			if next.Delivery != old.Delivery {
-				if _, err := advanceDelegationDelivery(old, next.Delivery); err != nil {
+				previous := old
+				previous.Recovery = next.Recovery
+				if _, err := advanceDelegationDelivery(previous, next.Delivery); err != nil {
 					return err
 				}
 			}

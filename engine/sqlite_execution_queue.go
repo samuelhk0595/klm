@@ -181,6 +181,13 @@ func (a *app) scheduleSQLMessagesLocked() {
 			if archived {
 				return nil
 			}
+			batch, err := st.activeDelegation(id)
+			if err != nil {
+				return err
+			}
+			if batch != nil {
+				return controlError(409, "Recover subagents in this conversation before continuing.")
+			}
 			queue, err := st.queue(id)
 			if err != nil {
 				return err

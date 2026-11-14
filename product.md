@@ -1368,7 +1368,14 @@ Owned children retain their same-parent history, harness and directory for reuse
 Parent Stop cancels them. Permissions, questions and MCP elicitation are answered
 through the actual owner with exact request/grant scope; child histories are
 read-only. Unconfirmed native/process/tool finality retains quarantine and blocks
-continuation. Restart invalidates interrupted work without replay. A chat Stop
+continuation. A stopped conversation exposes **Recover subagents**. An explicit
+**Continue without replay** decision releases the parent's wait only after all
+children are terminal and process/tool drainage is confirmed. Unconfirmed native
+histories remain quarantined; original outcomes, results and delivery aliases
+remain unchanged. Recovery is recorded durably and supplies the most recent batch's
+bounded results/references to subsequent turns. It dispatches no work and leaves
+queued messages paused until an explicit send. Graph activations retain their
+separate failure/retry lifecycle. Restart invalidates interrupted work without replay. A chat Stop
 continues to leave independent graph execution alone.
 
 Pi/OpenCode use owned local wrappers with native delegation suppressed. Codex

@@ -5,6 +5,7 @@ import { request, type DelegationRequest, type PermissionRequest, type QuestionR
 import { PermissionCard } from './PermissionCard';
 import { QuestionCard } from './QuestionCard';
 import { subscribeScope } from './scopedConnection';
+import { DelegationRecovery } from './DelegationRecovery';
 
 type Page = { items: DelegationRequest[]; hasMore: boolean; nextAfterId: string };
 export function DelegationRequests({ session, projectName, onSnapshot }: { session: Session; projectName: string; onSnapshot: (value: SessionResponse) => void }) {
@@ -33,7 +34,8 @@ export function DelegationRequests({ session, projectName, onSnapshot }: { sessi
     void refresh(true); return () => { controller.abort(); clearTimeout(timer); unsubscribe(); document.removeEventListener('visibilitychange', visible); };
   }, [session.id, pages, reload]);
   const resolved = (value: SessionResponse) => { onSnapshot(value); setReload(value => value + 1); };
-  return <>{!!page?.items.length && <div className="permission-queue" aria-label="Child requests">{page.items.map(item => item.kind === 'permission'
+  return <>{session.delegation?.recovery && <DelegationRecovery key={`${session.id}/${session.delegation.recovery.batchId}/${session.delegation.recovery.revision}`} sessionId={session.id} recovery={session.delegation.recovery} onSnapshot={resolved} />}
+    {!!page?.items.length && <div className="permission-queue" aria-label="Child requests">{page.items.map(item => item.kind === 'permission'
     ? <PermissionCard key={`${item.childSessionId}/${item.request.id}`} permission={item.request as PermissionRequest} sessionId={session.id} projectName={projectName} origin={`Subagent · ${item.childTitle || item.childSessionId.slice(0, 8)}`} onResolved={resolved} />
     : <QuestionCard key={`${item.childSessionId}/${item.request.id}`} question={item.request as QuestionRequest} sessionId={session.id} origin={`Subagent · ${item.childTitle || item.childSessionId.slice(0, 8)}`} onResolved={resolved} />)}</div>}
     <AutoPage hasMore={!!page?.hasMore} cursor={`${session.id}/${page?.nextAfterId}`} busy={loading} loading={loading && showLoading} error={error} onLoad={() => setPages(value => value + 1)} onRetry={() => setReload(value => value + 1)} />

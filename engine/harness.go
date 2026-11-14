@@ -370,6 +370,11 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 		if err == nil {
 			err = p.initializeDelegation(native)
 		}
+		if err == nil {
+			var recovery string
+			recovery, err = p.delegationRecoveryContext()
+			payload.Text = recovery + payload.Text
+		}
 		bridgeErr := err
 		if bridgeErr == nil {
 			bridge, bridgeErr = p.startLinkedBridge()
