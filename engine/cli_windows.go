@@ -121,6 +121,8 @@ func serveEngineControl(dir string, a *app, shutdown chan struct{}) (net.Listene
 					return
 				}
 				switch line {
+				case "discover\n":
+					a.writeRunnerDiscovery(conn)
 				case "pair\n":
 					a.mu.Lock()
 					ready := a.controlReady && !a.closing && a.clientAuth != nil

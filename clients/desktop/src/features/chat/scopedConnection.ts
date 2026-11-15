@@ -75,14 +75,17 @@ export async function readConversationWindow(id: string, current: Session | unde
     const end = old.startIndex + current.events.length;
     let after = old.startIndex - 1;
     do {
-      const limit = Math.min(PAGE_SIZE, end - after - 1);
-      const next = await request<EventPage>(`${base}/history?limit=${limit}${after >= 0 ? `&after=${after}` : `&before=${limit}`}`, 'GET', undefined, 15000, signal);
+      const limit = old.unit === 'messages' ? PAGE_SIZE : Math.min(PAGE_SIZE, end - after - 1);
+      const range = old.unit === 'messages'
+        ? `unit=messages&from=${old.startIndex}&end=${end}${after >= old.startIndex ? `&after=${after}` : ''}`
+        : after >= 0 ? `after=${after}` : `before=${limit}`;
+      const next = await request<EventPage>(`${base}/history?limit=${limit}&${range}`, 'GET', undefined, 15000, signal);
       if (!next.events?.length || next.endIndex <= after + 1) break;
       pages.push(next); after = next.endIndex - 1;
     } while (after + 1 < end);
     const first = pages[0]; const last = pages.at(-1);
     page = first && last ? { ...first, revision: last.revision, total: last.total, events: pages.flatMap(value => value.events ?? []), endIndex: last.endIndex, afterCursor: last.afterCursor, hasNewer: last.hasNewer } : { sessionId: id, revision: old.revision, startIndex: old.startIndex, endIndex: old.startIndex, total: old.total, events: [], hasMore: old.hasMore, hasNewer: old.hasNewer };
-  } else page = await request<EventPage>(`${base}/history?limit=${PAGE_SIZE}`, 'GET', undefined, 15000, signal);
+  } else page = await request<EventPage>(`${base}/history?unit=messages&limit=${PAGE_SIZE}`, 'GET', undefined, 15000, signal);
   return { kind: 'reset', windowRefresh: !reset, revision: page.revision, summary: session, history: page, changes: [], total: page.total };
   });
 }

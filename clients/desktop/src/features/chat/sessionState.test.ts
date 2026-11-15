@@ -114,4 +114,33 @@ describe('session transport', () => {
     const gap = { ...newer, startIndex: 230, endIndex: 255 };
     expect(prependHistory(after, gap)[0]).toBe(after[0]);
   });
+
+  it('retains message pages with more than 200 intermediate tool events', () => {
+    const events = Array.from({ length: 30 }, (_, index) => [message(`message-${index}`), ...Array.from({ length: 10 }, (_, tool) => ({ ...message(`tool-${index}-${tool}`), type: 'tool' as const }))]).flat();
+    const initial = reset(events.slice(55), 55);
+    initial.history!.unit = 'messages';
+    const loaded = mergeSessions([], [initial], true);
+    const older = { sessionId: summary.id, revision: 1, unit: 'messages' as const, startIndex: 0, endIndex: 55, total: events.length, events: events.slice(0, 55), hasMore: false, direction: 'before' as const };
+    const next = prependHistory(loaded, older)[0];
+    expect(next.events).toEqual(events);
+    expect(next.history).toMatchObject({ unit: 'messages', startIndex: 0, afterCursor: '329', hasNewer: false });
+    const refresh = { ...reset(events.slice(55), 55), revision: 2, windowRefresh: true };
+    refresh.history!.unit = 'messages';
+    expect(mergeSessions([next], [refresh], true)[0].events).toEqual(events);
+  });
+
+  it('bounds message-mode windows by messages while retaining contiguous work and usable cursors', () => {
+    const events = Array.from({ length: 225 }, (_, index) => [message(`message-${index}`), { ...message(`tool-${index}`), type: 'tool' as const }]).flat();
+    const initial = reset(events.slice(50), 50); initial.history!.unit = 'messages';
+    const loaded = mergeSessions([], [initial], true);
+    const page = { sessionId: summary.id, revision: 1, unit: 'messages' as const, startIndex: 0, endIndex: 50, total: events.length, events: events.slice(0, 50), hasMore: false, direction: 'before' as const };
+    const older = prependHistory(loaded, page)[0];
+    expect(older.events.filter(event => event.type === 'assistant')).toHaveLength(200);
+    expect(older.events).toEqual(events.slice(0, 400));
+    expect(older.history).toMatchObject({ startIndex: 0, afterCursor: '399', hasNewer: true });
+    const newer = prependHistory([older], { ...page, startIndex: 400, endIndex: 450, events: events.slice(400), direction: 'after' })[0];
+    expect(newer.events.filter(event => event.type === 'assistant')).toHaveLength(200);
+    expect(newer.events).toEqual(events.slice(newer.history!.startIndex));
+    expect(newer.history).toMatchObject({ nextCursor: String(newer.history!.startIndex), afterCursor: '449', hasNewer: false });
+  });
 });

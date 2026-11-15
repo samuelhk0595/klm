@@ -232,6 +232,11 @@ func serveEngineControl(dir string, a *app, shutdown chan struct{}) (net.Listene
 					fmt.Fprintln(conn, "ok")
 					return
 				}
+				// Discovery takes its own readiness snapshot under a.mu.
+				if line == "discover\n" {
+					a.writeRunnerDiscovery(conn)
+					return
+				}
 				// Gate all other commands until initialization and HTTP startup finish.
 				// Keep the lock through auth operations to fence shutdown admission.
 				a.mu.Lock()

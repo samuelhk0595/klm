@@ -38,7 +38,7 @@ func (s *sqliteStore) upgradeDelegationRecoverySchema(ctx context.Context) error
 		if err := tx.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 			return err
 		}
-		if version == 5 {
+		if version >= 5 && version <= sqliteSchemaVersion {
 			return nil
 		}
 		if version != 4 {

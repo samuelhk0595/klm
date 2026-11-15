@@ -117,7 +117,7 @@ export type Session = {
   archived?: boolean;
   runtimeActive?: boolean;
   events: EngineEvent[];
-   history?: { revision: Revision; startIndex: number; total: number; nextCursor?: string; afterCursor?: string; hasMore: boolean; hasNewer?: boolean };
+   history?: { unit?: 'messages'; revision: Revision; startIndex: number; total: number; nextCursor?: string; afterCursor?: string; hasMore: boolean; hasNewer?: boolean };
   permissions?: PermissionRequest[];
   questions?: QuestionRequest[];
   usage?: SessionUsage;
@@ -137,7 +137,7 @@ export type SourceReference = { sessionId: string; messageId: string; passage: s
 
 export type SessionSummary = Omit<Session, 'events' | 'history' | 'sources'>;
 export type EventPage = {
-  sessionId: string; revision: Revision; startIndex: number; endIndex: number;
+  sessionId: string; unit?: 'messages'; revision: Revision; startIndex: number; endIndex: number;
    total: number; events: EngineEvent[] | null; nextCursor?: string; afterCursor?: string; hasMore: boolean; hasNewer?: boolean; direction?: 'before' | 'after';
 };
 export type SessionUpdate = {
@@ -344,7 +344,7 @@ function normalizeEngineResponse(path: string, value: unknown): unknown {
   if (typeof object.sessionId === 'string' && typeof object.count === 'string' && Array.isArray(object.events)) {
     const events: EngineEvent[] = object.events.map((row: any) => row.event ?? ({ id: row.id, type: row.preview?.type ?? 'status', title: row.preview?.title, status: row.preview?.status, consultationId: row.preview?.consultationId, previewText: row.preview?.textPreview, text: '', createdAt: row.preview?.createdAt ?? '', content: { sessionId: object.sessionId, ordinal: row.ordinal, digest: row.content.digest, bytes: row.content.bytes } }));
     const start = object.before === '' ? 0 : ordinal(object.before);
-    return { sessionId: object.sessionId, revision: object.revision, startIndex: start, endIndex: start + events.length, total: ordinal(object.count), events, nextCursor: object.hasOlder ? object.before : undefined, afterCursor: object.after || undefined, hasMore: object.hasOlder, hasNewer: object.hasNewer } satisfies EventPage;
+    return { sessionId: object.sessionId, unit: object.unit === 'messages' ? 'messages' : undefined, revision: object.revision, startIndex: start, endIndex: start + events.length, total: ordinal(object.count), events, nextCursor: object.hasOlder ? object.before : undefined, afterCursor: object.after || undefined, hasMore: object.hasOlder, hasNewer: object.hasNewer } satisfies EventPage;
   }
   return value;
 }

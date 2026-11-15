@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 
 const linkedConfig = /*KLM_LINKED_CONFIG*/{} as {
   url: string; token: string; graphNode?: boolean; nativeSubagents?: boolean; nativeSubagentPath?: string; toolTimeoutMs: number;
-  libraryUrl?: string; libraryToken?: string; delegation?: boolean;
+  libraryUrl?: string; libraryToken?: string; delegation?: boolean; runner?: boolean;
   tools?: { name: string; description: string; inputSchema: TSchema; external?: boolean }[];
 };
 
@@ -157,6 +157,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (_, ctx) => {
+	if (linkedConfig.runner) pi.setActiveTools(["read", "write", "edit", "grep", "find", "ls", "ask_user", ...tools.map(tool => tool.name)]);
     if (ctx.mode === "rpc" && ctx.hasUI) {
       const inventory = await linkedRPC("tools/list", {});
       const libraryInventory = tools.some(tool => tool.external) ? await linkedRPC("tools/list", {}, undefined, crypto.randomUUID(), true) : { tools: [] };

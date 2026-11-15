@@ -46,6 +46,9 @@ func (s *sqliteStore) sessionTransaction(ctx context.Context, change func(*sqlit
 		if err := change(st); err != nil {
 			return err
 		}
+		if err := st.retainRunnerChanges(); err != nil {
+			return err
+		}
 		changes.publishedContent = st.changes.publishedContent
 		if err := st.validateDelegationChanges(); err != nil {
 			return err
@@ -143,6 +146,17 @@ func sqliteSessionMetadataJSON(meta Session) ([]byte, error) {
 }
 
 func (st *sqliteSessionTx) putSessionMeta(meta Session) error {
+	previous, previousErr := st.sessionMeta(meta.ID)
+	if previousErr == nil {
+		if previous.Origin != meta.Origin || previous.IntegrationID != meta.IntegrationID || previous.RunnerID != meta.RunnerID {
+			return errors.New("Session origin and external ownership are immutable")
+		}
+		if externalSession(previous) && (previous.Role != meta.Role || previous.ProjectID != meta.ProjectID || previous.Harness != meta.Harness || previous.Model != meta.Model || previous.Effort != meta.Effort || !meta.YOLO || meta.TopicID != "" || meta.SelectedGraphID != "" || meta.ParentID != "" || meta.Automation != nil) {
+			return errors.New("Captured external session identity and execution policy are immutable")
+		}
+	} else if !errors.Is(previousErr, sql.ErrNoRows) {
+		return previousErr
+	}
 	if err := st.validateManagedSessionUpdate(meta); err != nil {
 		return err
 	}

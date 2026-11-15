@@ -222,8 +222,10 @@ Here, a **step** means one model request and its resulting tool execution; a
 **turn** may contain several steps. The five-second shell handoff is not a promise
 that every model request, remote MCP call or end-to-end reply finishes within five
 seconds. The reference's shell policy must not be generalized into killing every
-tool after five seconds. Long non-shell tools need an explicit mapping before the
-slice claims the same availability.
+tool after five seconds. Selected MCP tools retain their existing supported
+execution/timeout/elicitation behavior in this slice. Converting long MCP calls
+into background jobs is explicitly deferred; the slice does not promise universal
+five-second availability for non-shell operations.
 
 The reference applies the five-second policy to its router and direct workers.
 Its spawned subagents use `standard`, whose shell handoff is 60 seconds; do not
@@ -283,9 +285,11 @@ mapping are approved. They are not claims of implementation or test results.
 2. **Necessary decision:** a worker records a concrete human-action request while
    other work continues. The question reaches the originating Chat without the
    user opening Tickets or requesting status.
-3. **Native permission:** a worker requires permission. The coordinating Chat
-   presents the real pending request and supported choices. Waiting alone grants
-   nothing; the exact human reply reaches its owning execution.
+3. **YOLO and human requests:** Foreman and worker captures both have fixed YOLO;
+   eligible execution approvals are not prompted as a non-YOLO policy. Necessary
+   task questions and MCP elicitation still reach the coordinating Chat. If an
+   actual upstream permission is outside supported YOLO bypass, present its exact
+   pending request/choices and forward only its explicit owning human response.
 4. **Deduplication:** the same pending question is reported/delivered again. It
    remains one logical request rather than repeated unsolicited questions.
 5. **Resolution:** answering or clearing a request updates its pending state;
@@ -472,10 +476,13 @@ this does not authorize changes to KLM's interface.
 
 The composer shows the effective model, effort and YOLO state as read-only
 information. It offers no model/effort/harness or execution-mode editing there;
-Foreman configuration belongs in Factory Settings. Foreman always runs in YOLO
-mode; this is a fixed role requirement, not a composer toggle. Preserve the exact
-pending human-question and elicitation/permission contracts that still apply to
-delegated workers or external tools; Foreman's YOLO does not answer them.
+Foreman configuration belongs in Factory Settings. Foreman **and all Factory
+workers always run in YOLO mode**. Capture that fixed external-role mode for each
+execution; do not add a toggle or change personal KLM settings. The worker mode
+does not inherit Foreman's selected capabilities. Necessary task questions and
+MCP elicitation still require explicit human responses. Preserve any actual
+upstream request that is outside supported YOLO bypass; do not invent routine
+execution-approval prompts or turn a report into human approval.
 
 **Approved:** Stop Foreman requests interruption of its current turn only. Existing
 Ticket workers continue. Cancel Ticket is the operation that stops that Ticket's
@@ -589,6 +596,8 @@ Factory loading/history inspection creates no inference or new execution.
 | Hidden external execution and shared current checkout | Explicitly approved. |
 | Ordinary KLM compatibility | Explicitly required whether Werbert is disconnected or connected/working; both interface and personal-session behavior remain unchanged. |
 | DeepSeek internal background/input/notification mechanism | Explicitly required; implementation evidence still needed per harness. |
+| Early native proof and MCP scope | Explicitly approved: short harness feasibility proof first; no asynchronous MCP-to-job conversion in this delivery. |
+| Foreman and worker execution mode | Explicitly approved: both always YOLO, captured per external execution; no personal KLM default changes. |
 | Stop only Foreman's current turn; separate Ticket cancellation | Explicitly approved; detailed event/queue races above are proposed for review. |
 | File schema, local handshake, delegation protocol, configuration generations and native compaction | Proposed here under delegated design work; await document approval. |
 

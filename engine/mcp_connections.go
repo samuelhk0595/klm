@@ -170,7 +170,7 @@ func (a *app) protectCredential(c mcpCredential) ([]byte, error) {
 	storage.Existing = len(a.state.MCPCredentials) > 0
 	var err error
 	if a.store != nil {
-		err = a.store.readers.QueryRowContext(context.Background(), `SELECT EXISTS(SELECT 1 FROM data_mcp_credentials)`).Scan(&storage.Existing)
+		err = a.store.readers.QueryRowContext(context.Background(), `SELECT EXISTS(SELECT 1 FROM data_mcp_credentials) OR EXISTS(SELECT 1 FROM runner_requests WHERE reply IS NOT NULL)`).Scan(&storage.Existing)
 	}
 	a.mu.Unlock()
 	if err != nil {

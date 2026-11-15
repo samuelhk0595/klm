@@ -48,12 +48,17 @@ mistaken for unavailable content. Topic/Library search applies to the requested
 engine/project scope before pagination. Background execution does not depend on
 open clients or subscriptions.
 
-Interactive histories and paged lists request up to 25 items per page and load
-additional pages about 300 px before the relevant scroll edge, without ordinary pagination
-buttons. A history item is a persisted event, including reasoning and tools;
-rendered work groups need not occupy 25 rows. Chat history opens at the newest
-tail and pages in both directions, keeping a separate bounded 200-event window
-per mounted reader, including compact work groups' internal scroll regions.
+Interactive chat history targets up to 25 messages per page: user messages,
+assistant responses and agent prompts. Reasoning, tools and status events remain
+in the contiguous timeline but do not consume that message quota. Other paged
+lists continue to request up to 25 items. Additional pages load about 300 px before
+the relevant scroll edge, without ordinary pagination buttons. Chat history opens
+at the newest tail and pages in both directions, keeping a separate window of up
+to 200 messages per mounted reader, including compact work groups' internal scroll
+regions. Independent safety bounds remain: a message-mode HTTP response has at
+most 1,024 event records within the 2 MiB byte contract, and a reader retains at
+most 8,192 event records. Oversized intervals use contiguous cursor continuations,
+and discarded regions remain reloadable. Graph activity retains its event paging.
 Each reader preserves its reading anchor and measured space for evicted rows;
 one reader's navigation does not move or block another. Streaming follows only
 at the real tail. Session

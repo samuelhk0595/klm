@@ -55,6 +55,10 @@ func (a *app) persistSQLLocked(ctx context.Context, change func(*sqliteSessionTx
 		return err
 	}
 	if a.sqlChanges != nil {
+		if a.runner != nil {
+			a.runner.wake()
+			changes = a.ordinaryRunnerChanges(changes)
+		}
 		a.sqlChanges.publish(changes)
 	}
 	return nil

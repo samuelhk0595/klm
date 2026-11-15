@@ -14,6 +14,7 @@ import (
 )
 
 type turn struct {
+	runner                *runnerTurn
 	automationRunID       string // explicit admitted owner; never inferred from session metadata
 	protocolScope         *protocolContentScope
 	graphDelegation       *graphDelegationBinding
@@ -42,6 +43,7 @@ type turn struct {
 }
 
 type app struct {
+	runner                       *runnerService
 	contentDownloads             contentDownloadTickets
 	harnessInstallCancel         context.CancelFunc // app.mu; storage freeze cancels already-owned installer work.
 	harnessInstaller             *harnessInstallService

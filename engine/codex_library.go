@@ -97,6 +97,12 @@ func (p *adapter) codexLibraryConfig(effective map[string]any) (map[string]any, 
 	projected["klm_linked"] = map[string]any{"url": p.bridge.url, "http_headers": map[string]string{"Authorization": "Bearer " + p.bridge.token}, "enabled": true, "startup_timeout_sec": 15, "tool_timeout_sec": int64(linkedToolClientTimeout / time.Second)}
 	projected["klm_library"] = map[string]any{"url": p.bridge.libraryURL, "http_headers": map[string]string{"Authorization": "Bearer " + p.bridge.libraryToken}, "enabled": true, "startup_timeout_sec": 15, "tool_timeout_sec": 330}
 	config := codexLibraryControls()
+	if p.turn != nil && p.turn.runner != nil {
+		features := object(config["features"])
+		features["shell_tool"], features["unified_exec"] = false, false
+		features["default_mode_request_user_input"] = true
+		config["tools"] = map[string]any{"experimental_request_user_input": map[string]any{"enabled": true}}
+	}
 	config["mcp_servers"] = projected
 	return config, nil
 }

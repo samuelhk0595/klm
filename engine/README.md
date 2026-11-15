@@ -1,5 +1,9 @@
 # KLM Engine
 
+The additive authenticated external runner is documented in
+[External runner protocol 1](RUNNER_API.md). It reuses the current adapters while
+keeping its technical sessions out of ordinary KLM views and controls.
+
 ## 0.6.0 storage and client contract
 
 Normal `klm start` now uses **`<data-dir>/engine.sqlite3` as the sole runtime
@@ -523,7 +527,7 @@ Errors are non-2xx JSON objects: `{"error":"message"}`.
 | GET | `/api/projects/{id}/topics` | Bounded `{items,hasMore,nextCursor,revision}`; `search`, `active=true` and returned `cursor` scope the page |
 | GET | `/api/projects/{id}/topics/{topicId}` | Exact same-project Topic, independent of loaded pages |
 | GET | `/api/sessions/{id}` | Session detail envelope `{session,revision,eventCount,more}`; bounded queue/requests, embedded topic, no history |
-| GET | `/api/sessions/{id}/history` | Bounded event page; `before`/`after` exclusive ordinal cursors, `limit` at most 50; oversized records reference content |
+| GET | `/api/sessions/{id}/history` | Bounded contiguous history; `before`/`after` exclusive event ordinals, `limit` at most 50; `unit=messages` counts messages while including intervening events; default/`unit=events` retains legacy event counting; oversized records reference content |
 | GET | `/api/sessions/{id}/content` | Digest-bound base64 byte fragments using returned content references/offsets |
 | GET | `/api/updates` | Scoped SSE invalidations; `scope=global`, `scope=project&id=...` or `scope=conversation&id=...`, with contract 3 |
 | POST | `/api/projects` | `{name,folder,icon}` -> 201 Project |
@@ -565,6 +569,21 @@ Session-returning mutations in this table use the contract-3 detail envelope
 `{session,revision,eventCount,more}`, including creation, message admission,
 settings, Stop and pending-request replies. Historical `SessionUpdate` names do
 not imply an embedded transcript. Follow the appropriate page/content endpoint.
+
+The interactive chat requests `/history?unit=messages&limit=25`. Only `user`,
+`assistant` and `agent_prompt` records consume the quota; tools, reasoning and
+other events are returned in the same continuous ordinal range. Responses mark
+`unit:"messages"`. `count` and the cursors still describe **events**, preserving
+the existing before/after and content-reference contracts. A backward page starts
+at its earliest selected message; a forward page includes work after its last
+selected message up to the next message boundary.
+
+Message-mode transport remains bounded to 1,024 records and the 2 MiB response
+budget, so a very large interval may require further cursor reads before reaching
+the message target. No event is skipped by a transport boundary. The optional
+`from` (inclusive) and `end` (exclusive) event ordinals let clients revalidate an
+already loaded range in forward, message-counted chunks without reading beyond
+that window. Existing callers that omit `unit` still count event records.
 
 ### Engine directory browser
 

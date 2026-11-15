@@ -566,6 +566,14 @@ func (p *adapter) externalMCPTool(name string) bool {
 }
 
 func (p *adapter) callExternalMCP(ctx context.Context, name string, raw json.RawMessage, callID string) (*mcp.CallToolResult, error) {
+	if p.turn.runner != nil {
+		p.turn.runner.mu.Lock()
+		uncertain := len(p.turn.runner.uncertainMCP) > 0
+		p.turn.runner.mu.Unlock()
+		if uncertain {
+			return nil, errors.New("This external execution has an unsettled MCP outcome. Reconcile it before further calls.")
+		}
+	}
 	x := p.mcp
 	if x == nil {
 		return nil, errors.New("MCP execution is unavailable.")
@@ -678,6 +686,14 @@ func (p *adapter) callExternalMCP(ctx context.Context, name string, raw json.Raw
 		var protocolError *jsonrpc.Error
 		if errors.As(err, &protocolError) {
 			return nil, errors.New("The MCP server returned a protocol error. Its response was received; the call was not repeated.")
+		}
+		if p.turn.runner != nil {
+			p.turn.runner.mu.Lock()
+			if p.turn.runner.uncertainMCP == nil {
+				p.turn.runner.uncertainMCP = map[string]bool{}
+			}
+			p.turn.runner.uncertainMCP[callID] = true
+			p.turn.runner.mu.Unlock()
 		}
 		return nil, errors.New("MCP call failed or completion is unconfirmed. It was not retried. Check the server before repeating the operation.")
 	}

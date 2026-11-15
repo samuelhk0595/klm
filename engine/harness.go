@@ -213,12 +213,18 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 		reasoningStart = len(s.Events)
 	}
 	t.reasoningStart = &reasoningStart
-	if reservationErr == nil {
+	if externalSession(s) != (t.runner != nil) {
+		reservationErr = errors.New("External execution requires its server-owned runner capture.")
+	}
+	if t.runner != nil && (s.RunnerID != t.runner.ExecutionID || s.Origin != runnerOrigin || !s.YOLO) {
+		reservationErr = errors.New("External execution ownership or captured policy changed.")
+	}
+	if reservationErr == nil && t.runner == nil {
 		reservationErr = a.reserveAnalyticsLocked(t, s)
 	}
 	a.mu.Unlock()
 	var specialist *AgentTurnPreparation
-	if reservationErr == nil && a.store != nil && s.Role != "graph_node" {
+	if reservationErr == nil && a.store != nil && s.Role != "graph_node" && t.runner == nil {
 		if len(preparations) > 0 {
 			specialist = preparations[0]
 		} else {
@@ -258,7 +264,7 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	if p.graph == nil && s.Role == "graph_node" {
 		err = errors.New("Private graph node requires its activation adapter binding.")
 	}
-	if err == nil && p.graph == nil && s.Role != "graph_node" && s.Role != sessionRoleGeneralAgent && s.Role != sessionRoleSubagent && graphConversationHooks != nil {
+	if err == nil && t.runner == nil && p.graph == nil && s.Role != "graph_node" && s.Role != sessionRoleGeneralAgent && s.Role != sessionRoleSubagent && graphConversationHooks != nil {
 		var hooks *GraphAdapterHooks
 		hooks, err = graphConversationHooks(a, t, s)
 		if hooks != nil {
@@ -282,7 +288,7 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	} else if specialist != nil && specialist.Resolution.Config.Prompt != "" {
 		payload.Text = "Specialist instructions:\n" + specialist.Resolution.Config.Prompt + "\n\n" + payload.Text
 	}
-	if err == nil && s.Role != "graph_node" && s.Role != sessionRoleSubagent {
+	if err == nil && t.runner == nil && s.Role != "graph_node" && s.Role != sessionRoleSubagent {
 		var guidance string
 		guidance, err = conversationGuidance(&s)
 		if err == nil {
@@ -315,6 +321,11 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	}
 	if err == nil {
 		err = p.prepareCapabilities(s)
+	}
+	if t.runner != nil {
+		a.mu.Lock()
+		t.runner.adapter = p
+		a.mu.Unlock()
 	}
 	defer p.closeMCP()
 	if p.internalSkillPrompt != "" {
@@ -367,10 +378,10 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 			}
 		}
 		var bridge *linkedBridge
-		if err == nil {
+		if err == nil && t.runner == nil {
 			err = p.initializeDelegation(native)
 		}
-		if err == nil {
+		if err == nil && t.runner == nil {
 			var recovery string
 			recovery, err = p.delegationRecoveryContext()
 			payload.Text = recovery + payload.Text
@@ -444,6 +455,24 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 			t.stopErr = errors.Join(t.stopErr, drainErr)
 		}
 	}
+	if t.runner != nil && p.runtime != nil {
+		t.runner.mu.Lock()
+		unknownMCP := len(t.runner.uncertainMCP) > 0
+		t.runner.mu.Unlock()
+		if unknownMCP {
+			p.processDrainFailed = true
+			err = errors.Join(err, errors.New("An external MCP outcome is unconfirmed; the call was not replayed."))
+		}
+		drainErr := p.runtime.shutdown()
+		err = errors.Join(err, drainErr)
+		p.processesDrained = drainErr == nil && !p.processDrainFailed
+		if drainErr != nil {
+			t.stopErr = errors.Join(t.stopErr, drainErr)
+		}
+		if !p.processesDrained {
+			t.stopErr = errors.Join(t.stopErr, err, errors.New("External process or tool drainage was not confirmed."))
+		}
+	}
 	graphResult := p.finishGraphAdapter(err)
 	if p.graphNode() && graphResult.Error != nil {
 		err = graphResult.Error
@@ -497,6 +526,9 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	t.approvals = nil
 	t.questions = nil
 	close(t.done)
+	if t.runner != nil && a.runner != nil {
+		a.runner.finishedLocked(p, errors.Join(err, finalErr))
+	}
 	a.scheduleLinkedLocked()
 	a.mu.Unlock()
 	if finalErr != nil {
@@ -763,6 +795,7 @@ func contentText(value any) string {
 // Stable keys upsert harness items in first-observed order. Native deltas append
 // text; accumulated tool results and completed messages replace text.
 func (p *adapter) put(key, kind, title string, value any, status string, appendText bool, raw map[string]any) error {
+	p.trackRunnerTool(key, kind, title, status, raw)
 	text, plain := value.(string)
 	if p.app.store != nil && (!plain || len(text) > protocolChunkSize || protocolHasContent(raw) || protocolValueBytes(raw, map[*protocolFrame]bool{}) > protocolChunkSize || p.streamedContent[p.keys[key]]) {
 		return p.putStreamed(key, kind, title, value, status, appendText, raw)

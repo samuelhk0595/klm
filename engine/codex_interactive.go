@@ -94,6 +94,9 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 			"-c", "mcp_servers.klm_linked.startup_timeout_sec=15",
 			"-c", "mcp_servers.klm_linked.tool_timeout_sec=" + strconv.FormatInt(int64(linkedToolClientTimeout/time.Second), 10),
 		}
+		if p.turn.runner != nil {
+			args = append(args, "-c", "features.shell_tool=false", "-c", "features.unified_exec=false")
+		}
 		if p.capabilities != nil {
 			if err := validateCodexLibraryBinary(b); err != nil {
 				return err
@@ -795,6 +798,18 @@ func (c *codexInteractive) frame(frame map[string]any) error {
 		defer release()
 	}
 	method, params := str(frame, "method"), object(frame["params"])
+	if c.p.turn.runner != nil && method == "thread/status/changed" && str(params, "threadId") == c.threadID {
+		waiting := false
+		flags, _ := object(params["status"])["activeFlags"].([]any)
+		for _, flag := range flags {
+			if flag == "waitingOnUserInput" || flag == "waitingOnApproval" {
+				waiting = true
+			}
+		}
+		if err := c.p.runnerWaiting(waiting); err != nil {
+			return err
+		}
+	}
 	c.p.observeCodexMCP(method, params)
 	if _, request := frame["id"]; request {
 		return c.request(frame)
@@ -882,6 +897,9 @@ func (c *codexInteractive) frame(frame map[string]any) error {
 			}
 		}
 		if str(item, "type") == "userMessage" {
+			if err := c.p.runnerNativeInput(contentText(item["content"]), false); err != nil {
+				return err
+			}
 			if clientID := str(item, "clientId"); clientID != "" {
 				if err := c.p.finishSteering(clientID, ""); err != nil {
 					return err

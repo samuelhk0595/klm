@@ -60,7 +60,7 @@ func (p *adapter) openCodeGraphConfig(node ...string) (string, func(), error) {
 	if !p.graphNode() {
 		plugin = "export default async function () { return {}; }"
 	}
-	policyData, _ := json.Marshal(map[string]any{"url": p.bridge.url, "token": p.bridge.token, "yolo": p.yolo, "graphNode": p.graphNode(), "library": p.capabilities != nil && p.harness == "opencode"})
+	policyData, _ := json.Marshal(map[string]any{"runner": p.turn.runner != nil, "url": p.bridge.url, "token": p.bridge.token, "yolo": p.yolo, "graphNode": p.graphNode(), "library": p.capabilities != nil && p.harness == "opencode"})
 	plugin = strings.Replace(plugin, "export default async function", "async function graphPlugin", 1) + "\n" +
 		strings.Replace(openCodePermissionsPlugin, "/*KLM_PERMISSION_CONFIG*/{}", string(policyData), 1)
 	_, delegationPlugin, assetErr := p.writeDelegationAssets(dir)

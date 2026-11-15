@@ -11,14 +11,15 @@ import (
 
 // Prepared attachments are stored separately from the public queue projection.
 type QueuedMessage struct {
-	Origin   *SpawnOrigin      `json:"origin,omitempty"`
-	ID       string            `json:"id"`
-	Text     string            `json:"text"`
-	Status   string            `json:"status"`
-	Mode     string            `json:"mode"`
-	Error    string            `json:"error,omitempty"`
-	Sources  []SourceReference `json:"sources,omitempty"`
-	Mentions []Mention         `json:"mentions,omitempty"`
+	RunnerSource *runnerInput      `json:"runnerSource,omitempty"`
+	Origin       *SpawnOrigin      `json:"origin,omitempty"`
+	ID           string            `json:"id"`
+	Text         string            `json:"text"`
+	Status       string            `json:"status"`
+	Mode         string            `json:"mode"`
+	Error        string            `json:"error,omitempty"`
+	Sources      []SourceReference `json:"sources,omitempty"`
+	Mentions     []Mention         `json:"mentions,omitempty"`
 }
 type queuedPayload struct {
 	Submission submission
@@ -311,6 +312,11 @@ func (p *adapter) steeringBoundary(method string, raw json.RawMessage) (any, err
 			return nil, errors.New("Unknown steering batch.")
 		}
 		return map[string]any{"consumed": true}, p.finishSteering(params.BatchID, "")
+	}
+	if p.harness == "opencode" {
+		if err := p.runnerNativeInput("", true); err != nil {
+			return nil, err
+		}
 	}
 	q, payload, err := p.takeSteering()
 	if err != nil || q == nil {

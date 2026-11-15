@@ -66,6 +66,8 @@ export function HistoryLoader({ session, onPage, direction = 'before', active = 
   async function load() {
     const root = container.current?.closest<HTMLElement>('.agent-work__items, .chat-history');
     if (!active || flight.current || !cursor || !root || !root.getClientRects().length) return;
+    // Bound automatic filling of collapsed work independently of the server's
+    // message quota and the retained message window; explicit scrolling resumes.
     if (session.events.length >= 200 && (root.scrollHeight <= root.clientHeight + 1 && !explicit.current || root.dataset.historyDirection && root.dataset.historyDirection !== direction)) return;
     explicit.current = false;
     const abort = new AbortController(); controller.current = abort;
@@ -76,7 +78,7 @@ export function HistoryLoader({ session, onPage, direction = 'before', active = 
       let pending = requests.get(key);
       if (!pending) {
         const shared = new AbortController();
-        pending = { controller: shared, readers: 0, promise: serializeHistory(session.id, () => request<EventPage>(`/api/sessions/${encodeURIComponent(session.id)}/history?${direction}=${encodeURIComponent(cursor!)}&limit=${PAGE_SIZE}`, 'GET', undefined, 15000, shared.signal)) };
+        pending = { controller: shared, readers: 0, promise: serializeHistory(session.id, () => request<EventPage>(`/api/sessions/${encodeURIComponent(session.id)}/history?unit=messages&${direction}=${encodeURIComponent(cursor!)}&limit=${PAGE_SIZE}`, 'GET', undefined, 15000, shared.signal)) };
         requests.set(key, pending);
         void pending.promise.finally(() => { if (requests.get(key) === pending) requests.delete(key); }).catch(() => {});
       }

@@ -362,6 +362,9 @@ func (p *adapter) analyticsStart() error {
 	return p.analyticsStartAt(time.Now())
 }
 func (p *adapter) analyticsDispatch() (time.Time, error) {
+	if p.turn != nil && p.turn.runner != nil {
+		return time.Now(), nil
+	}
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
 	if p.app.store != nil {
@@ -391,6 +394,9 @@ func (p *adapter) analyticsDispatch() (time.Time, error) {
 	return time.Now(), err
 }
 func (p *adapter) analyticsStartAt(anchor time.Time) error {
+	if p.turn != nil && p.turn.runner != nil {
+		return nil
+	}
 	p.app.mu.Lock()
 	defer p.app.mu.Unlock()
 	if p.app.store != nil {
@@ -743,7 +749,29 @@ func (a *app) checkpointAnalytics() {
 								return err
 							}
 						}
-						for id:=range a.graphRuns{key:=sqliteOwnedKey("settings",id);var g AnalyticsGraphTiming;err:=decodeSQLiteRecord(st.ctx,st.tx,"analytics_graphs",key,64<<10,&g);if errors.Is(err,sql.ErrNoRows){continue};if err!=nil{return err};if g.End!=""{continue};at,drift:=a.analyticsGraphInstant(id);if drift{g.Interrupted=true}else if !g.Interrupted{g.Last=analyticsStamp(at)};if err:=st.putExistingRecord("analytics_graphs",key,g);err!=nil{return err}}
+						for id := range a.graphRuns {
+							key := sqliteOwnedKey("settings", id)
+							var g AnalyticsGraphTiming
+							err := decodeSQLiteRecord(st.ctx, st.tx, "analytics_graphs", key, 64<<10, &g)
+							if errors.Is(err, sql.ErrNoRows) {
+								continue
+							}
+							if err != nil {
+								return err
+							}
+							if g.End != "" {
+								continue
+							}
+							at, drift := a.analyticsGraphInstant(id)
+							if drift {
+								g.Interrupted = true
+							} else if !g.Interrupted {
+								g.Last = analyticsStamp(at)
+							}
+							if err := st.putExistingRecord("analytics_graphs", key, g); err != nil {
+								return err
+							}
+						}
 						return nil
 					})
 				} else {

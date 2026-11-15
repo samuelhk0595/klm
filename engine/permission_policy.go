@@ -469,7 +469,7 @@ func (a *app) permissionRules(w http.ResponseWriter, r *http.Request) {
 		next := ""
 		more := false
 		err = a.store.readSnapshot(r.Context(), func(tx *sql.Tx) error {
-			ids, err := sqliteQueryIDs(r.Context(), tx, `SELECT id FROM data_permission_grants g WHERE id>? AND NOT EXISTS(SELECT 1 FROM permission_reply_intents i WHERE i.grant_id=g.id) ORDER BY id LIMIT ?`, r.URL.Query().Get("after"), limit+1)
+			ids, err := sqliteQueryIDs(r.Context(), tx, `SELECT id FROM data_permission_grants g WHERE id>? AND NOT EXISTS(SELECT 1 FROM runner_generations r WHERE r.session_id=g.session_id) AND NOT EXISTS(SELECT 1 FROM permission_reply_intents i WHERE i.grant_id=g.id) ORDER BY id LIMIT ?`, r.URL.Query().Get("after"), limit+1)
 			if err != nil {
 				return err
 			}
@@ -562,7 +562,16 @@ func (a *app) resolveRememberedPermissions() {
 func (a *app) deletePermissionRule(w http.ResponseWriter, r *http.Request) {
 	if a.store != nil {
 		a.mu.Lock()
-		err := a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error { return st.deleteRecord("permission_grants", r.PathValue("ruleID")) })
+		err := a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error {
+			var external bool
+			if err := st.tx.QueryRowContext(st.ctx, `SELECT EXISTS(SELECT 1 FROM data_permission_grants g JOIN runner_generations r ON r.session_id=g.session_id WHERE g.id=?)`, r.PathValue("ruleID")).Scan(&external); err != nil {
+				return err
+			}
+			if external {
+				return sql.ErrNoRows
+			}
+			return st.deleteRecord("permission_grants", r.PathValue("ruleID"))
+		})
 		a.mu.Unlock()
 		if err != nil {
 			sqlHTTPError(w, err)

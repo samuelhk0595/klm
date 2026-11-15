@@ -88,11 +88,14 @@ Worker capture additionally pins the saved Agent's full source identity/revision
 KLM materializes the actual execution resources using its existing mechanisms.
 Missing capabilities fail admission explicitly; no stripping or silent substitution.
 
-Foreman's execution capture always requests YOLO, following the user's fixed role
-requirement. Werbert shows that state read-only in Chat. This does not grant new
-tools, expand the captured task scope, auto-answer MCP elicitation or change a
-worker's separate captured permission policy. The current frontend-mock phase
-only displays/simulates this requirement and performs no real runner mutation.
+Foreman and every Factory worker always capture `yolo=true`, following the user's
+fixed external-role requirement. Werbert shows the effective mode read-only; no
+execution-mode toggle or saved-Agent YOLO field is introduced. The worker's fixed
+mode is captured explicitly, not obtained by inheriting Foreman's Library or
+settings. YOLO does not grant new tools, expand task scope, answer necessary task
+questions or auto-answer MCP elicitation. Personal KLM permission settings remain
+unchanged. Mock-only displays and fixture captures do not establish this runtime
+behavior until the real runner is implemented and validated.
 
 Werbert provides a bounded JSON-schema operational-tool manifest at native context
 creation. KLM makes only that external-role manifest and approved execution tools
@@ -135,9 +138,11 @@ the shell wait limit. Do not infer five-second handling for arbitrary remote MCP
 tools; unsupported long-tool behavior must be diagnosed and mapped explicitly.
 
 Operational Factory handlers perform durable admission/read operations and return
-promptly; delegation never waits for the worker result. Any necessary long
-non-shell operation needs explicit job semantics rather than a misleading
-five-second timeout that leaves unknown remote effects.
+promptly; delegation never waits for the worker result. In this first delivery,
+selected MCP calls retain the existing supported invocation/timeout/elicitation
+behavior. Do not convert them into jobs, add pending-job result envelopes or
+kill/retry them to manufacture five-second availability. Long non-shell calls may
+delay the next eligible step; asynchronous MCP conversion is explicitly deferred.
 
 SSE, if used, is a wake hint. Werbert's persisted cursor and the event/content APIs
 provide recovery. Commit a received event, its local state changes and notification
@@ -171,6 +176,13 @@ the smallest new external-execution records/hooks. Preserve the current dirty
 checkout and unrelated personal-session behavior. No second harness adapter stack,
 independent scheduler for the same work or automatic legacy-data migration is
 introduced in Werbert.
+
+The short isolated pinned-harness feasibility proof is the first implementation
+activity after authorization, before substantial persistence/API/business work.
+Establish external tools, fixed YOLO on both roles, five-second shell jobs and
+actual next-step delivery first; raise a concrete incompatibility before building
+the rest on an unproven native mechanism. Do not build a generic probe framework
+or include MCP-to-job conversion in this proof.
 
 For Pi, OpenCode and Codex, record actual support for the captured external tools,
 serial input boundaries, five-second shell/job behavior, native requests,

@@ -16,6 +16,10 @@ export default async function (context) {
   }
   return {
     ...hooks,
+    'chat.message': async (input, output) => {
+      await hooks['chat.message']?.(input, output);
+      if (permissionConfig.runner) output.message.tools = { ...output.message.tools, bash: false, shell: false, powershell: false, task: false, subagent: false, subagent_run: false };
+    },
     "experimental.chat.messages.transform": async (input, output) => {
       await hooks["experimental.chat.messages.transform"]?.(input, output);
       if (permissionConfig.graphNode) return;
@@ -43,6 +47,7 @@ export default async function (context) {
       await steeringRPC("klm/steering/consumed", { sessionID, batchID: batch.batchID });
     },
     "tool.execute.before": async (input, output) => {
+      if (permissionConfig.runner && ['bash', 'shell', 'powershell', 'task', 'subagent', 'subagent_run'].includes(input.tool)) throw new Error('Native execution bypass is disabled for this captured external role.');
       const response = await fetch(permissionConfig.url, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: "Bearer " + permissionConfig.token },
@@ -73,6 +78,15 @@ export default async function (context) {
       }
       if (permissionConfig.library) {
         await steeringRPC("klm/library/opencode/ready", {});
+      }
+      if (permissionConfig.runner) {
+        const deny = { bash: 'deny', shell: 'deny', powershell: 'deny', task: 'deny', subagent: 'deny', subagent_run: 'deny' };
+        config.permission = { ...config.permission, ...deny };
+        config.tools = { ...config.tools, ...Object.fromEntries(Object.keys(deny).map(name => [name, false])) };
+        for (const agent of Object.values(config.agent ?? {})) {
+          agent.permission = { ...agent.permission, ...deny };
+          agent.tools = { ...agent.tools, ...Object.fromEntries(Object.keys(deny).map(name => [name, false])) };
+        }
       }
     },
   };
