@@ -217,7 +217,9 @@ func (a *app) executeGraphTerminal(g *graphExecution, run GraphRun, x GraphActiv
 	args := []string{scriptFile}
 	switch terminalShell(node) {
 	case "powershell":
-		args = []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(". $env:KLM_GRAPH_SCRIPT_FILE")}
+		// Keep authored PowerShell inline: dot-sourcing the unsigned artifact
+		// introduces script-file execution-policy restrictions on Windows.
+		args = []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(strings.TrimPrefix(script, "\ufeff"))}
 	case "bash":
 		args = []string{"--noprofile", "--norc", scriptFile}
 	}

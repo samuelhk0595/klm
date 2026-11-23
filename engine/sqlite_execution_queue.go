@@ -255,9 +255,6 @@ func (a *app) scheduleSQLMessagesLocked() {
 		}
 		if bound {
 			if err := a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
-				if err := st.releaseAutomationForInput(&meta); err != nil {
-					return err
-				}
 				meta.Status = "running"
 				return st.putSessionMeta(meta)
 			}); err != nil {

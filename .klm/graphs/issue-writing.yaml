@@ -6,4 +6,16 @@ nodes:
         type: agent
         name: Organizer
         agent: issues-triage
-choices: {}
+        choices:
+            - work-done
+choices:
+    work-done:
+        name: work_done
+        description: Called when the work is fully done
+        input:
+            summary:
+                type: string
+                required: true
+        output:
+            summary: '{{choice.summary}}'
+        terminal: true
