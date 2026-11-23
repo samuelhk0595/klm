@@ -1,5 +1,5 @@
 export const PAGE_SIZE = 25;
-export const EDGE_MARGIN = 160;
+export const EDGE_MARGIN = 300;
 
 export function scrollRoot(element: HTMLElement): HTMLElement {
   for (let parent = element.parentElement; parent; parent = parent.parentElement) {

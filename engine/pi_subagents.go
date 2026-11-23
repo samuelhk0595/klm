@@ -362,7 +362,12 @@ func (p *adapter) preparePiSubagents(dir string, channel *piChildChannel, b bina
 		return "", nil
 	}
 	if runtime.GOOS == "linux" {
-		return "", errors.New("An installed pi-subagents package requires separate Linux compatibility validation. Native delegation was not loaded; the managed turn was refused.")
+		// Foreground SDK children and background runners are descendants of the
+		// parent's exclusive supervisor. The parent is retired at the native-child
+		// settlement boundary (including setsid descendants), never just at EOF.
+		if err := graphContainmentAvailable(); err != nil {
+			return "", err
+		}
 	}
 	var pkg struct {
 		Name    string `json:"name"`

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,6 +20,10 @@ import (
 )
 
 const managedOpenCodeAgent = "build"
+
+type openCodeInspectionFailure struct{ message string }
+
+func (e *openCodeInspectionFailure) Error() string { return e.message }
 
 func (p *adapter) openCodeManagedAgent() string {
 	if p.openCodeRootAgent != "" {
@@ -35,8 +40,8 @@ func validateOpenCodeLibraryBinary(b binary) error {
 }
 
 // Catalog reads share the pinned profile format, not managed execution admission.
-// Ordinary Linux turns additionally establish an owned subreaper/pidfd runtime;
-// graph platform admission remains independent and Windows-only.
+// Linux turns additionally establish an owned subreaper/pidfd runtime; graph
+// admission independently requires its supervisor capability handshake.
 func validateOpenCodeCatalogBinary(b binary) error {
 	if runtime.GOOS != "windows" && runtime.GOOS != "linux" {
 		return errors.New("OpenCode model discovery is supported on Windows and Linux only.")
@@ -501,7 +506,7 @@ func rewriteOpenCodeFileReferences(value any, dir string) any {
 
 // Remote config-bearing authentication and system policy are not silently
 // overridden. The ordinary provider auth file and native history stay in place.
-func inspectOpenCodeLibrarySources(ctx context.Context) error {
+func inspectOpenCodeLibrarySources(ctx context.Context, resolvedNode ...string) error {
 	dataRoot := filepath.Join(configHome("XDG_DATA_HOME", ".local", "share"), "opencode")
 	authPath := filepath.Join(dataRoot, "auth.json")
 	if data, err := os.ReadFile(authPath); err == nil {
@@ -542,35 +547,79 @@ func inspectOpenCodeLibrarySources(ctx context.Context) error {
 		return errors.New("Managed OpenCode requires an absolute native database path.")
 	}
 	if _, err := os.Stat(db); os.IsNotExist(err) {
+		log.Printf("OpenCode inspection category=database_absent (account metadata was not inspected)")
 		return nil
 	} else if err != nil {
 		return err
 	}
-	node, ok := executable("node")
-	if !ok {
-		return errors.New("Managed OpenCode requires Node with node:sqlite to inspect configuration-bearing account metadata.")
+	node := ""
+	if len(resolvedNode) > 0 {
+		node = resolvedNode[0]
 	}
-	const script = `const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.argv[1],{readOnly:true});const tables=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='account_state'").all();const row=tables.length?db.prepare('SELECT active_org_id FROM account_state WHERE active_org_id IS NOT NULL LIMIT 1').get():null;db.close();process.stdout.write(row?'remote':'local');`
+	if node == "" {
+		node = resolveNode(ctx).Node
+	}
+	if node == "" || !regularFile(node) {
+		return &openCodeInspectionFailure{"OpenCode inspection: Node executable is unavailable. Refresh the harness installation."}
+	}
+	// Only known categories cross the process boundary. Never print database rows,
+	// exception messages or native stderr (which may contain credentials).
+	const script = `let stage='sqlite_module',db;const result={node:process.version,category:'unexpected'};try{const {DatabaseSync}=require('node:sqlite');stage='database_open';db=new DatabaseSync(process.argv[1],{readOnly:true});stage='schema';const tables=db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='account_state'").all();if(tables.length){const columns=db.prepare('PRAGMA table_info(account_state)').all();if(!columns.some(c=>c.name==='active_org_id'))throw Error('schema');}stage='organization_query';const row=tables.length?db.prepare('SELECT active_org_id FROM account_state WHERE active_org_id IS NOT NULL LIMIT 1').get():null;result.category=row?'remote':'local';}catch{result.category=stage;}finally{try{db?.close();}catch{}process.stdout.write(JSON.stringify(result));}`
 	check, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(check, node, "-e", script, db)
 	configureProcess(cmd)
-	output, err := cmd.Output()
-	if err != nil {
-		return errors.New("Cannot safely inspect OpenCode organization configuration metadata (Node 22+ required).")
+	cmd.Cancel = func() error { return killTree(cmd.Process) }
+	cmd.WaitDelay = time.Second
+	var output, diagnostic cappedBuffer
+	cmd.Stdout, cmd.Stderr = &output, &diagnostic
+	started, diagnosticID := time.Now(), newID()
+	err := cmd.Run()
+	var result struct {
+		Node     string `json:"node"`
+		Category string `json:"category"`
 	}
-	if string(output) != "local" {
+	category := "process"
+	if err == nil && !output.truncated && json.Unmarshal(output.data, &result) == nil {
+		switch result.Category {
+		case "local", "remote", "sqlite_module", "database_open", "schema", "organization_query":
+			category = result.Category
+		}
+	}
+	if check.Err() != nil {
+		category = "timeout"
+		if ctx.Err() != nil {
+			category = "cancelled"
+		}
+	}
+	exitCode := -1
+	processStatus := "unavailable"
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+		processStatus = cmd.ProcessState.String()
+	}
+	if result.Node == "" {
+		result.Node = "unavailable"
+	}
+	log.Printf("OpenCode inspection diagnostic=%s node=%q version=%q category=%s exit=%d status=%q duration=%s stderr_bytes=%d", diagnosticID, node, result.Node, category, exitCode, processStatus, time.Since(started), len(diagnostic.data))
+	if category == "cancelled" {
+		return ctx.Err()
+	}
+	if category == "remote" {
 		return errors.New("Managed OpenCode Library does not support active organization-supplied configuration on this version.")
+	}
+	if category != "local" {
+		return &openCodeInspectionFailure{fmt.Sprintf("OpenCode inspection failed at %s (Node %s, executable %s, exit %d, %s; diagnostic %s).", category, result.Node, node, exitCode, processStatus, diagnosticID)}
 	}
 	return nil
 }
 
-func (p *adapter) configureOpenCodeLibrary(config map[string]any, dir string) ([]string, error) {
+func (p *adapter) configureOpenCodeLibrary(config map[string]any, dir string, node ...string) ([]string, error) {
 	projection, err := openCodeLibraryProjection(p.cwd)
 	if err != nil {
 		return nil, err
 	}
-	if err := inspectOpenCodeLibrarySources(p.turn.ctx); err != nil {
+	if err := inspectOpenCodeLibrarySources(p.turn.ctx, node...); err != nil {
 		return nil, err
 	}
 	for key := range config {

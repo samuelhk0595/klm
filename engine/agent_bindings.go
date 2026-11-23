@@ -168,11 +168,6 @@ func (a *app) patchAgentBinding(ctx context.Context, id, expected, selectionRevi
 		if (patch.Model.Present || patch.Effort.Present) && (a.runs[id] != nil || meta.Status == "running") {
 			return controlError(409, "Wait for the current turn before changing model or effort.")
 		}
-		if run, err := st.activeAutomation(id); err != nil {
-			return err
-		} else if run != nil {
-			return controlError(409, "Automation settings are read-only until the run ends.")
-		}
 		var pending bool
 		if err := st.tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM data_library_deletions)`).Scan(&pending); err != nil {
 			return err

@@ -70,23 +70,25 @@ type AutomationTrigger struct {
 }
 
 type AutomationRun struct {
-	PromptKind        string              `json:"promptKind,omitempty"`
-	SettingsResolved  bool                `json:"settingsResolved,omitempty"`
-	ID                string              `json:"id"`
-	AutomationID      string              `json:"automationId"`
-	ProjectID         string              `json:"projectId"`
-	SessionID         string              `json:"sessionId"`
-	Snapshot          Automation          `json:"snapshot"`
-	Trigger           AutomationTrigger   `json:"trigger"`
-	Capabilities      *CapabilitySnapshot `json:"capabilities,omitempty"`
-	Status            string              `json:"status"`
-	Decision          string              `json:"decision,omitempty"`
-	Reason            string              `json:"reason,omitempty"`
-	Reminder          bool                `json:"reminder"`
-	NeedsContinuation bool                `json:"needsContinuation"`
-	StopRequested     bool                `json:"stopRequested"`
-	StartedAt         string              `json:"startedAt"`
-	FinishedAt        string              `json:"finishedAt,omitempty"`
+	LiveYOLO          *bool                 `json:"liveYolo,omitempty"` // explicit human policy edit; admitted snapshot stays immutable
+	GraphGrant        *AutomationGraphGrant `json:"graphGrant,omitempty"`
+	PromptKind        string                `json:"promptKind,omitempty"`
+	SettingsResolved  bool                  `json:"settingsResolved,omitempty"`
+	ID                string                `json:"id"`
+	AutomationID      string                `json:"automationId"`
+	ProjectID         string                `json:"projectId"`
+	SessionID         string                `json:"sessionId"`
+	Snapshot          Automation            `json:"snapshot"`
+	Trigger           AutomationTrigger     `json:"trigger"`
+	Capabilities      *CapabilitySnapshot   `json:"capabilities,omitempty"`
+	Status            string                `json:"status"`
+	Decision          string                `json:"decision,omitempty"`
+	Reason            string                `json:"reason,omitempty"`
+	Reminder          bool                  `json:"reminder"`
+	NeedsContinuation bool                  `json:"needsContinuation"`
+	StopRequested     bool                  `json:"stopRequested"`
+	StartedAt         string                `json:"startedAt"`
+	FinishedAt        string                `json:"finishedAt,omitempty"`
 }
 
 type AutomationRecovery struct {

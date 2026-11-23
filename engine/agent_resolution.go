@@ -80,7 +80,7 @@ func (a *app) validateResolvedAgent(ctx context.Context, config ResolvedAgentCon
 	}
 	catalog, err := a.catalog(ctx, Session{ProjectID: projectID, Harness: config.Harness}, cwd, false)
 	if err != nil {
-		return config, agentProblem(502, "catalog_unavailable", "model", modelCatalogLoadError)
+		return config, agentProblem(502, "catalog_unavailable", "model", catalogFailureMessage(err))
 	}
 	if config.Model == "" {
 		config.Model = catalog.DefaultModel

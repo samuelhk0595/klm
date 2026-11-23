@@ -98,6 +98,29 @@ the user requests a redesign.
 - See SKILLS_MCP_LIBRARY_IMPLEMENTATION_PROGRESS.md for evidence and unvalidated
   runtime paths; do not infer acceptance from compilation or fixture probes.
 
+## Linux amd64 and 0.6.2
+
+- Linux graphs use per-activation subreaper/pidfd domains and a supervisor handshake
+  before admission. Keep Choice/tool-call sealing and confirmed drainage; capability
+  implementation is not runtime acceptance. Native pi-subagents remains separate
+  from engine-owned `subagent_run`, with parent-domain shutdown after settlement.
+- Terminal `shell` persists PowerShell/Bash/sh. Missing legacy fields always mean
+  PowerShell; new Linux nodes explicitly default to sh based on the engine OS.
+- Resolve `GH_CONFIG_DIR` from the original engine environment before isolated XDG
+  projection. Do not copy gh credentials or change independent MCP environments.
+- Linux MCP secrets use an engine-specific AES-GCM key in private data storage;
+  preserve the matching database/key backup, links/owner/mode checks and explicit
+  missing-key/integrity errors. Windows retains DPAPI. This is not same-user isolation.
+- Automation chats use ordinary composer/queue/Stop/Send now. New input dispatch
+  transactionally releases automation ownership; enqueueing alone does not.
+  Saved graph selection authorizes only those graphs within the captured automation
+  objective and exact owning turn, with persisted configuration provenance. Outside
+  it, real human-message graph authorization remains required. Never synthesize user
+  events, broaden session/Library/tool grants or infer a retry fresh/reuse decision.
+- Zenity/KDialog is an optional engine-host native picker on graphical Linux;
+  headless hosts retain remote directory browsing. See
+  V0_6_2_IMPLEMENTATION_PROGRESS.md for checks and pending human acceptance.
+
 ## UI Copy
 
 Mobile host URLs use port 7332 by default only for literal IP addresses. Never add

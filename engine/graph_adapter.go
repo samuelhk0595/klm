@@ -74,15 +74,22 @@ func PrepareGraphProcess(cmd *exec.Cmd) (GraphOwnedProcess, error) {
 // Interrupt/idle/completed alone are not a seal. A gate or confirmed termination
 // of the complete owned process domain is required before accepting a Choice.
 func GraphAdapterCapabilities() []GraphAdapterCapability {
-	contained := runtime.GOOS == "windows"
-	return []GraphAdapterCapability{
+	containmentErr := graphContainmentAvailable()
+	contained := containmentErr == nil
+	capabilities := []GraphAdapterCapability{
 		{Harness: "pi", PreExecutionGate: true, OwnedContainment: contained,
 			Limitation: "Gate covers agent-dispatched tools in the owned extension only. No containment of remote work delegated by a command. Native continuation has not been exercised."},
 		{Harness: "opencode", PreExecutionGate: true, OwnedContainment: contained,
 			Limitation: "Requires the owned pre-tool plugin handshake; harness versions are not gated. Tracks tool-call responses, not server lifetime or detached remote tasks. Ambiguous transport/cancellation errors retain finality uncertainty."},
 		{Harness: "codex", OwnedContainment: contained, ProcessSeal: contained,
-			Limitation: "Choice stays reserved until native settlement, returned MCP calls and termination of the owned Job. Local cancellation is not a remote response. Detached tasks after a tool response are outside the guarantee."},
+			Limitation: "Choice stays reserved until native settlement, returned MCP calls and confirmed termination of the owned process domain (Windows Job / Linux subreaper and pidfds). Local cancellation is not a remote response. Detached remote tasks after a response are outside the guarantee."},
 	}
+	if containmentErr != nil {
+		for i := range capabilities {
+			capabilities[i].Limitation = containmentErr.Error() + " " + capabilities[i].Limitation
+		}
+	}
+	return capabilities
 }
 
 // Preflight before dispatching any graph task. Do not perform work with an
@@ -513,7 +520,7 @@ func (p *adapter) finishGraphAdapter(runErr error) GraphAdapterResult {
 	}
 	// Codex has no dependable fail-closed pre-tool hook. Its barrier is physical:
 	// leave the result RESERVED while native interrupt completes, then terminate
-	// the entire owned Job. Zero live processes seals ALL already-authorized local
+	// the entire owned process domain. Confirmed drainage seals ALL authorized local
 	// tools as well as future dispatch. Persist that evidence before acceptance.
 	// No graph result is accepted during the reservation/interrupt window.
 	if p.harness == "codex" && b.state == "reserved" && p.nativeSettled && p.choiceToolSettled && p.processesDrained {

@@ -75,7 +75,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 	session := p.app.state.session(p.id)
 	var sqlNative nativeSession
 	if p.app.store != nil {
-		meta, native, _, readErr := p.app.store.readTurnSession(ctx, p.id)
+		meta, native, _, readErr := p.app.store.readTurnSession(ctx, p.id, p.automationRunID)
 		if readErr != nil {
 			p.app.mu.Unlock()
 			return readErr
@@ -218,7 +218,11 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 		for _, live := range questionRequests {
 			live.Store(false)
 		}
-		if p.runtime == nil {
+		if p.runtime != nil && (children != nil || p.automationRunID != "") {
+			shutdownErr := p.runtime.shutdown()
+			p.processesDrained = shutdownErr == nil
+			err = errors.Join(err, shutdownErr)
+		} else if p.runtime == nil {
 			_ = proc.Close()
 			p.processesDrained = proc.Drained()
 		} else {

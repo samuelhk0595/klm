@@ -41,9 +41,6 @@ func (a *app) stopSQLSessionLocked(id string, origin *SpawnOrigin) (*turn, error
 	if err != nil {
 		return nil, err
 	}
-	if automation != nil && !automation.StopRequested {
-		return nil, controlError(409, "Confirm stopping the automation run in its conversation first.")
-	}
 	if a.stopVersions == nil {
 		a.stopVersions = map[string]uint64{}
 	}
@@ -57,6 +54,12 @@ func (a *app) stopSQLSessionLocked(id string, origin *SpawnOrigin) (*turn, error
 	defer cancel()
 	var consultations []string
 	err = a.persistSQLLocked(ctx, func(st *sqliteSessionTx) error {
+		if automation != nil {
+			automation.StopRequested = true
+			if err := st.putRoot("automation_runs", automation.ID, *automation); err != nil {
+				return err
+			}
+		}
 		if err := st.eachMatching("queued_messages", `owner_id=? AND status IN ('queued','steering','interrupting')`, []any{id}, func(key string) error {
 			var q QueuedMessage
 			if err := decodeSQLiteRecord(ctx, st.tx, "queued_messages", key, 1<<20, &q); err != nil {
@@ -139,8 +142,8 @@ func (a *app) confirmSQLAutomationStopLocked(ctx context.Context, id, runID stri
 			}
 			return nil
 		}
-		if runID != r.ID {
-			return controlError(409, "Confirm stopping this automation run first.")
+		if runID != "" && runID != r.ID {
+			return controlError(409, "Automation ownership changed. Refresh before stopping.")
 		}
 		r.StopRequested = true
 		return st.putRoot("automation_runs", r.ID, *r)

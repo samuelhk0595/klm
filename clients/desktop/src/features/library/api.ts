@@ -7,11 +7,12 @@ export type ConversationCapabilities = { revision: Revision; desired: Capability
 export type SkillEntry = { id: string; name: string; description: string; revision?: string; valid: boolean; error?: string; source: string };
 export type MCPConfig = { transport: 'stdio' | 'http'; command?: string; args?: string[]; cwd?: string; url?: string; auth: 'none' | 'manual' | 'oauth'; clientId?: string; redirectUri?: string; scopes?: string[] };
 export type MCPConnection = { id: string; name: string; revision: string; config: MCPConfig; credentialsConfigured: boolean; catalog?: { tools: { name: string; description?: string }[]; resources: boolean; revision: string } | null; lastTestAt?: string; lastTestError?: string };
-export type LibraryInventory = { skillsRoot: string; skills: SkillEntry[]; skillsHasMore?: boolean; skillsNextOffset?: number; skillsWindowStart?: number; search?: string; connections: MCPConnection[]; recoveryPending: boolean; harnesses: Record<string, { managed: boolean; status: string }> };
+export type LibraryInventory = { clientGeneration?: number; skillsRoot: string; skills: SkillEntry[]; skillsHasMore?: boolean; skillsNextOffset?: number; skillsWindowStart?: number; search?: string; connections: MCPConnection[]; recoveryPending: boolean; harnesses: Record<string, { managed: boolean; status: string }> };
 export type DeletionPreview = { revision: string; itemRevision: string; references: { kind: string; id: string; title: string; projectId?: string }[]; hasMore?: boolean; nextOffset?: number; total?: number };
 export const emptySelection = (): CapabilitySelection => ({ skills: [], mcpConnections: [] });
 export const selectionOf = (value?: CapabilitySelection): CapabilitySelection => ({ skills: value?.skills ?? [], mcpConnections: value?.mcpConnections ?? [] });
 export const libraryPath = (id: string) => `/api/library/mcp/${encodeURIComponent(id)}`;
+let inventoryGeneration = 0;
 export const getLibrary = async (signal?: AbortSignal, search = ''): Promise<LibraryInventory> => {
   const query = `limit=25&search=${encodeURIComponent(search)}`;
   const page = await request<LibraryInventory & { hasMore?: boolean; nextOffset?: number }>(`/api/library?${query}`, 'GET', undefined, 20000, signal);
@@ -25,7 +26,7 @@ export const getLibrary = async (signal?: AbortSignal, search = ''): Promise<Lib
     if (page.connections.length > 64) throw new Error('Library changed. Refresh before continuing.');
   }
   page.connections = await Promise.all(page.connections.map(c => (c as MCPConnection & { detailRequired?: boolean }).detailRequired ? request<MCPConnection>(libraryPath(c.id), 'GET', undefined, 20000, signal) : Promise.resolve(c)));
-  return page;
+  return { ...page, clientGeneration: ++inventoryGeneration };
 };
 export const capabilityPath = (id: string) => `/api/sessions/${encodeURIComponent(id)}/capabilities`;
 export function selectionKey(selection?: CapabilitySelection) {

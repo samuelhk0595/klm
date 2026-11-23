@@ -120,6 +120,39 @@ func TestDelegationContracts(t *testing.T) {
 	if _, err := delegationCodexResponse(uncertain); err == nil {
 		t.Fatal("unsafe native response generated")
 	}
+	// Recovery may release the parent after a lost native completion, but never
+	// while processes or remote/tool calls may still be running.
+	if delegationRecoveryReason(settled, children) == "" {
+		t.Fatal("recovery accepted unconfirmed process drainage")
+	}
+	children[1].State, children[1].Outcome, children[1].EndedAt, children[1].ResultDigest = DelegationInvocationDraining, "", "", ""
+	unconfirmed.ProcessesDrained, unconfirmed.NativeSettled = true, false
+	children[1], err = completeDelegationInvocation(children[1], DelegationFinalityUnconfirmed, unconfirmed, "partial-result", "Lost native stream", "fixture-ended")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reason := delegationRecoveryReason(settled, children); reason != "" {
+		t.Fatal("drained lost-stream batch could not recover", reason)
+	}
+	recovered, _, err := settleDelegationBatch(batch, children, "fixture-ended")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := advanceDelegationDelivery(recovered, DelegationDeliveryAbandoned); err == nil {
+		t.Fatal("recovery accepted without an explicit decision")
+	}
+	recovered.Recovery = &DelegationRecoveryDecision{OperationID: "human-decision", ResolvedAt: "fixture-time"}
+	recovered, err = advanceDelegationDelivery(recovered, DelegationDeliveryAbandoned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recoveredResult, err := buildDelegationResult(recovered, children)
+	if err != nil || recoveredResult.CanContinue || recoveredResult.Outcome != DelegationFinalityUnconfirmed {
+		t.Fatal("recovery rewrote the unconfirmed execution outcome", err)
+	}
+	if err := (DelegationBatchRecord{Delivery: DelegationDeliveryAbandoned}).Validate(); err == nil {
+		t.Fatal("abandoned delivery lacks a durable recovery decision")
+	}
 	lease := DelegationChildRecord{Version: 1, ID: children[1].ChildSessionID, ParentSessionID: batch.ParentSessionID, Origin: "engine", Harness: "pi", ExecutionCWD: children[1].ExecutionCWD, ActiveInvocationID: children[1].ID, CreatedAt: "fixture-time"}
 	lease, err = finishDelegationChild(lease, children[1])
 	if err != nil || !lease.Quarantined || lease.Reusable() {

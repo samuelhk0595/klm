@@ -18,6 +18,7 @@ func (a *app) delegationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/sessions/{id}/delegation/batches/{batchId}/invocations/{invocationId}/output", a.chatSessionHandler(a.delegationHTTP))
 	mux.HandleFunc("GET /api/sessions/{id}/delegation/requests", a.chatSessionHandler(a.delegationRequestsHTTP))
 	mux.HandleFunc("GET /api/sessions/{id}/delegation/children", a.chatSessionHandler(a.delegationChildrenHTTP))
+	mux.HandleFunc("POST /api/sessions/{id}/delegation/batches/{batchId}/recover", a.chatSessionHandler(a.recoverDelegationHTTP))
 	for _, suffix := range []string{"batches", "batches/{batchId}/members", "batches/{batchId}/invocations/{invocationId}/output"} {
 		mux.HandleFunc("GET /api/sessions/{id}/graph/runs/{runId}/activations/{activationId}/delegation/"+suffix, a.graphDelegationHTTP)
 	}

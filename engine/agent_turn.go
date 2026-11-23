@@ -111,7 +111,10 @@ func (st *sqliteSessionTx) markAgentApplied(id string, preparation *AgentTurnPre
 // specialist/model/Library preparation succeeds. A failed preparation pauses the
 // exact queue, rather than consuming it or starting an automatic retry loop.
 func (a *app) executeBoundQueued(t *turn, s Session, native nativeSession, b binary, cwd string, payload submission, messages []QueuedMessage) {
-	preparation, err := a.prepareAgentTurn(t.ctx, s.ID, nil)
+	// Prepare the replacement's current settings, not the previous automation's
+	// frozen capture. Ownership remains intact until queued input is admitted.
+	ctx := context.WithValue(t.ctx, automationTurnContextKey{}, "")
+	preparation, err := a.prepareAgentTurn(ctx, s.ID, nil)
 	a.mu.Lock()
 	if a.runs[s.ID] != t || t.ctx.Err() != nil {
 		err = context.Canceled
@@ -144,6 +147,9 @@ func (a *app) executeBoundQueued(t *turn, s Session, native nativeSession, b bin
 				if err := st.appendQueuedUser(s.ID, q); err != nil {
 					return err
 				}
+			}
+			if err := st.releaseAutomationForInput(&current); err != nil {
+				return err
 			}
 			current.Status = "running"
 			current.UpdatedAt = now()

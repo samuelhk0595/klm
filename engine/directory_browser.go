@@ -64,10 +64,11 @@ func (a *app) filesystemRoots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respond(w, 200, struct {
-		Roots        []filesystemDirectory `json:"roots"`
-		Home         *string               `json:"home"`
-		NativePicker bool                  `json:"nativePicker"`
-	}{roots, home, platformNativeDirectoryPicker})
+		Roots                []filesystemDirectory `json:"roots"`
+		Home                 *string               `json:"home"`
+		NativePicker         bool                  `json:"nativePicker"`
+		DefaultTerminalShell string                `json:"defaultTerminalShell"`
+	}{roots, home, nativeDirectoryPickerAvailable(), defaultTerminalShell()})
 }
 
 func directoryBrowserError(w http.ResponseWriter, err error) {

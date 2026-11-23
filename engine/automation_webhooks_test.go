@@ -15,6 +15,9 @@ func TestAutomationWebhookRouting(t *testing.T) {
 		{EventType: "issues", Action: "edited"},
 		{EventType: "issues", Action: "assigned"},
 		{EventType: "issues", Action: "milestoned"},
+		{EventType: "issue_comment", Action: "created"},
+		{EventType: "issue_comment", Action: "edited"},
+		{EventType: "issue_comment", Action: "deleted"},
 	}
 	for _, trigger := range triggers {
 		t.Run(trigger.EventType+"/"+trigger.Action, func(t *testing.T) {
@@ -37,7 +40,7 @@ func TestAutomationWebhookRouting(t *testing.T) {
 			if vars["organization.name"] != "org" || vars["repository.name"] != "repo" {
 				t.Fatalf("missing repository context: %v", vars)
 			}
-			if trigger.EventType == "issues" {
+			if trigger.EventType == "issues" || trigger.EventType == "issue_comment" {
 				if vars["issue.number"] != "17" || vars["pr.number"] != "" {
 					t.Fatalf("issue number must come from issue.number: %v", vars)
 				}
@@ -73,6 +76,59 @@ func TestAutomationWebhookConfiguration(t *testing.T) {
 	if err := validateAutomationConfig(&v); err == nil {
 		t.Fatal("unsupported action accepted")
 	}
+	v.Webhook = &AutomationWebhook{EventType: "issue_comment", Action: "created"}
+	v.Prompt = "Handle comment on issue or PR {{issue.number}}"
+	if err := validateAutomationConfig(&v); err != nil {
+		t.Fatal("comment configuration rejected:", err)
+	}
+	v.SessionMode = "existing"
+	v.SessionID = "session"
+	v.FollowUpPrompt = "Handle PR {{pr.number}}"
+	if err := validateAutomationConfig(&v); err == nil {
+		t.Fatal("comment follow-up accepted an unavailable PR reference")
+	}
+	v.FollowUpPrompt = v.Prompt
+	if err := validateAutomationConfig(&v); err != nil {
+		t.Fatal("comment follow-up rejected:", err)
+	}
+}
+
+func TestAutomationWebhookCommentTargets(t *testing.T) {
+	for _, action := range []string{"created", "edited", "deleted"} {
+		for _, target := range []string{"issue", "pull_request"} {
+			t.Run(action+"/"+target, func(t *testing.T) {
+				marker := ""
+				if target == "pull_request" {
+					marker = `,"pull_request":{"url":"https://api.github.com/repos/org/repo/pulls/17"}`
+				}
+				e := WebhookStoredEvent{ID: "comment", ProjectID: "p", Provider: "github", EventType: "issue_comment", Action: action, ReceivedSequence: 2,
+					Payload: `{"number":99,"issue":{"number":17` + marker + `},"comment":{"body":"external content"},"repository":{"name":"repo"}}`}
+				d := diskState{Automations: []Automation{{ID: "comments", ProjectID: "p", Mode: "webhook", Enabled: true, Webhook: &AutomationWebhook{EventType: "issue_comment", Action: action}}}}
+				automationWebhook(&d, e)
+				if len(d.AutomationTriggers) != 1 {
+					t.Fatalf("comment did not enqueue: %+v", d.AutomationTriggers)
+				}
+				vars := d.AutomationTriggers[0].Variables
+				if len(vars) != 3 || vars["issue.number"] != "17" || vars["organization.name"] != "" || vars["repository.name"] != "repo" {
+					t.Fatalf("unexpected comment references: %v", vars)
+				}
+				d.AutomationTriggers = nil
+				e.EventType = "pull_request_review_comment"
+				automationWebhook(&d, e)
+				if len(d.AutomationTriggers) != 0 {
+					t.Fatal("inline review comment triggered a general-comment automation")
+				}
+			})
+		}
+	}
+	e := WebhookStoredEvent{Provider: "github", EventType: "issue_comment", Action: "created", Payload: `{"number":99,"repository":{"name":"repo"}}`}
+	if automationWebhookVariables(e) != nil {
+		t.Fatal("comment without issue.number used a top-level number")
+	}
+	e.Action = "opened"
+	if supportedAutomationWebhook(e.EventType, e.Action) {
+		t.Fatal("unsupported comment action accepted")
+	}
 }
 
 func TestAutomationWebhookPendingTriggerEdit(t *testing.T) {
@@ -81,6 +137,7 @@ func TestAutomationWebhookPendingTriggerEdit(t *testing.T) {
 	for _, config := range []AutomationWebhook{
 		{EventType: "issues", Action: "opened"},
 		{EventType: "pull_request", Action: "ready_for_review"},
+		{EventType: "issue_comment", Action: "created"},
 	} {
 		next := previous
 		next.Webhook = &config

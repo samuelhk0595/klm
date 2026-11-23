@@ -62,7 +62,9 @@ export function AutomationEditor({ initial: incoming, project, sessions, topics,
   const [promptField, setPromptField] = useEngineDraft<'prompt' | 'followUpPrompt'>(`${key}.promptField`, 'prompt');
   const sessionMode = draft.sessionMode || 'new_per_run';
   const webhook = webhookConfig(draft);
-  const availableReferences = references.filter(ref => ref.token !== (webhook.eventType === 'issues' ? '{{pr.number}}' : '{{issue.number}}'));
+  const unavailableReference = webhook.eventType === 'pull_request' ? '{{issue.number}}' : '{{pr.number}}';
+  const availableReferences = references.filter(ref => ref.token !== unavailableReference).map(ref =>
+    webhook.eventType === 'issue_comment' && ref.token === '{{issue.number}}' ? { ...ref, name: 'Issue or PR number', meaning: 'Issue or pull request number' } : ref);
   const usesSession = sessionMode === 'existing' || sessionMode === 'reuse_created' && !!draft.sessionId;
   const creating = !usesSession;
   const linked = !!initial.sessionId && (initial.sessionMode || 'new_per_run') !== 'new_per_run';
@@ -128,11 +130,10 @@ export function AutomationEditor({ initial: incoming, project, sessions, topics,
     requestAnimationFrame(() => { editor?.focus(); editor?.setSelectionRange(start + token.length, start + token.length); });
   }
   const option = catalog?.models.find(model => model.id === draft.model || !draft.model && model.id === catalog.defaultModel);
-  const unavailableReference = webhook.eventType === 'issues' ? '{{pr.number}}' : '{{issue.number}}';
   const hasInvalidReferences = (text: string) => draft.mode === 'schedule' ? references.some(ref => text.includes(ref.token)) : text.includes(unavailableReference);
   const initialReferences = creating && hasInvalidReferences(draft.prompt);
   const followUpReferences = sessionMode !== 'new_per_run' && hasInvalidReferences(draft.followUpPrompt || '');
-  const referenceError = draft.mode === 'schedule' ? 'Remove webhook references from this scheduled prompt.' : `This event cannot provide ${unavailableReference}. Use ${webhook.eventType === 'issues' ? '{{issue.number}}' : '{{pr.number}}'} instead.`;
+  const referenceError = draft.mode === 'schedule' ? 'Remove webhook references from this scheduled prompt.' : `This event cannot provide ${unavailableReference}. Use ${webhook.eventType === 'pull_request' ? '{{pr.number}}' : '{{issue.number}}'} instead.`;
 
   function validate(all = false) {
     setValidation('');
@@ -194,6 +195,7 @@ export function AutomationEditor({ initial: incoming, project, sessions, topics,
           }}>
             <optgroup label="PR">{webhookTriggers.filter(item => item.eventType === 'pull_request').map(item => <option key={`${item.eventType}/${item.action}`} value={`${item.eventType}/${item.action}`}>{item.label}</option>)}</optgroup>
             <optgroup label="Issue">{webhookTriggers.filter(item => item.eventType === 'issues').map(item => <option key={`${item.eventType}/${item.action}`} value={`${item.eventType}/${item.action}`}>{item.label}</option>)}</optgroup>
+            <optgroup label="Issue and PR comments">{webhookTriggers.filter(item => item.eventType === 'issue_comment').map(item => <option key={`${item.eventType}/${item.action}`} value={`${item.eventType}/${item.action}`}>{item.label}</option>)}</optgroup>
           </Select></label> : <>
             <div className="automation-field-grid">
               <label className="automation-field">Repeat<Select label="Recurrence" variant="field" value={draft.schedule.recurrence} onChange={event => schedule({ recurrence: event.target.value as Automation['schedule']['recurrence'] })}><option value="once">Once</option><option value="daily">Daily</option><option value="every_days">Every N days</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></Select></label>

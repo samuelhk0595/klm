@@ -1,11 +1,14 @@
 // Version-gated child-session factory seam shared by foreground SDK children and
-// the package's Windows background runner. No ambient resources reach a child.
+// the package's background runner. Both stay in the engine-owned process domain.
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 const configPath = /*KLM_CHILD_CONFIG*/'';
 const packageSessions = await import(/*KLM_PACKAGE_SESSIONS*/'');
+const samePath = (a, b) => process.platform === 'win32'
+  ? path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
+  : path.resolve(a) === path.resolve(b);
 
 export default function managedFactory() {
   const resources = JSON.parse(readFileSync(configPath, 'utf8'));
@@ -18,7 +21,7 @@ export default function managedFactory() {
             // Explicit captured metadata, not native skill discovery.
             skillsOverride: () => ({ skills: resources.skills, diagnostics: [] }),
             agentsFilesOverride: current => ({ agentsFiles: current.agentsFiles.filter(file =>
-              path.resolve(path.dirname(file.path)).toLowerCase() !== path.resolve(resources.agentDir).toLowerCase()) }),
+              !samePath(path.dirname(file.path), resources.agentDir)) }),
           });
         }
       } };
@@ -27,7 +30,7 @@ export default function managedFactory() {
   return {
     async create(launch) {
       const config = JSON.parse(readFileSync(configPath, 'utf8'));
-      if (launch.machine || launch.cwd.toLowerCase() !== config.cwd.toLowerCase() || !config.model || !config.effort || !launch.runtime?.runId) throw new Error('Invalid managed child launch.');
+      if (launch.machine || !samePath(launch.cwd, config.cwd) || !config.model || !config.effort || !launch.runtime?.runId) throw new Error('Invalid managed child launch.');
       const childId = randomUUID();
       async function call(method, params = {}, signal, bounded = true) {
         const deadline = bounded ? AbortSignal.timeout(15000) : undefined;

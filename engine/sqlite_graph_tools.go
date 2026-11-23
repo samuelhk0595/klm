@@ -269,8 +269,22 @@ func (a *app) sqlGraphConversationCall(ctx context.Context, owner string, mutabl
 				result, err = st.graphActivityResult(v)
 				return err
 			}
-			if err := st.graphAuthorization(owner, invoke.Authorization); err != nil {
-				return err
+			if len(invoke.Authorization) == 0 {
+				auth, err := a.automationGraphAuthorization(st, owner, invoke.GraphID)
+				if err != nil {
+					return err
+				}
+				if auth != nil {
+					invoke.Authorization = []GraphAuthorization{cloneGraphAuthorization(*auth)}
+				}
+			}
+			if len(invoke.Authorization) == 0 {
+				return errors.New("Provide real human-message authorization outside an owning automation turn.")
+			}
+			for _, auth := range invoke.Authorization {
+				if err := st.validateGraphActivityAuthorization(GraphActivity{ProjectID: s.ProjectID, ConversationID: owner, GraphID: invoke.GraphID}, auth); err != nil {
+					return err
+				}
 			}
 			if err := st.graphAllowed(owner, invoke.GraphID); err != nil {
 				return err
@@ -291,6 +305,9 @@ func (a *app) sqlGraphConversationCall(ctx context.Context, owner string, mutabl
 				return err
 			}
 			v := GraphActivity{ID: newID(), ConversationID: owner, ProjectID: s.ProjectID, GraphID: invoke.GraphID, Objective: invoke.Objective, Task: invoke.Task, Workspace: invoke.Workspace, Priority: invoke.Priority, Order: order, Status: "ready", Version: 1, CreatedAt: now(), UpdatedAt: now()}
+			if t, _ := ctx.Value(graphCallingTurnKey{}).(*turn); t != nil && a.runs[owner] == t && t.ctx.Err() == nil {
+				v.AutomationRunID = t.automationRunID
+			}
 			if err := st.putRoot("graph_activities", v.ID, v); err != nil {
 				return err
 			}

@@ -17,9 +17,10 @@ type DelegationActions struct {
 }
 
 type DelegationSessionStatus struct {
-	Availability DelegationAvailability `json:"availability"`
-	Waiting      bool                   `json:"waiting"`
-	Actions      DelegationActions      `json:"actions"`
+	Availability DelegationAvailability  `json:"availability"`
+	Waiting      bool                    `json:"waiting"`
+	Actions      DelegationActions       `json:"actions"`
+	Recovery     *DelegationRecoveryView `json:"recovery,omitempty"`
 }
 
 func (st *sqliteSessionTx) delegationSessionStatus(owner Session) (*DelegationSessionStatus, error) {
@@ -49,7 +50,15 @@ func (st *sqliteSessionTx) delegationSessionStatus(owner Session) (*DelegationSe
 			return nil, err
 		}
 	}
-	return &DelegationSessionStatus{Availability: delegationAvailability(owner.Role, owner.Harness, native.ID, native.Delegation), Waiting: view.Waiting, Actions: view.Actions}, nil
+	status := &DelegationSessionStatus{Availability: delegationAvailability(owner.Role, owner.Harness, native.ID, native.Delegation), Waiting: view.Waiting, Actions: view.Actions}
+	if batch != nil && owner.Status != "running" {
+		status.Recovery, err = st.delegationRecoveryView(*batch)
+		if err != nil {
+			return nil, err
+		}
+		status.Actions.Send, status.Actions.Steer, status.Actions.Interrupt = false, false, false
+	}
+	return status, nil
 }
 
 type DelegationBatchView struct {
@@ -113,7 +122,7 @@ func delegationBatchView(batch DelegationBatchRecord, members []DelegationInvoca
 		}
 	}
 	view.Remaining = view.Total - view.Terminal
-	view.Waiting = batch.State != DelegationSettled || batch.Delivery == DelegationDeliveryPending || batch.Delivery == DelegationDeliverySending || batch.Delivery == DelegationDeliveryUncertain
+	view.Waiting = batch.Delivery != DelegationDeliveryAbandoned && (batch.State != DelegationSettled || batch.Delivery == DelegationDeliveryPending || batch.Delivery == DelegationDeliverySending || batch.Delivery == DelegationDeliveryUncertain || batch.Outcome == DelegationFinalityUnconfirmed)
 	view.Actions = DelegationActions{Send: !archived, Queue: !archived, Steer: !archived && owner.Status == "running" && !view.Waiting, Interrupt: !archived && !automation, Settings: !archived && !automation && owner.Status != "running", Stop: true}
 	return view
 }
@@ -156,6 +165,9 @@ func (st *sqliteSessionTx) delegationProgress(batch DelegationBatchRecord, owner
 }
 
 func (st *sqliteSessionTx) delegationAliasWaiting(view *DelegationBatchView) error {
+	if view.Delivery == DelegationDeliveryAbandoned {
+		return nil
+	}
 	var pending bool
 	if err := st.tx.QueryRowContext(st.ctx, `SELECT EXISTS(SELECT 1 FROM data_delegation_calls WHERE owner_id=? AND x_delivery IN ('pending','sending','uncertain'))`, view.ID).Scan(&pending); err != nil {
 		return err

@@ -149,19 +149,42 @@ func (a *app) readMCPCredential(id string) (mcpCredential, error) {
 	if !exists {
 		return result, errors.New("MCP credentials were disconnected or removed; authenticate again.")
 	}
-	data, err := unprotectMCPCredential(blob)
-	if err != nil || json.Unmarshal(data, &result) != nil {
-		return result, errors.New("Cannot decrypt MCP credentials for this engine user.")
+	data, err := unprotectMCPCredential(blob, mcpCredentialStorage{Directory: a.dir, Existing: true})
+	if err != nil {
+		return result, err
+	}
+	if json.Unmarshal(data, &result) != nil {
+		return result, errors.New("Invalid decrypted MCP credential format.")
 	}
 	return result, nil
 }
 
-func protectCredential(c mcpCredential) ([]byte, error) {
+type mcpCredentialStorage struct {
+	Directory string
+	Existing  bool
+}
+
+func (a *app) protectCredential(c mcpCredential) ([]byte, error) {
+	storage := mcpCredentialStorage{Directory: a.dir}
+	a.mu.Lock()
+	storage.Existing = len(a.state.MCPCredentials) > 0
+	var err error
+	if a.store != nil {
+		err = a.store.readers.QueryRowContext(context.Background(), `SELECT EXISTS(SELECT 1 FROM data_mcp_credentials)`).Scan(&storage.Existing)
+	}
+	a.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return protectCredential(c, storage)
+}
+
+func protectCredential(c mcpCredential, storage ...mcpCredentialStorage) ([]byte, error) {
 	data, err := json.Marshal(c)
 	if err != nil {
 		return nil, err
 	}
-	return protectMCPCredential(data)
+	return protectMCPCredential(data, storage...)
 }
 
 func publicMCPConnection(c MCPConnection) map[string]any {
@@ -247,7 +270,7 @@ func (a *app) saveMCPConnection(w http.ResponseWriter, r *http.Request) {
 	var blob []byte
 	var err error
 	if body.Secrets != nil {
-		blob, err = protectCredential(*body.Secrets)
+		blob, err = a.protectCredential(*body.Secrets)
 		if err != nil {
 			fail(w, 500, err.Error())
 			return

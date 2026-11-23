@@ -48,11 +48,6 @@ func (a *app) changeSessionYOLO(ctx context.Context, id string, enabled bool) er
 			if s.GraphRunID != "" || s.Role == sessionRoleSubagent {
 				return controlError(404, "Conversation not found.")
 			}
-			if run, err := st.activeAutomation(id); err != nil {
-				return err
-			} else if run != nil {
-				return controlError(409, "Automation run settings are read-only until the run ends.")
-			}
 			if _, err := st.conversationDirectory(s); err != nil {
 				return err
 			}
@@ -70,6 +65,14 @@ func (a *app) changeSessionYOLO(ctx context.Context, id string, enabled bool) er
 					if binding != nil && binding.owner.parent.id == id && child.nativeYOLOConfigured && child.nativeYOLO {
 						return controlError(409, "A Codex child started with full access. Finish or stop the owning turn before disabling YOLO.")
 					}
+				}
+			}
+			if run, err := st.activeAutomation(id); err != nil {
+				return err
+			} else if run != nil {
+				run.LiveYOLO = &enabled
+				if err := st.putRoot("automation_runs", run.ID, *run); err != nil {
+					return err
 				}
 			}
 			if s.YOLO == enabled {

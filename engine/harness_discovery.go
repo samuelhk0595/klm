@@ -62,6 +62,7 @@ func canonicalFile(path string) string {
 // PATH is supplied only to child environments. Bootstrap never changes the
 // engine's process-global environment while other turns may be running.
 func runtimeEnvironment(env []string, node string) []string {
+	env = ghConfigurationEnvironment(env)
 	if node == "" {
 		return env
 	}
@@ -339,9 +340,13 @@ func binaryVersion(ctx context.Context, b binary) string {
 func discoverWithNode(ctx context.Context, n nodeInstallation) ([]Harness, map[string]binary) {
 	harnesses, binaries := []Harness{}, map[string]binary{}
 	for _, recipe := range harnessRecipes {
-		h := Harness{ID: recipe.ID, Name: recipe.Name, RequiredVersion: recipe.Version, ExecutionSupported: runtime.GOOS == "windows", ChatExecutionSupported: managedChatPlatform(), GraphExecutionSupported: runtime.GOOS == "windows"}
+		graphErr := CheckGraphAdapter(recipe.ID)
+		h := Harness{ID: recipe.ID, Name: recipe.Name, RequiredVersion: recipe.Version, ExecutionSupported: managedChatPlatform(), ChatExecutionSupported: managedChatPlatform(), GraphExecutionSupported: graphErr == nil}
 		if !h.ExecutionSupported {
-			h.ExecutionReason = "Managed chats require working Linux amd64 subreaper/pidfd supervision. Graph execution is unavailable; protected MCP credentials remain unsupported on Linux."
+			h.ExecutionReason = "Managed execution requires Windows or Linux amd64 subreaper/pidfd supervision."
+		}
+		if graphErr != nil {
+			h.ExecutionReason = graphErr.Error()
 		}
 		var b binary
 		override := os.Getenv("KLM_" + strings.ToUpper(recipe.ID) + "_BIN")

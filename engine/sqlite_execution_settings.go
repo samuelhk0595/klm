@@ -40,11 +40,6 @@ func (a *app) changeSQLSettings(ctx context.Context, id string, model, effort *s
 		if a.runs[id] != nil || before.Status == "running" {
 			return controlError(409, "Wait for the current turn before changing settings.")
 		}
-		if r, err := st.activeAutomation(id); err != nil {
-			return err
-		} else if r != nil {
-			return controlError(409, "Automation run settings are read-only until the run ends.")
-		}
 		cwd, err = st.conversationDirectory(before)
 		return err
 	})
@@ -94,11 +89,6 @@ func (a *app) changeSQLSettings(ctx context.Context, id string, model, effort *s
 		if a.runs[id] != nil || s.Status == "running" {
 			return controlError(409, "Wait for the current turn before changing settings.")
 		}
-		if r, err := st.activeAutomation(id); err != nil {
-			return err
-		} else if r != nil {
-			return controlError(409, "Automation run settings are read-only until the run ends.")
-		}
 		changed := s.Model != nextModel
 		s.Model, s.Effort, s.ResolvedEffort = nextModel, nextEffort, ""
 		if changed {
@@ -117,6 +107,14 @@ func (a *app) changeSQLSettings(ctx context.Context, id string, model, effort *s
 		}
 		if yolo != nil {
 			s.YOLO = *yolo
+			if run, err := st.activeAutomation(id); err != nil {
+				return err
+			} else if run != nil {
+				run.LiveYOLO = yolo
+				if err := st.putRoot("automation_runs", run.ID, *run); err != nil {
+					return err
+				}
+			}
 		}
 		s.UpdatedAt = now()
 		return st.putSessionMeta(s)
@@ -186,11 +184,6 @@ func (a *app) changeSQLGraphSelection(ctx context.Context, id, graphID string) e
 		}
 		if p.Removed || p.Folder != project.Folder || s.ProjectID != project.ID {
 			return controlError(409, "Conversation or project changed; retry selection.")
-		}
-		if r, err := st.activeAutomation(id); err != nil {
-			return err
-		} else if r != nil {
-			return controlError(409, "Automation run settings are read-only until the run ends.")
 		}
 		if s.SelectedGraphID == graphID {
 			return nil

@@ -234,6 +234,15 @@ func (v sqliteValidation) validateGraphActivities() error {
 		if s.ParentID != "" || s.GraphRunID != "" || s.ProjectID != a.ProjectID || !validAuthoringID(a.GraphID) || strings.TrimSpace(a.Objective) == "" || a.Version == 0 || !validGraphTime(a.CreatedAt) || !validGraphTime(a.UpdatedAt) || !slices.Contains([]string{"scheduled", "ready", "running", "awaiting_user", "awaiting_assessment", "succeeded", "abandoned"}, a.Status) {
 			return errors.New("invalid graph activity")
 		}
+		if a.AutomationRunID != "" {
+			var original AutomationRun
+			if err := v.get("automation_runs", a.AutomationRunID, &original); err != nil {
+				return err
+			}
+			if original.ProjectID != a.ProjectID || original.SessionID != a.ConversationID {
+				return errors.New("invalid graph notification automation origin")
+			}
+		}
 		n, err := v.collectionCount("graph_activities", id, "authorization")
 		if err != nil {
 			return err
@@ -245,6 +254,12 @@ func (v sqliteValidation) validateGraphActivities() error {
 			var ref GraphAuthorization
 			if err := v.get("graph_authorization", key, &ref); err != nil {
 				return err
+			}
+			if ref.Source != "" && ref.Source != "human_message" {
+				return (&sqliteSessionTx{ctx: v.ctx, tx: v.tx}).validateGraphActivityAuthorization(a, ref)
+			}
+			if ref.Automation != nil {
+				return errors.New("invalid human graph provenance")
 			}
 			human, err := v.userEvent(a.ConversationID, ref.EventID)
 			if err != nil {

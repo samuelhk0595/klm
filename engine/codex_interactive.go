@@ -56,7 +56,7 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 	p.app.mu.Lock()
 	native := p.app.state.Native[p.id]
 	if p.app.store != nil {
-		_, value, _, readErr := p.app.store.readTurnSession(p.turn.ctx, p.id)
+		_, value, _, readErr := p.app.store.readTurnSession(p.turn.ctx, p.id, p.automationRunID)
 		if readErr != nil {
 			p.app.mu.Unlock()
 			return readErr
@@ -121,7 +121,7 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 			// Native EOF/flush is separate from session disposal. After success,
 			// retain the owned container and background workload across turns.
 			// Only turn-scoped transports/gateways rotate before the next turn.
-			if err != nil || p.failed || !p.completed || p.turn.ctx.Err() != nil || p.processDrainFailed {
+			if p.automationRunID != "" || err != nil || p.failed || !p.completed || p.turn.ctx.Err() != nil || p.processDrainFailed {
 				shutdownErr := p.runtime.shutdown()
 				p.processesDrained = shutdownErr == nil && !p.processDrainFailed
 				err = errors.Join(err, shutdownErr)

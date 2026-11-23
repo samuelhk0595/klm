@@ -61,8 +61,8 @@ device addressing and platform setup.
 
 ## First Slice
 
-- Add a project using the rail's plus button. The engine opens a native Windows
-  directory picker; choose its name and icon, then save. Directory is read-only
+- Add a project using the rail's plus button. Use the engine directory browser or
+  optional native host picker; choose its name and icon, then save. Directory is read-only
   with a Change directory button. Icons are optional and stored locally.
 - Use the compact **New session** shortcut at the top of the sidebar and choose
   Pi, OpenCode, or Codex. Select a
@@ -168,11 +168,33 @@ as established by section 12 of the refinement record.
 
 ### Graph adapter status
 
-Windows mechanisms for **Pi, OpenCode and Codex** are implemented and admitted by
+Windows and Linux amd64 mechanisms for **Pi, OpenCode and Codex** are implemented and admitted by
 capability preflight. All still report **`RuntimeValidated=false`**: real model
 tasks, Choice finality and native continuation require human validation.
-OpenCode requires **1.18.30**, its owned plugin handshake and native tool inventory.
-Pi uses its owned extension. Unix graph execution is not enabled.
+Managed OpenCode targets **1.18.35**, its owned plugin handshake and native tool inventory.
+Pi uses its owned extension. Linux admission checks the subreaper/pidfd supervisor;
+Choice acceptance still requires confirmed process and tool-call finality.
+
+### 0.6.2 implementation
+
+- Automation chats use ordinary steering, FIFO, Send now and Stop. New input
+  dispatch releases automation ownership; queued input precedes automatic reminders.
+- The user's saved automation graph selection authorizes those graphs within its
+  captured objective, with persisted configuration provenance. Normal chats still
+  require human-message authorization; retry fresh/reuse decisions remain explicit.
+- Terminal nodes persist PowerShell/Bash/sh. Existing missing-shell definitions
+  retain PowerShell on every platform; new Linux nodes default to sh.
+- OpenCode reports distinct read-only inspection failures and uses resolved Node.
+  All three harnesses use a canonical original-environment `GH_CONFIG_DIR`.
+- Linux MCP credentials use AES-256-GCM with a private engine key; Windows keeps
+  DPAPI. Native Pi children share the supervised parent lifetime. A graphical
+  Linux engine can use Zenity/KDialog; headless hosts retain the remote browser.
+
+Build evidence and outstanding Linux/Windows human scenarios are recorded in
+[0.6.2 progress](V0_6_2_IMPLEMENTATION_PROGRESS.md). Linux deployment instructions,
+including database/key backups, are in [distribution/linux](distribution/linux/README.md).
+No Linux desktop, installer, engine-hosted UI, Activity Board credentials, ARM64
+or Alpine/musl support is included.
 
 The **2026-09-13 external-MCP decision** replaces the preventive configuration ban:
 allow configured MCPs in OpenCode/Codex without a server-name allowlist or disabling

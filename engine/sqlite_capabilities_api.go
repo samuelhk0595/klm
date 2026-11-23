@@ -53,11 +53,6 @@ func (a *app) sqlConversationCapabilities(w http.ResponseWriter, r *http.Request
 			if s.Role == sessionRoleSubagent || s.GraphRunID != "" {
 				return controlError(404, "Conversation not found.")
 			}
-			if run, err := st.activeAutomation(id); err != nil {
-				return err
-			} else if run != nil {
-				return controlError(409, "Automation run settings are read-only until the run ends.")
-			}
 			var pending bool
 			if err := st.tx.QueryRowContext(st.ctx, `SELECT EXISTS(SELECT 1 FROM data_library_deletions)`).Scan(&pending); err != nil {
 				return err

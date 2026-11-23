@@ -26,7 +26,7 @@ function UnboundSessionLibraryDialog({ session, onClose }: { session: Session; o
   const [saving, setSaving] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [confirmation, setConfirmation] = useState<'close' | 'reload' | null>(null);
-  const locked = session.automation?.status === 'running';
+  const locked = false;
   const dirty = !!state && selectionKey(draft) !== selectionKey(state.desired);
   const pending = !!state && (!state.applied || selectionKey(state.desired) !== selectionKey(state.applied.selection));
   const displayed = locked && state?.applied ? selectionOf(state.applied.selection) : draft;

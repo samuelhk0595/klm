@@ -11,6 +11,7 @@ export type FileBranch = { name: string; git_branch: string; separate_worktree?:
 export type FileNode = {
   type: 'agent' | 'terminal' | 'fork' | 'join'; name?: string; agent?: string;
   overrides?: AgentNodeOverrides; choices?: string[]; command?: string; to?: string;
+  shell?: 'powershell' | 'bash' | 'sh';
   branches?: Record<string, FileBranch>; prompt?: string; output_branch?: string; output?: Record<string, string>;
 };
 export type FileChoice = {
@@ -56,7 +57,7 @@ export function graphDrawing(graph: GraphFile): { nodes: CanvasNode[]; edges: Ed
   for (const [id, n] of Object.entries(graph.definition.nodes).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {
     const data: CanvasNode['data'] = { initial: id === graph.definition.initial_node };
     if (n.type === 'agent') Object.assign(data, { name: n.name, agentId: n.agent, overrides: n.overrides ?? {} });
-    if (n.type === 'terminal') data.terminal = { name: n.name ?? '', command: n.command ?? '', outputFields: Object.entries(n.output ?? {}).map(([name, value]) => ({ key: name, name, value })) };
+    if (n.type === 'terminal') data.terminal = { name: n.name ?? '', command: n.command ?? '', shell: n.shell ?? 'powershell', outputFields: Object.entries(n.output ?? {}).map(([name, value]) => ({ key: name, name, value })) };
     if (n.type === 'join') data.join = { agentId: n.agent ?? '', prompt: n.prompt ?? '', outputBranch: n.output_branch ?? '' };
     if (n.type === 'fork') data.fork = { name: n.name ?? '', branches: Object.entries(n.branches ?? {}).map(([branchID, b]) => ({ id: branchID, name: b.name, gitBranch: b.git_branch ?? '', separateWorktree: b.separate_worktree ?? true, outputFields: Object.entries(b.output ?? {}).map(([name, value]) => ({ key: name, name, value })) })) };
     nodes.push({ id, type: n.type === 'agent' ? 'aiAgent' : n.type, position: position(id), data, selectable: false, deletable: false });
@@ -120,7 +121,7 @@ export function canvasDefinition(meta: GraphDefinition, nodes: CanvasNode[], edg
     }
     const choices = edges.filter(e => e.source === n.id).map(e => nodes.find(target => target.id === e.target)?.data.choice?.id).filter((id): id is string => !!id);
     if (n.type === 'aiAgent') result.nodes[n.id] = { type: 'agent', name: d.name?.trim(), agent: d.agentId, choices, overrides: Object.values(d.overrides ?? {}).some(v => v !== undefined) ? d.overrides : undefined };
-    if (n.type === 'terminal') result.nodes[n.id] = { type: 'terminal', name: d.terminal?.name, command: d.terminal?.command, output: Object.fromEntries((d.terminal?.outputFields ?? []).map(f => [f.name, f.value])), to: destination(n.id) };
+    if (n.type === 'terminal') result.nodes[n.id] = { type: 'terminal', name: d.terminal?.name, command: d.terminal?.command, shell: d.terminal?.shell ?? 'powershell', output: Object.fromEntries((d.terminal?.outputFields ?? []).map(f => [f.name, f.value])), to: destination(n.id) };
     if (n.type === 'join') result.nodes[n.id] = { type: 'join', agent: d.join?.agentId, prompt: d.join?.prompt, output_branch: d.join?.outputBranch, choices };
     if (n.type === 'fork') result.nodes[n.id] = { type: 'fork', name: d.fork?.name, branches: Object.fromEntries((d.fork?.branches ?? []).map(b => [b.id, { name: b.name, git_branch: b.gitBranch, separate_worktree: b.separateWorktree ?? true, to: destination(n.id, b.id), output: Object.fromEntries(b.outputFields.map(f => [f.name, f.value])) }])) };
   }

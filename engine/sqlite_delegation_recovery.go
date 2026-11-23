@@ -12,7 +12,7 @@ type DelegationRecoveryHook func(context.Context, *sqliteStore) error
 
 func (s *sqliteStore) pendingDelegationRecovery(ctx context.Context) (bool, error) {
 	var pending bool
-	err := s.readers.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM data_delegation_batches WHERE x_state<>'settled' OR x_delivery IN ('pending','sending')) OR EXISTS(SELECT 1 FROM data_delegation_invocations WHERE x_state<>'terminal') OR EXISTS(SELECT 1 FROM data_delegation_calls WHERE x_delivery IN ('pending','sending'))`).Scan(&pending)
+	err := s.readers.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM data_delegation_batches WHERE x_state<>'settled' OR x_delivery IN ('pending','sending')) OR EXISTS(SELECT 1 FROM data_delegation_invocations WHERE x_state<>'terminal') OR EXISTS(SELECT 1 FROM data_delegation_calls c JOIN data_delegation_batches b ON b.id=c.owner_id WHERE b.x_delivery<>'abandoned' AND c.x_delivery IN ('pending','sending'))`).Scan(&pending)
 	return pending, err
 }
 
@@ -20,7 +20,7 @@ func (s *sqliteStore) delegationRecoveryPage(ctx context.Context, after string, 
 	if limit < 1 || limit > 100 {
 		return nil, errors.New("Delegation recovery page limit must be 1 to 100.")
 	}
-	ids, err := sqliteQueryIDs(ctx, s.readers, `SELECT b.id FROM data_delegation_batches b WHERE (x_state<>'settled' OR x_delivery IN ('pending','sending') OR EXISTS(SELECT 1 FROM data_delegation_calls c WHERE c.owner_id=b.id AND c.x_delivery IN ('pending','sending'))) AND b.id>? ORDER BY b.id LIMIT ?`, after, limit)
+	ids, err := sqliteQueryIDs(ctx, s.readers, `SELECT b.id FROM data_delegation_batches b WHERE x_delivery<>'abandoned' AND (x_state<>'settled' OR x_delivery IN ('pending','sending') OR EXISTS(SELECT 1 FROM data_delegation_calls c WHERE c.owner_id=b.id AND c.x_delivery IN ('pending','sending'))) AND b.id>? ORDER BY b.id LIMIT ?`, after, limit)
 	if err != nil {
 		return nil, err
 	}

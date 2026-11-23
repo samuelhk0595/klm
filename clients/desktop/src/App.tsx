@@ -52,7 +52,6 @@ import { DesignSystem } from './DesignSystem';
 import { ProjectRail } from './features/projects/ProjectRail';
 import { ProjectDialog } from './features/projects/ProjectDialog';
 import { ProjectSettingsDialog, type ProjectSettingsSection } from './features/projects/ProjectSettingsDialog';
-import { StopAutomationDialog } from './features/automations/StopAutomationDialog';
 import { useActivityBoard } from './features/activity-board/useActivityBoard';
 import { SettingsDialog } from './features/settings/SettingsDialog';
 import { BackgroundPicker } from './features/settings/BackgroundPicker';
@@ -141,12 +140,13 @@ export function App() {
   const [pageVisible, setPageVisible] = useState(!document.hidden);
   const [generalChatVisible, setGeneralChatVisible] = useState(false);
   const [projectSearch, setProjectSearch] = useState('');
-  const [projectPage, setProjectPage] = useState<{ id: string; next: string; topicsNext: string; busy: boolean }>({ id: '', next: '', topicsNext: '', busy: false });
+  type ProjectLoading = 'initial' | 'sessions' | 'topics' | 'retry' | undefined;
+  const [projectPage, setProjectPage] = useState<{ id: string; next: string; topicsNext: string; busy: boolean; loading?: ProjectLoading }>({ id: '', next: '', topicsNext: '', busy: false });
   const historyAccess = useRef(new Map<string, number>());
   const projectWindow = useRef({ key: '', pages: 1, start: '' });
   const topicWindow = useRef({ key: '', cursor: '' });
   const topicPages = useRef(1);
-  const projectReader = useRef<(() => void) | undefined>(undefined);
+  const projectReader = useRef<((loading?: ProjectLoading) => void) | undefined>(undefined);
   const [projectPagingError, setProjectPagingError] = useState('');
   const sidebarRestore = useRef<(() => void) | undefined>(undefined);
   useLayoutEffect(() => { sidebarRestore.current?.(); sidebarRestore.current = undefined; });
@@ -399,7 +399,6 @@ export function App() {
   const [drafts, setDrafts] = useEngineDraft<Record<string, ComposerDraft>>(chatDraftKeys.composers, {});
   metadataPins.current = new Set([activeId, generalSession?.id ?? '', sideSession?.id ?? '', ...floatingSessionIds, ...Object.values(floatingSubagentIds), ...mobileChatSheets.flatMap(sheet => [sheet.sessionId, sheet.subagentId ?? '']), ...[...historyAccess.current].sort((a,b) => b[1]-a[1]).slice(0,6).map(([id]) => id)]);
   const [settingsOpen, setSettingsOpen] = useEngineDraft('ui.settings', () => new URLSearchParams(window.location.search).get('klm-library') === '1');
-  const [automationStop, setAutomationStop] = useState<{ resolve: (confirmed: boolean) => void }>();
   const shell = useRef<HTMLDivElement>(null);
   const readMainGeometry = useCallback(() => {
     const element = shell.current;
@@ -489,7 +488,6 @@ export function App() {
           for (const pending of submissionControllers.current.values()) pending.controller.abort();
           submissionControllers.current.clear(); submissionTails.current.clear(); submissionRequests.current.clear(); generalHarnessBlocks.current.clear();
           pending.current.clear(); setPendingSessions({}); setSessionErrors({}); setSideErrors({}); setGraphErrors({}); setSessionTabs({}); setOpenSubagentTabs({});
-          automationStop?.resolve(false); setAutomationStop(undefined);
           if (!IS_DESKTOP) { setCreatingSession(null); setRenamingSession(null); setEditingProject(null); setProjectSettingsId(''); setChoosingTopicSessionId(''); setAddingProject(null); setSettingsOpen(false); }
           for (const [session, items] of Object.entries(restoredSubmissions)) for (const item of items) if (item.status !== 'failed') generalHarnessBlocks.current.set(item.id, session);
           setEngine({ projects: [], sessions: [], harnesses: [] }); setLoaded(false);
@@ -553,6 +551,8 @@ export function App() {
     if (!loaded || !pageVisible || generalView || !project) return;
     const id = project.id; const controller = new AbortController(); let pending = false; let again = false;
     const key = `${id}/${projectSearch}`;
+    const newWindow = projectWindow.current.key !== key || topicWindow.current.key !== key;
+    let queuedLoading: ProjectLoading;
     if (projectWindow.current.key !== key) projectWindow.current = { key, pages: 1, start: '' };
     if (topicWindow.current.key !== key) { topicWindow.current = { key, cursor: '' }; topicPages.current = 1; }
     const boundaries: { sessions?: string; topics?: string } = {};
@@ -576,9 +576,9 @@ export function App() {
       if (!controller.signal.aborted) topicPages.current = consumed;
       return { items, nextCursor: next };
     }
-    async function load() {
-      if (pending) { again = true; return; } pending = true;
-      setProjectPage(value => ({ ...value, busy: true }));
+    async function load(loading?: ProjectLoading) {
+      if (pending) { again = true; queuedLoading = loading ?? queuedLoading; return; } pending = true;
+      setProjectPage(value => ({ ...value, busy: true, loading }));
       try {
         const [page, topics] = await Promise.all([
           readWindow(),
@@ -598,10 +598,10 @@ export function App() {
         if (!controller.signal.aborted && error instanceof EngineRequestError && error.status === 409 && (projectWindow.current.start || topicWindow.current.cursor)) { projectWindow.current.start = ''; topicWindow.current.cursor = ''; again = true; }
         else if (!controller.signal.aborted) { setConnectionError(errorMessage(error)); setProjectPagingError(errorMessage(error)); }
       }
-      finally { pending = false; if (!controller.signal.aborted) setProjectPage(value => ({ ...value, busy: false })); if (again && !controller.signal.aborted) { again = false; void load(); } }
+      finally { pending = false; if (!controller.signal.aborted) setProjectPage(value => ({ ...value, busy: false, loading: undefined })); if (again && !controller.signal.aborted) { again = false; const loading = queuedLoading; queuedLoading = undefined; void load(loading); } }
     }
-    void load(); let timer: ReturnType<typeof setTimeout> | undefined;
-    projectReader.current = () => { void load(); };
+    void load(newWindow || projectPage.id !== id ? 'initial' : undefined); let timer: ReturnType<typeof setTimeout> | undefined;
+    projectReader.current = (loading = 'retry') => { void load(loading); };
     const unsubscribe = subscribeScope('project', id, () => { if (!timer) timer = setTimeout(() => { timer = undefined; void load(); }, 750); });
     return () => { controller.abort(); clearTimeout(timer); unsubscribe(); projectReader.current = undefined; };
   }, [loaded, project?.id, generalView, pageVisible, refreshVersion, projectSearch]);
@@ -610,7 +610,7 @@ export function App() {
     if (!project || projectPage.id !== project.id || projectPage.busy) return;
     const id = project.id; const cursor = topics ? projectPage.topicsNext : projectPage.next; if (!cursor) return;
     if (topics) topicPages.current++; else projectWindow.current.pages++;
-    projectReader.current?.();
+    projectReader.current?.(topics ? 'topics' : 'sessions');
   }
 
   useEffect(() => {
@@ -784,9 +784,6 @@ export function App() {
     const id = target.id;
     let stopBody: { automationRunId: string } | undefined;
     if (action === 'stop' && target.automation?.status === 'running') {
-      if (automationStop) return false;
-      const confirmed = await new Promise<boolean>(resolve => setAutomationStop({ resolve }));
-      if (!confirmed || identity !== currentEngineIdentity()) return false;
       stopBody = { automationRunId: target.automation.runId };
     }
     if (action === 'harness' && target.role === 'general_agent' && generalHarnessBlocked(target)) return false;
@@ -905,7 +902,6 @@ export function App() {
   }
   function sendMessage(target: Session, draft: ComposerDraft, sources: SourceReference[], mode: SendMode = 'steer', composerKey = target.id) {
     if (agentExecutionBlocked(target)) return false;
-    if (target.automation?.status === 'running') mode = 'steer';
     if (target.role === 'general_agent' && pending.current.has(target.id)) return false;
     if (IS_DESKTOP) {
       if (!loaded || !draftStorageReady()) return false;
@@ -1192,7 +1188,7 @@ export function App() {
     } catch (error) { return errorMessage(error); }
   }
 
-  const composerGraphControl = session && !generalConversation ? <GraphPicker key={session.id} graphs={catalogGraphs} value={selectedGraphId} selectedName={catalogSelectedGraph?.definition.name ?? selectedGraph?.definition.name} running={graphRunInProgress} disabled={session.automation?.status === 'running' || !!selectingGraphs[session.id] || !session.graph} loading={catalogLoading} error={catalogError || catalog?.errors.join(' ')} onReload={() => void reloadCatalog().catch(() => {})} onChange={graphId => void chooseGraph(session.id, graphId)} /> : undefined;
+  const composerGraphControl = session && !generalConversation ? <GraphPicker key={session.id} graphs={catalogGraphs} value={selectedGraphId} selectedName={catalogSelectedGraph?.definition.name ?? selectedGraph?.definition.name} running={graphRunInProgress} disabled={!!selectingGraphs[session.id] || !session.graph} loading={catalogLoading} error={catalogError || catalog?.errors.join(' ')} onReload={() => void reloadCatalog().catch(() => {})} onChange={graphId => void chooseGraph(session.id, graphId)} /> : undefined;
   const tabItems: { value: SessionTab; label: string; onClose?: () => void; closeLabel?: string }[] = [{ value: 'chat', label: 'Chat' }];
   if (selectedGraphId) tabItems.push({ value: 'graph', label: 'Graph' });
   for (const id of openSubagentIds) {
@@ -1245,8 +1241,8 @@ export function App() {
     <ProjectRail projects={projects} sessions={sessions} activeId={boardView ? boardProjectId : generalView ? '' : project?.id ?? ''} generalActive={generalView} onGeneralAgent={() => { navigation.current += 1; setOverlaySessionId(''); setSidebarOpen(false); setMobileProjectRailOpen(false); setView('general'); }} onSelect={selectProject} onEdit={openProjectEditor} onRemove={target => removeProject(target.id)} onReorder={reorderProject} onAdd={() => void openProjectPicker()} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />
     {!generalView && sidebarOpen && <button className="panel-backdrop" aria-label="Close side panel" onClick={() => setSidebarOpen(false)} />}
     {!generalView && !boardView && project && <WorkspaceSidebar key={`sidebar:${project.id}`} project={project} sessions={projectSessions} activeId={view === 'chat' ? activeId : ''} activeSection={view} collapsed={topicCollapseState(workspaceNavigation, project)} archivedCollapsed={collapsedArchivedProjects.includes(project.id)} onSearchChange={setProjectSearch}
-      sessionsComplete={projectPage.id === project.id && !projectPage.next && !projectPage.busy}
-      paging={expanded => <><AutoPage hasMore={expanded && projectPage.id === project.id && !!projectPage.next} cursor={`${project.id}/${projectSearch}/sessions/${projectPage.next}`} busy={projectPage.busy} error={projectPagingError} onLoad={() => void loadMoreProject()} onRetry={() => projectReader.current?.()} /><AutoPage hasMore={projectPage.id === project.id && !!projectPage.topicsNext} cursor={`${project.id}/${projectSearch}/topics/${projectPage.topicsNext}`} busy={projectPage.busy} error={projectPagingError} onLoad={() => void loadMoreProject(true)} onRetry={() => projectReader.current?.()} /></>}
+      sessionsComplete={projectPage.id === project.id && !projectPage.next}
+      paging={expanded => <><AutoPage hasMore={expanded && projectPage.id === project.id && !!projectPage.next} cursor={`${project.id}/${projectSearch}/sessions/${projectPage.next}`} busy={projectPage.busy} loading={projectPage.busy && !!projectPage.loading && projectPage.loading !== 'topics'} error={projectPagingError} onLoad={() => void loadMoreProject()} onRetry={() => projectReader.current?.()} /><AutoPage hasMore={projectPage.id === project.id && !!projectPage.topicsNext} cursor={`${project.id}/${projectSearch}/topics/${projectPage.topicsNext}`} busy={projectPage.busy} loading={projectPage.busy && projectPage.loading === 'topics'} error={projectPagingError} onLoad={() => void loadMoreProject(true)} onRetry={() => projectReader.current?.()} /></>}
       onCollapsedChange={topics => setWorkspaceNavigation(current => ({ ...current, collapsedTopics: { ...current.collapsedTopics, [project.id]: typeof topics === 'function' ? topics(topicCollapseState(current, project)) : topics } }))}
       onArchivedCollapsedChange={collapsed => setWorkspaceNavigation(current => ({ ...current, collapsedArchivedProjects: collapsed ? [...new Set([...current.collapsedArchivedProjects, project.id])] : current.collapsedArchivedProjects.filter(id => id !== project.id) }))}
       onNew={newSession} onRename={setRenamingSession} onEditTopic={topic => setEditingTopic({ projectId: project.id, topic })}
@@ -1305,7 +1301,7 @@ export function App() {
           {generalConversation && <GeneralHarnessPicker session={session} harnesses={harnesses} disabled={!!pendingSessions[session.id] || generalHarnessBlocked(session) || !!connectionError} onChange={harness => void updateSession(session, 'harness', { harness })} />}
           {generalView && !harnesses.some(harness => harness.id === session.harness && harness.available) && <p role="status" className="form-error">The selected harness is not installed.</p>}
           {!generalView && projectSessionArchived && <div className="archived-conversation-actions"><span>{currentTopic?.archived ? 'Topic archived' : 'Session archived'}</span><Button size="sm" onClick={async () => { if (currentTopic?.archived && project) { const failure = await patchTopic(project.id, currentTopic, { archived: false }); setSessionErrors(current => ({ ...current, [session.id]: failure ?? '' })); } else void patchSession(session, { archived: false }); }}>{currentTopic?.archived ? 'Restore topic' : 'Restore session'}</Button></div>}
-          <MessageComposer key={session.id} clearOnSend={!IS_DESKTOP} session={session} onSnapshot={receiveSession} steeringOnly={session.automation?.status === 'running'} placeholder={overlaySession ? `Message ${session.title}` : undefined} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} onTranscription={text => setDrafts(current => {
+          <MessageComposer key={session.id} clearOnSend={!IS_DESKTOP} session={session} onSnapshot={receiveSession} placeholder={overlaySession ? `Message ${session.title}` : undefined} projectId={session.projectId} draft={drafts[session.id] ?? { text: '', mentions: [] }} onDraftChange={draft => setDrafts(current => ({ ...current, [session.id]: draft }))} onSend={send} onTranscription={text => setDrafts(current => {
             const draft = current[session.id] ?? { text: '', mentions: [] };
             const separator = !draft.text || draft.text.endsWith('\n\n') ? '' : draft.text.endsWith('\n') ? '\n' : '\n\n';
             return { ...current, [session.id]: { ...draft, text: `${draft.text}${separator}${text.trim()}` } };
@@ -1331,7 +1327,6 @@ export function App() {
       const target = sessionsRef.current.find(s => s.id === id) ?? await request<Session>(`/api/sessions/${encodeURIComponent(id)}`);
       receiveSession(target); setProjectSettingsId(''); openSessionInProject(target);
     }} onClose={() => setProjectSettingsId('')} />}
-    {automationStop && <StopAutomationDialog onDecision={confirmed => { const resolve = automationStop.resolve; setAutomationStop(undefined); resolve(confirmed); }} />}
     {creatingSession && createProject && <CreateSessionDialog key={`${createProject.id}:${creatingSession.topicId ?? ''}`} project={createProject} harnesses={harnesses} topicId={creatingSession.topicId} onCreate={createSession} onClose={() => { navigation.current += 1; setCreatingSession(null); }} />}
     {canChooseTopic && choosingTopicSession && choosingTopicProject && <TopicDialog key={`choose-topic:${choosingTopicSession.id}`} draftKey={`form.topic.choose:${choosingTopicProject.id}:${choosingTopicSession.id}`} topic={sessionTopic(choosingTopicProject, choosingTopicSession)} selection={{ projectId: choosingTopicProject.id, topics: choosingTopicProject.topics ?? [], onSelect: id => chooseSessionTopic(choosingTopicSession, id), onCreate: input => createTopic(choosingTopicProject.id, input, choosingTopicSession) }} onSave={input => {
       const topic = sessionTopic(choosingTopicProject, choosingTopicSession);

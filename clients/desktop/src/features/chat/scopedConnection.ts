@@ -64,13 +64,13 @@ export function subscribeScope(kind: 'global' | 'project' | 'conversation', id: 
 
 if (import.meta.hot) import.meta.hot.dispose(() => { clearTimeout(timer); source?.close(); scopes.clear(); });
 
-export async function readConversationWindow(id: string, current: Session | undefined, signal: AbortSignal, reset = false): Promise<SessionUpdate> {
+export async function readConversationWindow(id: string, current: Session | undefined, signal: AbortSignal, reset = false, following?: boolean): Promise<SessionUpdate> {
   return serializeHistory(id, async () => {
   const base = `/api/sessions/${encodeURIComponent(id)}`;
   const session = await request<Session>(`${base}?limit=25`, 'GET', undefined, 15000, signal);
   const old = current?.history;
   let page: EventPage;
-  if (old && current.events.length && (!historyFollowing(id) || old.hasNewer)) {
+  if (old && current.events.length && (following === undefined ? !historyFollowing(id) || old.hasNewer : !following)) {
     const pages: EventPage[] = [];
     const end = old.startIndex + current.events.length;
     let after = old.startIndex - 1;

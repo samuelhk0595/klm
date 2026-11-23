@@ -55,7 +55,7 @@ export function LibraryPanel({ onGeneralAgent }: { onGeneralAgent?: () => void }
       <Button size="sm" disabled={busy} onClick={() => void preview('skills', skill.id, skill.name || skill.id)}>Usage / Delete</Button>
     </article>)}
     {inventory && !inventory.skills.length && <p className="muted">No user skills installed.</p>}
-    {inventory && <LibrarySkillsPaging inventory={inventory} onPage={setInventory} />}
+    {inventory && <LibrarySkillsPaging inventory={inventory} query={remoteSearch} onPage={setInventory} />}
     <div className="library-heading"><h4>MCP connections</h4><Button size="sm" disabled={busy} onClick={() => setEditing('new')}>Add connection</Button></div>
     {inventory?.connections.map(connection => <article className="library-item" key={connection.id}>
       <div><strong>{connection.name}</strong><p className="muted">{connection.config.transport === 'stdio' ? connection.config.command : connection.config.url}</p>

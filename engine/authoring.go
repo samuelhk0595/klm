@@ -53,6 +53,7 @@ type GraphNode struct {
 	Overrides    *NodeOverrides         `json:"overrides,omitempty" yaml:"overrides,omitempty"`
 	Choices      []string               `json:"choices,omitempty" yaml:"choices,omitempty"`
 	Command      string                 `json:"command,omitempty" yaml:"command,omitempty"`
+	Shell        string                 `json:"shell,omitempty" yaml:"shell,omitempty"`
 	Output       map[string]string      `json:"output,omitempty" yaml:"output,omitempty"`
 	To           string                 `json:"to,omitempty" yaml:"to,omitempty"`
 	Branches     map[string]GraphBranch `json:"branches,omitempty" yaml:"branches,omitempty"`
@@ -445,7 +446,7 @@ func (a *app) projectModels(w http.ResponseWriter, r *http.Request) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(55 * time.Second))
 	c, err := a.catalog(r.Context(), Session{ProjectID: p.ID, Harness: r.PathValue("harness")}, p.Folder, r.URL.Query().Get("refresh") == "true")
 	if err != nil {
-		fail(w, 502, modelCatalogLoadError)
+		fail(w, 502, catalogFailureMessage(err))
 		return
 	}
 	respond(w, 200, c)
@@ -669,6 +670,9 @@ func validateGraph(g GraphDefinition, agents []AgentRecord) error {
 		agentIDs[a.ID] = a.Enabled
 	}
 	for id, n := range g.Nodes {
+		if n.Shell != "" && (n.Type != "terminal" || n.Shell != "powershell" && n.Shell != "bash" && n.Shell != "sh") {
+			return fmt.Errorf("Node %s: shell must be powershell, bash or sh on a Terminal node.", id)
+		}
 		if !validAuthoringID(id) {
 			return errors.New("Invalid node identifier.")
 		}
@@ -961,6 +965,25 @@ func (a *app) saveGraph(w http.ResponseWriter, r *http.Request) {
 	} else if readErr != nil || revision(old) != body.Revision {
 		fail(w, 409, "Graph changed. Reload before saving.")
 		return
+	}
+	// An older editor omits fields it does not understand. Preserve the saved
+	// shell instead of silently downgrading a Bash/sh node to PowerShell.
+	var previous GraphDefinition
+	if readErr == nil {
+		if err := yaml.Unmarshal(old, &previous); err != nil {
+			fail(w, 409, "Cannot preserve the existing graph shell configuration.")
+			return
+		}
+	}
+	for nodeID, node := range body.Definition.Nodes {
+		if node.Type == "terminal" && node.Shell == "" {
+			if prior, exists := previous.Nodes[nodeID]; exists && prior.Type == "terminal" {
+				node.Shell = terminalShell(prior)
+			} else {
+				node.Shell = defaultTerminalShell()
+			}
+			body.Definition.Nodes[nodeID] = node
+		}
 	}
 	id := authoringSlug(body.Definition.Name)
 	if id != oldID {

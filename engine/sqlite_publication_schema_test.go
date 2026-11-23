@@ -13,7 +13,7 @@ import (
 )
 
 func TestPublicationSchemaChain(t *testing.T) {
-	for _, version := range []int{1, 2, 3, 4} {
+	for _, version := range []int{1, 2, 3, 4, 5} {
 		t.Run(fmt.Sprint(version), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -67,7 +67,7 @@ func TestPublicationSchemaChain(t *testing.T) {
 			}
 			var current int
 			var value string
-			if err := s.writer.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&current); err != nil || current != 4 {
+			if err := s.writer.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&current); err != nil || current != sqliteSchemaVersion {
 				t.Fatal(current, err)
 			}
 			if err := s.writer.QueryRowContext(ctx, `SELECT value FROM store_meta WHERE key='publication-sentinel'`).Scan(&value); err != nil || value != "retain exact data" {

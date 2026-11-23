@@ -24,8 +24,19 @@ type graphExecution struct {
 }
 
 type GraphAuthorization struct {
-	EventID string `json:"eventId"` // express user message in the owning conversation
-	Text    string `json:"text"`    // authorized scope, not a semantic proof of consent
+	Source     string                `json:"source,omitempty"`
+	Automation *AutomationGraphGrant `json:"automation,omitempty"` // engine supplied only
+	EventID    string                `json:"eventId"`              // express user message in the owning conversation
+	Text       string                `json:"text"`                 // authorized scope, not a semantic proof of consent
+}
+
+type AutomationGraphGrant struct {
+	ProjectID           string   `json:"projectId"`
+	AutomationID        string   `json:"automationId"`
+	RunID               string   `json:"runId"`
+	Revision            uint64   `json:"revision"`
+	ConfigurationDigest string   `json:"configurationDigest"`
+	Graphs              []string `json:"graphs"`
 }
 type GraphWorkspaceDecision struct {
 	Mode                 string            `json:"mode"`                           // original (default) | new_worktree
@@ -43,25 +54,26 @@ type GraphAssessment struct {
 	CreatedAt   string `json:"createdAt"`
 }
 type GraphActivity struct {
-	Task           string                 `json:"task,omitempty"`
-	Error          string                 `json:"error,omitempty"`
-	ID             string                 `json:"id"`
-	ConversationID string                 `json:"conversationId"`
-	ProjectID      string                 `json:"projectId"`
-	GraphID        string                 `json:"graphId"`
-	Objective      string                 `json:"objective"`
-	Authorization  []GraphAuthorization   `json:"authorization"`
-	Status         string                 `json:"status"` // scheduled | ready | running | awaiting_user | awaiting_assessment | succeeded | abandoned
-	Order          uint64                 `json:"order"`
-	Priority       int                    `json:"priority"`
-	Dependencies   []string               `json:"dependencies"` // activity IDs whose objective must be satisfied
-	Assessments    []GraphAssessment      `json:"assessments,omitempty"`
-	Correction     string                 `json:"correction,omitempty"`
-	Workspace      GraphWorkspaceDecision `json:"workspace"`
-	Version        uint64                 `json:"version"`
-	OperationIDs   []string               `json:"operationIds,omitempty"`
-	CreatedAt      string                 `json:"createdAt"`
-	UpdatedAt      string                 `json:"updatedAt"`
+	AutomationRunID string                 `json:"automationRunId,omitempty"` // notification origin, not a grant
+	Task            string                 `json:"task,omitempty"`
+	Error           string                 `json:"error,omitempty"`
+	ID              string                 `json:"id"`
+	ConversationID  string                 `json:"conversationId"`
+	ProjectID       string                 `json:"projectId"`
+	GraphID         string                 `json:"graphId"`
+	Objective       string                 `json:"objective"`
+	Authorization   []GraphAuthorization   `json:"authorization"`
+	Status          string                 `json:"status"` // scheduled | ready | running | awaiting_user | awaiting_assessment | succeeded | abandoned
+	Order           uint64                 `json:"order"`
+	Priority        int                    `json:"priority"`
+	Dependencies    []string               `json:"dependencies"` // activity IDs whose objective must be satisfied
+	Assessments     []GraphAssessment      `json:"assessments,omitempty"`
+	Correction      string                 `json:"correction,omitempty"`
+	Workspace       GraphWorkspaceDecision `json:"workspace"`
+	Version         uint64                 `json:"version"`
+	OperationIDs    []string               `json:"operationIds,omitempty"`
+	CreatedAt       string                 `json:"createdAt"`
+	UpdatedAt       string                 `json:"updatedAt"`
 }
 type GraphRunInput struct {
 	Task string `json:"task"`

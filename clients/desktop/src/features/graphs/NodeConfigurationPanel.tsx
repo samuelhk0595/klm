@@ -72,6 +72,6 @@ export function NodeConfigurationPanel({ node, nodes, edges, onClose }: {
         </div></details>;
       })}</section>
     </>}
-    {terminal && <><dl className="graph-config-fields"><Field label="Name">{terminal.name}</Field><Field label="Command"><pre>{terminal.command || '—'}</pre></Field><Field label="Destination">{nodeName(destination)}</Field></dl><OutputFields fields={terminal.outputFields ?? []} /></>}
+    {terminal && <><dl className="graph-config-fields"><Field label="Name">{terminal.name}</Field><Field label="Shell">{terminal.shell ?? 'powershell'}</Field><Field label="Command"><pre>{terminal.command || '—'}</pre></Field><Field label="Destination">{nodeName(destination)}</Field></dl><OutputFields fields={terminal.outputFields ?? []} /></>}
   </aside>;
 }

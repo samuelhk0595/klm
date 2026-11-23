@@ -28,7 +28,7 @@ func (st *sqliteSessionTx) existingDelegation(parent, operation string) (*Delega
 
 func (st *sqliteSessionTx) activeDelegation(parent string) (*DelegationBatchRecord, error) {
 	var id string
-	err := st.tx.QueryRowContext(st.ctx, `SELECT b.id FROM data_delegation_batches b WHERE x_parentSessionId=? AND (x_state<>'settled' OR x_delivery IN ('pending','sending','uncertain') OR x_outcome='finality_unconfirmed' OR EXISTS(SELECT 1 FROM data_delegation_calls c WHERE c.owner_id=b.id AND c.x_delivery IN ('pending','sending','uncertain'))) LIMIT 1`, parent).Scan(&id)
+	err := st.tx.QueryRowContext(st.ctx, `SELECT b.id FROM data_delegation_batches b WHERE x_parentSessionId=? AND x_delivery<>'abandoned' AND (x_state<>'settled' OR x_delivery IN ('pending','sending','uncertain') OR x_outcome='finality_unconfirmed' OR EXISTS(SELECT 1 FROM data_delegation_calls c WHERE c.owner_id=b.id AND c.x_delivery IN ('pending','sending','uncertain'))) LIMIT 1`, parent).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -92,7 +92,7 @@ func (st *sqliteSessionTx) syncDelegationCards(batch DelegationBatchRecord, memb
 	}
 	e := Event{ID: "delegation-batch/" + batch.ID, Type: "subagent", Title: "Subagents", Status: "running", CreatedAt: batch.CreatedAt, Data: map[string]any{
 		"managed": true, "kind": "batch", "id": batch.ID, "batchId": batch.ID, "parentSessionId": batch.ParentSessionID, "state": batch.State, "total": batch.ExpectedChildren, "terminal": terminal, "remaining": batch.ExpectedChildren - terminal,
-		"waiting": batch.Delivery != DelegationDeliveryDelivered && batch.Delivery != DelegationDeliveryCancelled, "delivery": batch.Delivery, "outcome": batch.Outcome, "revision": batch.Revision,
+		"waiting": batch.Delivery != DelegationDeliveryDelivered && batch.Delivery != DelegationDeliveryCancelled && batch.Delivery != DelegationDeliveryAbandoned, "delivery": batch.Delivery, "outcome": batch.Outcome, "revision": batch.Revision,
 	}}
 	if batch.State == DelegationSettled {
 		e.Status = string(batch.Outcome)

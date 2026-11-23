@@ -6,6 +6,8 @@ import "golang.org/x/sys/windows"
 
 const platformNativeDirectoryPicker = true
 
+func nativeDirectoryPickerAvailable() bool { return platformNativeDirectoryPicker }
+
 func platformDirectoryRoots() ([]filesystemDirectory, error) {
 	bits, err := windows.GetLogicalDrives()
 	if err != nil {
