@@ -180,8 +180,14 @@ func (a *app) startReservedSQLGraphActivity(ctx context.Context, owner, id strin
 		}
 	}
 	a.mu.Lock()
+	projectGit, err := a.captureProjectGitIdentities(ctx, activity.ProjectID)
+	if err != nil {
+		a.mu.Unlock()
+		return fail(err)
+	}
 	defer a.mu.Unlock()
 	run := GraphRun{ID: newID(), ActivityID: id, ProjectID: activity.ProjectID, ConversationID: owner, GraphID: activity.GraphID, Input: GraphRunInput{Task: activity.Task}, Workspace: activity.Workspace, Status: "starting", Revision: 1, CreatedAt: now(), UpdatedAt: now()}
+	run.ProjectGit = projectGit
 	if run.Input.Task == "" {
 		run.Input.Task = activity.Objective
 	}

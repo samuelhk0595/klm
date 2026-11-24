@@ -10,12 +10,13 @@ import (
 )
 
 type runnerPreparation struct {
-	ProjectID      string           `json:"project_id"`
-	InstanceKey    string           `json:"instance_key"`
-	Workspace      *runnerWorkspace `json:"workspace"`
-	Capture        runnerCapture    `json:"capture"`
-	Source         *AgentCapture    `json:"source,omitempty"`
-	RecoveryPolicy string           `json:"recovery_policy,omitempty"`
+	ProjectGit     *ProjectGitIdentitySnapshot `json:"project_git,omitempty"`
+	ProjectID      string                      `json:"project_id"`
+	InstanceKey    string                      `json:"instance_key"`
+	Workspace      *runnerWorkspace            `json:"workspace"`
+	Capture        runnerCapture               `json:"capture"`
+	Source         *AgentCapture               `json:"source,omitempty"`
+	RecoveryPolicy string                      `json:"recovery_policy,omitempty"`
 }
 
 func runnerGitEnvironment() []string {
@@ -127,6 +128,12 @@ func (a *app) runnerPrepareHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.mu.Lock()
+	prepared.ProjectGit, err = a.captureProjectGitIdentities(r.Context(), project.ID)
+	if err != nil {
+		a.mu.Unlock()
+		sqlHTTPError(w, err)
+		return
+	}
 	err = a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error {
 		if err := st.runnerGroupOpen(owner, prepared.ProjectID, prepared.InstanceKey); err != nil {
 			return err

@@ -298,7 +298,7 @@ func (a *app) createGraphWorkspace(ctx context.Context, run GraphRun, activation
 		return "", err
 	}
 	if isolated {
-		_, err = graphGit(ctx, cwd, "worktree", "add", "-b", w.GitBranch, w.Directory, base)
+		_, err = a.projectGraphGit(ctx, run, cwd, "worktree", "add", "-b", w.GitBranch, w.Directory, base)
 	}
 	if err == nil {
 		w.Directory, err = CanonicalGraphDirectory(w.Directory)

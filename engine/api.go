@@ -102,6 +102,7 @@ func (a *app) routes() http.Handler {
 	a.runnerRoutes(mux)
 	a.automationRoutes(mux)
 	a.activityBoardRoutes(mux)
+	a.projectGitIdentityRoutes(mux, projectGitIdentityVerifierForBuild())
 	mux.HandleFunc("GET /api/health", a.health)
 	mux.HandleFunc("GET /api/version", a.getVersion)
 	mux.HandleFunc("GET /api/state", a.getState)
@@ -227,9 +228,10 @@ func (a *app) routes() http.Handler {
 				return
 			}
 			webhookDelete := pattern == "DELETE /api/projects/{id}/webhooks/{webhookId}"
+			identityDelete := pattern == "DELETE /api/projects/{id}/git-identities/{identityId}"
 			transcriptionUpload := r.Method == http.MethodPost && r.URL.Path == "/api/transcriptions"
 			kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-			if (!transcriptionUpload && !webhookDelete && (err != nil || kind != "application/json")) ||
+			if (!transcriptionUpload && !webhookDelete && !identityDelete && (err != nil || kind != "application/json")) ||
 				(transcriptionUpload && (err != nil || kind != "multipart/form-data")) {
 				if transcriptionUpload {
 					fail(w, 415, "Transcriptions require multipart/form-data.")

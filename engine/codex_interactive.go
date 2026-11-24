@@ -81,7 +81,8 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 
 	process, reused := (*interactiveProcess)(nil), false
 	toolKey := p.runtimeToolKey()
-	if p.runtime != nil && p.capabilities == nil {
+	managedShell := p.turn.projectGit.Configured() && p.turn.runner == nil
+	if p.runtime != nil && p.capabilities == nil && !managedShell {
 		process, reused = p.runtime.getInteractive("codex", "", "", toolKey)
 	}
 	if !reused {
@@ -97,6 +98,11 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 		if p.turn.runner != nil {
 			args = append(args, "-c", "features.shell_tool=false", "-c", "features.unified_exec=false")
 		}
+		if managedShell {
+			// Login profiles can replace PATH, and native shell snapshots can
+			// capture process environments. Keep the live launch projection.
+			args = append(args, "-c", "allow_login_shell=false", "-c", "features.shell_snapshot=false", "-c", "features.shell_snapshot_v2=false")
+		}
 		if p.capabilities != nil {
 			if err := validateCodexLibraryBinary(b); err != nil {
 				return err
@@ -110,7 +116,7 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 			return err
 		}
 		if p.runtime != nil {
-			if err := p.runtime.retainInteractive(process, "codex", "", "", toolKey, p.capabilities != nil, nil); err != nil {
+			if err := p.runtime.retainInteractive(process, "codex", "", "", toolKey, p.capabilities != nil || managedShell, nil); err != nil {
 				closeRuntimeInteractive(&runtimeInteractive{process: process})
 				return err
 			}
@@ -250,7 +256,7 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 	}
 	sendThread := func() error {
 		params := map[string]any{"cwd": cwd, "approvalPolicy": approvalPolicy, "approvalsReviewer": "user", "sandbox": sandbox}
-		if p.capabilities != nil {
+		if p.capabilities != nil || managedShell {
 			params["config"] = libraryConfig
 		}
 		method := "thread/start"
@@ -426,7 +432,7 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 			if err := c.send(map[string]any{"method": "initialized"}); err != nil {
 				return err
 			}
-			if p.capabilities != nil {
+			if p.capabilities != nil || managedShell {
 				phase = "klm-library-config"
 				if err := c.send(map[string]any{"id": phase, "method": "config/read", "params": map[string]any{"cwd": cwd, "includeLayers": false}}); err != nil {
 					return err
@@ -438,9 +444,29 @@ func (p *adapter) runCodex(b binary, cwd string, payload submission) (err error)
 				return err
 			}
 		case "klm-library-config":
-			libraryConfig, err = p.codexLibraryConfig(object(result["config"]))
-			if err != nil {
-				return err
+			effective := object(result["config"])
+			if managedShell {
+				if err := verifyCodexProjectGitPolicy(effective); err != nil {
+					return err
+				}
+			}
+			if p.capabilities != nil {
+				libraryConfig, err = p.codexLibraryConfig(effective)
+				if err != nil {
+					return err
+				}
+			}
+			if managedShell {
+				if libraryConfig == nil {
+					libraryConfig = map[string]any{}
+				}
+				features := object(libraryConfig["features"])
+				if features == nil {
+					features = map[string]any{}
+					libraryConfig["features"] = features
+				}
+				features["shell_snapshot"], features["shell_snapshot_v2"] = false, false
+				libraryConfig["allow_login_shell"] = false
 			}
 			phase = "klm-thread"
 			if err := sendThread(); err != nil {

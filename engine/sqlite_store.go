@@ -17,7 +17,7 @@ import (
 
 const (
 	sqliteApplicationID = 0x4b4c4d31 // KLM1; independent of product version.
-	sqliteSchemaVersion = 6          // External runner ownership and receipts.
+	sqliteSchemaVersion = 7          // Project Git identities.
 	sqliteReaderLimit   = 4
 )
 
@@ -170,6 +170,12 @@ func (s *sqliteStore) enableRuntime(ctx context.Context) error {
 		return err
 	}
 	if err := s.upgradeAgentReferenceIndexes(ctx); err != nil {
+		return err
+	}
+	if err := s.write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, projectGitIdentitySchema+"PRAGMA user_version=7;")
+		return err
+	}); err != nil {
 		return err
 	}
 	if err := s.recoverAgentCatalogChanges(ctx); err != nil {

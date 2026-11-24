@@ -113,6 +113,11 @@ func (s *runnerService) scheduleLocked(executionID string) error {
 		s.applyDesiredLocked(execution)
 		return nil
 	}
+	// Only legacy executions lack a capture. Freeze it at their first new
+	// admission; explicit shared captures and resumed owners remain unchanged.
+	if err := a.bindRunnerProjectGit(a.ctx, &execution); err != nil {
+		return err
+	}
 	var meta Session
 	var native nativeSession
 	var payload submission
@@ -231,7 +236,7 @@ func (s *runnerService) scheduleLocked(executionID string) error {
 	delete(s.prepared, executionID)
 	delete(s.preparedContext, executionID)
 	t := &turn{
-		ctx: ctx, cancel: cancel, done: make(chan struct{}),
+		ctx: ctx, cancel: cancel, done: make(chan struct{}), projectGit: execution.ProjectGit,
 		runner: &runnerTurn{
 			ExecutionID: execution.ID, TurnID: turnID, Capture: execution.Applied, RecoveryPolicy: execution.RecoveryPolicy,
 		},
@@ -240,6 +245,15 @@ func (s *runnerService) scheduleLocked(executionID string) error {
 	a.wg.Add(1)
 	go a.execute(t, meta, native, b, cwd, payload)
 	return nil
+}
+
+func (a *app) bindRunnerProjectGit(ctx context.Context, execution *runnerExecution) error {
+	if execution.ProjectGit != nil {
+		return nil
+	}
+	var err error
+	execution.ProjectGit, err = a.captureProjectGitIdentities(ctx, execution.ProjectID)
+	return err
 }
 
 func (s *runnerService) finishedLocked(p *adapter, failure error) {

@@ -484,6 +484,13 @@ func (p *adapter) startOpenCodeServer(b binary, cwd string, ctx context.Context)
 	cmd.Env = append(cmd.Env, "OPENCODE_CONFIG_CONTENT="+graphConfig)
 	cmd.Env = append(cmd.Env, p.openCodeLibraryEnv...)
 	cmd.Env = skillExecutionEnv(cmd.Env)
+	env, gitCleanup, err := p.turn.projectNativeGitEnvironment(cmd.Env, p.runtime)
+	if err != nil {
+		return fail(err)
+	}
+	cmd.Env = env
+	profileCleanup := cleanup
+	cleanup = func() { gitCleanup(); profileCleanup() }
 	var owner *ownedProcess
 	if p.runtime == nil {
 		owner, err = prepareOwnedProcess(cmd)

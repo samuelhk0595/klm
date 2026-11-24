@@ -238,8 +238,14 @@ func (a *app) runnerCreate(w http.ResponseWriter, r *http.Request, kind string) 
 	execution.InstanceKey = prepared.InstanceKey
 	execution.Workspace = prepared.Workspace
 	execution.RecoveryPolicy = prepared.RecoveryPolicy
+	execution.ProjectGit = prepared.ProjectGit
 	var receipt runnerOperation
 	a.mu.Lock()
+	if err := a.bindRunnerProjectGit(r.Context(), &execution); err != nil {
+		a.mu.Unlock()
+		sqlHTTPError(w, err)
+		return
+	}
 	err = a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error {
 		if previous, err := st.runnerReceipt(owner, body.OperationID, digest, nil); err == nil {
 			receipt = previous

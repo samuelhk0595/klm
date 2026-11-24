@@ -27,7 +27,7 @@ func (a *app) executeDelegationChild(ctx context.Context, owner *delegationExecu
 		return failure(err)
 	}
 	childCtx, cancel := context.WithCancel(ctx)
-	t := &turn{ctx: childCtx, cancel: cancel, done: make(chan struct{}), delegationChild: &delegationChildBinding{owner: owner, invocationID: item.ID, mcpTracked: true}}
+	t := &turn{ctx: childCtx, cancel: cancel, done: make(chan struct{}), projectGit: owner.parent.turn.projectGit, delegationChild: &delegationChildBinding{owner: owner, invocationID: item.ID, mcpTracked: true}}
 	a.mu.Lock()
 	if ctx.Err() != nil || a.closing || a.storageErr != nil || a.runs[item.ChildSessionID] != nil {
 		a.mu.Unlock()

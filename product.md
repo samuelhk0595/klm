@@ -225,13 +225,35 @@ assistant messages provide Copy and a durable Favorite toggle; like and dislike 
 not used. Failed or cancelled partial responses remain copyable but cannot be marked
 as favorites.
 
-### Project Settings and GitHub Webhooks
+### Project Settings, Git Identities and GitHub Webhooks
 
 The **Project settings** button in the sessions sidebar opens a modal with
-**General**, **Webhooks**, **Tasks** and **Automations** sections. General edits the project's name and icon,
+**General**, **Git identities**, **Webhooks**, **Tasks** and **Automations** sections. General edits the project's name and icon,
 shows its fixed directory and provides confirmed project removal. Project creation
-and the rail's Edit/Remove menu retain their existing entry points. Webhooks belong
-to this project modal, not global Settings.
+and the rail's Edit/Remove menu retain their existing entry points.
+
+**Git identities** manages multiple GitHub tokens for the registered project. Each
+entry has a unique alias and the GitHub account returned by verification. Test
+connection does not save, and a failed replacement preserves the saved credential.
+The first identity becomes default. Removing the default promotes the oldest
+remaining identity; after removing the last entry, newly admitted work uses the
+existing shared `gh` setup. Projects that never configure a token keep that setup.
+
+Configured projects use the admitted default for managed `gh` and GitHub HTTPS
+commands. `klm-git-identity list` lists aliases; `klm-git-identity <alias> gh|git …`
+selects one alias for one operation. A failed or unavailable selected identity does
+not fall back to another account. The engine encrypts tokens and keeps only
+nonsecret references in execution records. Authentication follows the registered
+project, even if execution uses another directory. See [engine operations](engine/README.md#project-git-identities)
+for admission boundaries, API and command compatibility. This guarantee applies
+to managed commands; unrestricted processes under the engine's OS user are not isolated.
+
+The [November 19 Git identity publication](PROJECT_GIT_IDENTITIES_VPS_DEPLOYMENT_20261119.md)
+records focused Windows/Linux checks, the schema-7 VPS engine update and separate
+Windows desktop/engine installers for manual installation. Real-token and
+installed-client acceptance remain separate.
+
+**Webhooks** are configured in the same project modal.
 
 Each project can have multiple independent GitHub connections, with their own name,
 secret, stable ID, endpoint, enabled state and explicit event retention. The UI

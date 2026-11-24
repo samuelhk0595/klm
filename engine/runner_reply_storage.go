@@ -4,7 +4,7 @@ import "context"
 
 func (a *app) protectRunnerReply(body []byte) ([]byte, error) {
 	var existing bool
-	err := a.store.readers.QueryRowContext(context.Background(), `SELECT EXISTS(SELECT 1 FROM data_mcp_credentials) OR EXISTS(SELECT 1 FROM runner_requests WHERE reply IS NOT NULL)`).Scan(&existing)
+	err := a.store.readers.QueryRowContext(context.Background(), existingProtectedCredentialsSQL).Scan(&existing)
 	if err != nil {
 		return nil, err
 	}

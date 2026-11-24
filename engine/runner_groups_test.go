@@ -79,6 +79,9 @@ func TestRunnerGroupFenceSurvivesDelayedAdmission(t *testing.T) {
 
 func TestRunnerColdReplyReconciliation(t *testing.T) {
 	a, execution := runnerRegressionApp(t, "worker")
+	if err := a.bindRunnerProjectGit(a.ctx, &execution); err != nil {
+		t.Fatal(err)
+	}
 	execution.State = "interrupted"
 	execution.RecoveryPolicy = "resume_drained"
 	execution.ProcessesDrained = true

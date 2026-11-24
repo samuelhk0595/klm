@@ -12,28 +12,28 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"sync"
 	"time"
 )
 
 type runnerJob struct {
-	Command           string               `json:"command"`
-	Directory         string               `json:"directory"`
-	Shell             string               `json:"shell"`
-	EnvironmentDigest string               `json:"environment_digest"`
-	Error             string               `json:"error,omitempty"`
-	ContentID         string               `json:"content_id,omitempty"`
-	Digest            string               `json:"digest,omitempty"`
-	Bytes             int64                `json:"bytes"`
-	ID                string               `json:"id"`
-	ExecutionID       string               `json:"execution_id"`
-	TurnID            string               `json:"turn_id"`
-	State             string               `json:"state"`
-	PID               int                  `json:"pid,omitempty"`
-	Output            string               `json:"output"`
-	ExitCode          *int                 `json:"exit_code,omitempty"`
-	Domain            *runnerProcessDomain `json:"process_domain,omitempty"`
+	ProjectGit        *ProjectGitIdentitySnapshot `json:"project_git,omitempty"`
+	Command           string                      `json:"command"`
+	Directory         string                      `json:"directory"`
+	Shell             string                      `json:"shell"`
+	EnvironmentDigest string                      `json:"environment_digest"`
+	Error             string                      `json:"error,omitempty"`
+	ContentID         string                      `json:"content_id,omitempty"`
+	Digest            string                      `json:"digest,omitempty"`
+	Bytes             int64                       `json:"bytes"`
+	ID                string                      `json:"id"`
+	ExecutionID       string                      `json:"execution_id"`
+	TurnID            string                      `json:"turn_id"`
+	State             string                      `json:"state"`
+	PID               int                         `json:"pid,omitempty"`
+	Output            string                      `json:"output"`
+	ExitCode          *int                        `json:"exit_code,omitempty"`
+	Domain            *runnerProcessDomain        `json:"process_domain,omitempty"`
 }
 type runnerLiveJob struct {
 	cancelRequested bool
@@ -118,6 +118,9 @@ func (s *runnerService) jobCall(ctx context.Context, p *adapter, name, callID st
 	// Reserve framing time inside the external role's five-second ceiling.
 	wait = min(wait, 4800)
 	if name == "shell_start" {
+		if p.turn.projectGit == nil {
+			return nil, errors.New("Shell admission has no owning turn Git identity capture.")
+		}
 		if args.Command == "" || len(args.Command) > 64<<10 || callID == "" {
 			return nil, errors.New("A bounded command and native call identity are required.")
 		}
@@ -146,7 +149,12 @@ func (s *runnerService) jobCall(ctx context.Context, p *adapter, name, callID st
 			shell = "powershell.exe"
 			argv = []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-Command", args.Command}
 		}
-		intent := runnerJob{Command: args.Command, Directory: p.cwd, Shell: shell, EnvironmentDigest: revision([]byte(strings.Join(environment, "\x00")))}
+		// Only captured references enter the digest. Projected authority, payloads
+		// and ambient credentials never become durable job metadata or hashes.
+		intent := runnerJob{
+			Command: args.Command, Directory: p.cwd, Shell: shell, ProjectGit: p.turn.projectGit,
+			EnvironmentDigest: revision(runnerRawJSON(p.turn.projectGit)),
+		}
 		args.JobID = revision([]byte(p.turn.runner.ExecutionID + "/" + p.turn.runner.TurnID + "/" + callID))
 		digest := revision(raw)
 		fresh := false
@@ -193,7 +201,20 @@ func (s *runnerService) jobCall(ctx context.Context, p *adapter, name, callID st
 			command = cmd
 			cmd.Dir = p.cwd
 			var domain *runnerProcessDomain
+			environment, cleanup, err := a.projectGitEnvironment(environment, p.turn.projectGit)
+			if err != nil {
+				intent.ID, intent.ExecutionID, intent.TurnID = args.JobID, p.turn.runner.ExecutionID, p.turn.runner.TurnID
+				intent.State, intent.Error = "failed", err.Error()
+				_ = s.saveJob(intent)
+				return nil, err
+			}
 			cmd.Env = environment
+			projectGitRetained := false
+			defer func() {
+				if !projectGitRetained && settled() {
+					cleanup()
+				}
+			}()
 			if p.turn.runner.RecoveryPolicy == "resume_drained" {
 				owner, domain, err = prepareRunnerOwnedProcess(cmd, a.dir)
 			} else {
@@ -278,10 +299,12 @@ func (s *runnerService) jobCall(ctx context.Context, p *adapter, name, callID st
 			}
 			s.app.wg.Add(1)
 			retained = true
+			projectGitRetained = true
 			go func() {
 				defer s.app.wg.Done()
 				defer func() {
 					if owner.Drained() {
+						cleanup()
 						release()
 					}
 				}()

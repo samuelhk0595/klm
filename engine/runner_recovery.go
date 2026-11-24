@@ -139,6 +139,10 @@ func (s *runnerService) recoverDrainedTx(st *sqliteSessionTx, execution *runnerE
 	if execution.RecoveryBlocked != "" {
 		return nil
 	}
+	if execution.ProjectGit == nil {
+		execution.RecoveryBlocked = "git_identity_capture_missing"
+		return nil
+	}
 	if !execution.ProcessesDrained {
 		execution.RecoveryBlocked = "native_process_drainage_unconfirmed"
 		return nil

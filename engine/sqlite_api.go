@@ -642,6 +642,9 @@ func (a *app) sqlEventContent(w http.ResponseWriter, r *http.Request) {
 // Reuses paired-client protection and the existing routes. Until each remaining
 // handler is converted, SQL ownership never falls through into the JSON backend.
 func sqlRouteAvailable(pattern string) bool {
+	if strings.Contains(pattern, " /api/projects/{id}/git-identities") {
+		return true
+	}
 	if strings.Contains(pattern, " /api/runner/") {
 		return true
 	}

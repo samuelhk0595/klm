@@ -69,6 +69,19 @@ unavailable selections fail explicitly rather than being stripped.
 
 ### Prepared participants and initial CWD
 
+Project Git identities are owned by KLM Project settings. Preparation, direct
+runner admission and subsequent jobs retain the registered `project_id`'s
+identity capture, independent of initial CWD. An optional output-only
+`project_git` record contains the captured project, default and versioned alias
+references; an empty identity list explicitly captures shared mode. Integrators
+neither select a project by changing the workspace nor supply credential data.
+Managed `shell_start` commands use the captured default or the operation-local
+`klm-git-identity <alias> gh|git …` launcher. Job continuations and cold resume
+retain the original capture. Replacement/removal invalidates the referenced old
+credential for new launches; active executions cannot silently rebind. Legacy
+executions without a capture can capture at fresh turn admission, but automatic
+cold recovery without a capture is blocked. See [Project Git identities](README.md#project-git-identities).
+
 The positive `extensions` capability flags are
 `immutable_participant_preparation`, `initial_cwd_workspace`,
 `worker_input_lookup`, `resume_drained`, `instance_cancellation_fence` and

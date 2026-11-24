@@ -679,6 +679,68 @@ refresh or abandonment. Conflicting navigation/selection is disabled in flight;
 there is no automatic retry. Windows, permission/conflict and protected-path edge
 cases require their own runtime acceptance, beyond build or happy-path evidence.
 
+### Project Git identities
+
+In **Project settings → Git identities**, add a GitHub token with an alias, test
+the candidate and save it. The displayed `@login` comes from GitHub's `/user`
+endpoint; it does not prove permissions on a repository. Replace validates before
+writing, and an unsuccessful test or save leaves the old credential intact.
+The first entry is default; if the default is removed the oldest remaining entry
+becomes default. Removing the last entry restores shared mode for new work.
+
+With no identities, the existing engine `GH_CONFIG_DIR` resolution and shared
+authentication are unchanged. In configured execution, use `gh` or `git` as usual
+for the default; run `klm-git-identity list` for captured aliases or
+`klm-git-identity work gh api user --jq .login` to select one for a command. The
+launcher takes `git` as well. POSIX command-scoped `KLM_GIT_IDENTITY=work gh …`
+also works. Separate managed operations do not share a mutable active account.
+An unknown, removed, replaced or unusable identity never causes shared-account
+fallback. A public Git HTTPS request may not require authentication.
+
+The engine captures identity references per dispatched ordinary main/side turn,
+per graph run, and per runner execution/preparation. Owned subagents inherit the
+parent capture. Steering, active graph nodes, runner continuations and continuing
+shell jobs use the admitted references. Changing the default or alias affects
+new captures. Replacing/removing a token revokes its old version for subsequent
+managed command launches; a command that already acquired its token may finish.
+Existing runner executions need a new admission to pick up configuration changes.
+No credential is persisted in a job or execution capture.
+
+The KLM shims isolate `gh` configuration and install a process-local Git HTTPS
+credential helper restricted to `github.com`. Only the selected credential is
+resolved; it is not put in the harness environment, arguments, prompts, logs or
+normal API responses. Windows uses CurrentUser DPAPI; Linux uses the engine's
+private AES-GCM key. Back up the database and matching Linux key together.
+Managed Git ignores ambient HTTP credential settings, rejects embedded HTTPS
+credentials and URL rewrites, and does not rewrite Git config or remotes. `gh`
+account management, extensions, interactive browser/editor actions and raw
+credential-printing commands are not available through these shims. Use the
+usual `gh` outside managed execution for those administrative actions.
+Configured Codex native shells use non-login mode and require compatible default
+shell inheritance; incompatible custom environment filters fail before the turn.
+Existing harness approval and network policies still apply.
+
+The guarantee covers managed `gh` and GitHub HTTPS, not SSH, other HTTP hosts,
+external MCP processes, user hooks or processes that bypass the managed launch
+path. Same-OS-user unrestricted shell/filesystem access is not a security boundary.
+
+All identity settings endpoints require the normal paired-client authority and
+active project. Paths below are relative to `/api/projects/{id}/git-identities`.
+
+| Request | JSON body | Response |
+| --- | --- | --- |
+| `GET` (collection) | — | `{identities:[{id,alias,login,isDefault}]}` |
+| `POST /test` | `{token}` or `{identityId}` | `{login}` (no mutation) |
+| `POST` (collection) | `{alias,token,makeDefault?}` | Updated list (201) |
+| `PATCH /{identityId}` | `{alias?,token?,makeDefault?}` | Updated list |
+| `DELETE /{identityId}` | — | Updated list |
+
+Aliases are 1–40 ASCII letters, digits, underscores or hyphens, start with a
+letter/digit, and are unique per project ignoring case. Token responses do not
+include the token, prefix or ciphertext. `makeDefault: true` selects the entry;
+there is always one default while the list is nonempty. The API's collection
+route is spelled without a trailing slash.
+
 ### Project GitHub webhooks
 
 In the client, open **Project settings** from the sessions sidebar. **General**

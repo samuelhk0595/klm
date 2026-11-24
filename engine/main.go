@@ -15,7 +15,9 @@ import (
 
 type turn struct {
 	runner                *runnerTurn
-	automationRunID       string // explicit admitted owner; never inferred from session metadata
+	projectGit            *ProjectGitIdentitySnapshot // Reference-only capture of the owning project's authentication policy.
+	projectGitApp         *app                        // Set before native launch, including graph activations without a session runtime.
+	automationRunID       string                      // explicit admitted owner; never inferred from session metadata
 	protocolScope         *protocolContentScope
 	graphDelegation       *graphDelegationBinding
 	delegation            *delegationExecution
@@ -103,6 +105,9 @@ type app struct {
 }
 
 func main() {
+	if handled, code := projectGitLaunchCLI(); handled {
+		os.Exit(code)
+	}
 	if err := dispatchCLI(os.Args[1:]); err != nil {
 		log.Print(err)
 		os.Exit(1)
