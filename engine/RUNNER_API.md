@@ -41,6 +41,8 @@ key independently prevent another execution when operation IDs change.
 | --- | --- |
 | `GET /capabilities` | Protocol/engine identity, per-harness mechanisms and readiness diagnostics; probe evidence is distinct from complete runtime acceptance. |
 | `POST /connections`; `GET /connections/{integrationId}` | Bind/reconnect stable key/identity; confirm current client binding. |
+| `GET /projects/{projectId}/issue-field-organizations` | List active GitHub organization memberships visible to the project's default Git identity as `{organizations:[login,...]}`. |
+| `GET /projects/{projectId}/issue-fields?organization={login}` | Verify the default identity's active membership and return `{organization,fields:[{id,name,options:[{id,name}]}]}` with lowercase organization and decimal-string IDs. |
 | `POST /captures/validate` | Validate `{project_id,capture}` without admitting a conversation or model turn. |
 | `POST /captures` | Retain an immutable participant preparation using its original operation receipt; no session or inference. See prepared work below. |
 | `POST /conversations`; `POST /work` | Durable coordinator creation without inference, or asynchronous saved-Agent work admission. Return an immutable operation receipt with `result` containing the admitted execution. |
@@ -60,6 +62,13 @@ key independently prevent another execution when operation IDs change.
 | `GET /conversations/{id}/history`; `GET /work/{id}/history` | Existing bounded native history pages, newest tail by default; exclusive `before`/`after` ordinals. |
 | `GET /conversations/{id}/content`; `GET /work/{id}/content` | Existing digest-bound native event chunks using `ordinal`, `digest`, `offset`. Optional `source_session_id` addresses a retained owned generation. |
 | `GET /jobs/{jobId}/content` | Finalized retained command bytes, digest, byte offsets, base64 chunk and EOF. EOF is not execution success. |
+
+Issue field discovery requires the paired client that owns the runner integration
+and a nonremoved registered project. KLM uses its default Git identity for
+bounded, read-only GitHub membership and Issue field requests. The repository
+remote is not consulted. The fields request requires an explicit organization
+selection; no repository, alias, or URL override is accepted. Credentials stay
+in KLM; discovery starts no runner work and has no shared `gh` fallback.
 
 Captures contain explicit harness/model/effort, assembled instructions, selection,
 JSON-schema manifest and effective `yolo=true`. Saved-Agent work additionally

@@ -13,6 +13,8 @@ import (
 
 func (a *app) runnerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/runner/capabilities", a.runnerCapabilities)
+	mux.HandleFunc("GET /api/runner/projects/{projectId}/issue-fields", a.runnerIssueFieldsHTTP)
+	mux.HandleFunc("GET /api/runner/projects/{projectId}/issue-field-organizations", a.runnerIssueFieldsHTTP)
 	mux.HandleFunc("POST /api/runner/connections", a.runnerConnect)
 	mux.HandleFunc("POST /api/runner/captures/validate", a.runnerValidateCaptureHTTP)
 	mux.HandleFunc("POST /api/runner/captures", a.runnerPrepareHTTP)
