@@ -634,6 +634,9 @@ func (p *adapter) callExternalMCP(ctx context.Context, name string, raw json.Raw
 		child.uncertainMCP = append(child.uncertainMCP, DelegationUncertainCall{SessionID: p.id, CallID: callID, Tool: name, Reason: "MCP response has not been received."})
 		p.app.mu.Unlock()
 	}
+	if err := p.retainRunnerMCP(callID, route.connection.ID+"/"+route.operation+"/"+route.original, "mcp_pending", nil); err != nil {
+		return nil, err
+	}
 	if route.operation == "call" {
 		result, err = live.session.CallTool(ctx, &mcp.CallToolParams{Name: route.original, Arguments: arguments})
 	} else {
@@ -650,6 +653,23 @@ func (p *adapter) callExternalMCP(ctx context.Context, name string, raw json.Raw
 			encoded, _ := json.Marshal(value)
 			result = &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(encoded)}}, StructuredContent: value}
 		}
+	}
+	runnerState := "mcp_replied"
+	var protocolResult *jsonrpc.Error
+	var notSentResult *mcpNotSentError
+	if errors.As(err, &notSentResult) {
+		runnerState = "mcp_not_sent"
+	} else if err != nil && !errors.As(err, &protocolResult) {
+		runnerState = "mcp_unknown"
+	}
+	var retainedResult any
+	if err == nil {
+		retainedResult, _ = translateMCPResult(result)
+	} else {
+		retainedResult = map[string]string{"outcome": runnerState}
+	}
+	if retainErr := p.retainRunnerMCP(callID, route.connection.ID+"/"+route.operation+"/"+route.original, runnerState, retainedResult); retainErr != nil {
+		return nil, retainErr
 	}
 	if child := p.turn.delegationChild; child != nil {
 		var protocolError *jsonrpc.Error
@@ -687,7 +707,7 @@ func (p *adapter) callExternalMCP(ctx context.Context, name string, raw json.Raw
 		if errors.As(err, &protocolError) {
 			return nil, errors.New("The MCP server returned a protocol error. Its response was received; the call was not repeated.")
 		}
-		if p.turn.runner != nil {
+		if p.turn.runner != nil && route.operation == "call" {
 			p.turn.runner.mu.Lock()
 			if p.turn.runner.uncertainMCP == nil {
 				p.turn.runner.uncertainMCP = map[string]bool{}

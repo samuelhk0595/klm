@@ -5,28 +5,32 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net"
 	"sync"
 	"time"
 )
 
 type runnerTurn struct {
-	uncertainMCP map[string]bool
-	mu           sync.Mutex
-	activeTools  map[string]string
-	adapter      *adapter // app.mu; published only after selected MCP preparation.
-	ExecutionID  string
-	TurnID       string
-	Capture      runnerCapture
+	uncertainMCP   map[string]bool
+	mu             sync.Mutex
+	activeTools    map[string]string
+	adapter        *adapter // app.mu; published only after selected MCP preparation.
+	ExecutionID    string
+	TurnID         string
+	Capture        runnerCapture
+	RecoveryPolicy string
 }
 
 type runnerService struct {
-	app             *app
-	changed         chan struct{}
-	mu              sync.Mutex
-	jobs            map[string]*runnerLiveJob
-	callWake        map[string]chan struct{}
-	prepared        map[string]string // app.mu; consumed at an actual complete-turn claim.
-	preparedContext map[string]string
+	app                *app
+	changed            chan struct{}
+	mu                 sync.Mutex
+	jobs               map[string]*runnerLiveJob
+	callWake           map[string]chan struct{}
+	prepared           map[string]string // app.mu; consumed at an actual complete-turn claim.
+	preparedContext    map[string]string
+	cancelling         map[string]bool // app.mu; one existing-owner drainage attempt per execution.
+	maintenanceStarted bool
 }
 
 func (a *app) initializeRunner(ctx context.Context) error {
@@ -74,6 +78,9 @@ func (s *runnerService) scheduleLocked(executionID string) error {
 	if a.runs[execution.SessionID] != nil {
 		return nil
 	}
+	if execution.CancelRequested {
+		return nil
+	}
 	if execution.State != "idle" && execution.State != "stopped" && execution.State != "waiting_jobs" && execution.State != "blocked" {
 		return nil
 	}
@@ -83,6 +90,21 @@ func (s *runnerService) scheduleLocked(executionID string) error {
 	}
 	if !actionable {
 		return nil
+	}
+	project, err := a.store.readProjectMeta(a.ctx, execution.ProjectID)
+	if err != nil {
+		return err
+	}
+	_, initialCWD, err := a.readSQLConversation(a.ctx, execution.SessionID)
+	if err != nil {
+		return err
+	}
+	if err := validateRunnerLaunchDirectory(project, initialCWD); err != nil {
+		return a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
+			execution.State, execution.Error = "interrupted", err.Error()
+			execution.RecoveryBlocked = "workspace_unavailable"
+			return st.putRunnerExecution(execution)
+		})
 	}
 	if execution.Kind == "coordinator" && execution.Desired.ConfigurationGate && s.prepared[executionID] != revision(runnerCaptureJSON(execution.Desired)) {
 		return s.captureNextTurnLocked(execution)
@@ -97,6 +119,9 @@ func (s *runnerService) scheduleLocked(executionID string) error {
 	var cwd string
 	turnID := newID()
 	err = a.writeSQLLocked(a.ctx, func(st *sqliteSessionTx) error {
+		if err := st.runnerGroupOpen(execution.IntegrationID, execution.ProjectID, execution.InstanceKey); err != nil {
+			return err
+		}
 		inputs := []runnerInput{}
 		rows, err := st.tx.QueryContext(st.ctx, `SELECT body FROM runner_inputs WHERE execution_id=? AND state='retained' ORDER BY position LIMIT 32`, executionID)
 		if err != nil {
@@ -126,6 +151,9 @@ func (s *runnerService) scheduleLocked(executionID string) error {
 			return nil
 		}
 		execution.TurnID, execution.State = turnID, "running"
+		execution.ProcessesDrained = false
+		execution.ProcessDomains = []runnerProcessDomain{}
+		execution.RecoveryBlocked = ""
 		execution.NativeWaiting = false
 		meta, err = st.sessionMeta(execution.SessionID)
 		if err != nil {
@@ -202,7 +230,12 @@ func (s *runnerService) scheduleLocked(executionID string) error {
 	ctx, cancel := context.WithCancel(a.ctx)
 	delete(s.prepared, executionID)
 	delete(s.preparedContext, executionID)
-	t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{}), runner: &runnerTurn{ExecutionID: execution.ID, TurnID: turnID, Capture: execution.Applied}}
+	t := &turn{
+		ctx: ctx, cancel: cancel, done: make(chan struct{}),
+		runner: &runnerTurn{
+			ExecutionID: execution.ID, TurnID: turnID, Capture: execution.Applied, RecoveryPolicy: execution.RecoveryPolicy,
+		},
+	}
 	a.runs[meta.ID] = t
 	a.wg.Add(1)
 	go a.execute(t, meta, native, b, cwd, payload)
@@ -217,6 +250,15 @@ func (s *runnerService) finishedLocked(p *adapter, failure error) {
 			return err
 		}
 		stopping := execution.State == "cancelling"
+		execution.ProcessesDrained = p.processesDrained && !p.processDrainFailed && p.turn.stopErr == nil
+		if !execution.ProcessesDrained {
+			execution.RecoveryBlocked = "native_process_drainage_unconfirmed"
+		}
+		p.turn.runner.mu.Lock()
+		if len(p.turn.runner.uncertainMCP) > 0 {
+			execution.RecoveryBlocked = "mcp_result_unknown"
+		}
+		p.turn.runner.mu.Unlock()
 		execution.State = "idle"
 		var actionable bool
 		if err := st.tx.QueryRowContext(st.ctx, `SELECT EXISTS(SELECT 1 FROM runner_inputs WHERE execution_id=? AND state='retained' AND json_extract(body,'$.mode')<>'passive')`, execution.ID).Scan(&actionable); err != nil {
@@ -252,6 +294,19 @@ func (s *runnerService) finishedLocked(p *adapter, failure error) {
 			execution.State = "interrupted"
 			if failure != nil {
 				execution.Error = failure.Error()
+			} else if p.runnerFailureText != "" {
+				execution.Error = p.runnerFailureText
+			} else if execution.Error == "" {
+				execution.Error = "Native turn ended without confirmed completion; inspect the retained native error events."
+			}
+			if execution.RecoveryPolicy == "resume_drained" && execution.RecoveryBlocked == "" && p.turn.ctx.Err() == nil {
+				execution.RecoveryBlocked = "native_resume_failed"
+				var network net.Error
+				if errors.As(failure, &network) && network.Timeout() {
+					execution.RecoveryBlocked = "native_transport_retry"
+					delay := time.Duration(1<<min(execution.RecoveryAttempts+1, 6)) * time.Second
+					execution.RecoveryRetryAfter = time.Now().Add(delay).UTC().Format(time.RFC3339Nano)
+				}
 			}
 		}
 		if p.turn.ctx.Err() != nil {

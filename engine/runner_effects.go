@@ -50,6 +50,9 @@ func (a *app) runnerAdmitEffect(w http.ResponseWriter, r *http.Request) {
 		if execution.IntegrationID != owner {
 			return sql.ErrNoRows
 		}
+		if err := st.runnerGroupOpen(execution.IntegrationID, execution.ProjectID, execution.InstanceKey); err != nil {
+			return err
+		}
 		t := a.runs[execution.SessionID]
 		if call.State != "pending" || execution.State != "running" || execution.TurnID != call.TurnID || t == nil || t.ctx.Err() != nil {
 			return controlError(409, "Application effect belongs to a sealed or inactive turn.")
@@ -76,7 +79,8 @@ func (a *app) runnerAdmitEffect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *runnerService) unsettledEffects(ctx context.Context, executionID, turnID string) (int, error) {
-	query := `SELECT count(*) FROM runner_calls WHERE execution_id=? AND json_extract(body,'$.state')='admitted'`
+	query := `SELECT count(*) FROM runner_calls WHERE execution_id=? AND (json_extract(body,'$.state')='admitted'
+		OR (json_extract(body,'$.state') IN ('mcp_pending','mcp_unknown') AND json_extract(body,'$.arguments.operation')='call'))`
 	args := []any{executionID}
 	if turnID != "" {
 		query += ` AND turn_id=?`

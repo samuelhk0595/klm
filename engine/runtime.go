@@ -29,6 +29,10 @@ type sessionRuntime struct {
 	refreshBeforeTurn bool // Retain idle resources, but never reuse their managed profile.
 	shutdownDone      chan struct{}
 	shutdownErr       error
+	runnerExecutionID string
+	runnerTurnID      string
+	runnerDomainID    string
+	runnerDomain      runnerProcessDomain
 }
 
 type runtimeInteractive struct {
@@ -118,7 +122,14 @@ func (r *sessionRuntime) prepare(cmd *exec.Cmd) (*ownedProcess, error) {
 		return nil, context.Canceled
 	}
 	if r.group == nil {
-		group, err := newRuntimeProcessGroup()
+		var group *runtimeProcessGroup
+		var domain runnerProcessDomain
+		var err error
+		if r.runnerExecutionID != "" {
+			group, domain, err = newRunnerRuntimeProcessGroup(r.app.dir)
+		} else {
+			group, err = newRuntimeProcessGroup()
+		}
 		if err != nil {
 			r.mu.Unlock()
 			return nil, err
@@ -130,6 +141,37 @@ func (r *sessionRuntime) prepare(cmd *exec.Cmd) (*ownedProcess, error) {
 		}
 		r.group = group
 		created = true
+		if r.runnerExecutionID != "" {
+			executionID, turnID := r.runnerExecutionID, r.runnerTurnID
+			r.mu.Unlock()
+			err = r.app.runner.retainProcessDomain(executionID, turnID, domain)
+			r.mu.Lock()
+			if err != nil {
+				r.mu.Unlock()
+				group.Close()
+				return nil, err
+			}
+			if r.closed {
+				r.mu.Unlock()
+				return nil, context.Canceled
+			}
+			r.runnerDomainID = domain.ID
+			r.runnerDomain = domain
+		}
+	}
+	if !created && r.runnerExecutionID != "" {
+		domain, executionID, turnID := r.runnerDomain, r.runnerExecutionID, r.runnerTurnID
+		r.mu.Unlock()
+		err := r.app.runner.retainProcessDomain(executionID, turnID, domain)
+		r.mu.Lock()
+		if err != nil {
+			r.mu.Unlock()
+			return nil, err
+		}
+		if r.closed {
+			r.mu.Unlock()
+			return nil, context.Canceled
+		}
 	}
 	group := r.group
 	r.mu.Unlock()
@@ -137,6 +179,11 @@ func (r *sessionRuntime) prepare(cmd *exec.Cmd) (*ownedProcess, error) {
 		watchRuntimeGroup(group, r.supervisionFailed)
 	}
 	owner, err := prepareSessionOwnedProcess(cmd, group)
+	if err == nil && r.runnerDomainID != "" {
+		owner.beforeResume = func() error {
+			return r.app.runner.confirmProcessDomain(r.runnerExecutionID, r.runnerTurnID, r.runnerDomainID)
+		}
+	}
 	if err == nil {
 		r.publish()
 	}

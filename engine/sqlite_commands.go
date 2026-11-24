@@ -198,6 +198,9 @@ func (st *sqliteSessionTx) effectivelyArchived(s Session) (bool, error) {
 }
 
 func (st *sqliteSessionTx) conversationDirectory(s Session) (string, error) {
+	if externalSession(s) && s.ExecutionCWD != "" {
+		return s.ExecutionCWD, nil
+	}
 	if s.Role == sessionRoleGeneralAgent {
 		return s.ExecutionCWD, nil
 	}

@@ -249,6 +249,11 @@ func (a *app) execute(t *turn, s Session, native nativeSession, b binary, cwd st
 	err := reservationErr
 	if err == nil && s.Role != "graph_node" {
 		p.runtime, err = a.beginSessionRuntime(s.ID)
+		if err == nil && t.runner != nil && t.runner.RecoveryPolicy == "resume_drained" {
+			p.runtime.mu.Lock()
+			p.runtime.runnerExecutionID, p.runtime.runnerTurnID = t.runner.ExecutionID, t.runner.TurnID
+			p.runtime.mu.Unlock()
+		}
 		// Independent of the adapter's event loop and native abort response.
 		// A cancelled turn retires the entire conversation process container.
 		if err == nil {
@@ -702,6 +707,7 @@ type adapter struct {
 	subagent               bool
 	piMessage              int
 	failed                 bool
+	runnerFailureText      string
 	completed              bool
 	model                  string
 	effort                 string
@@ -913,6 +919,9 @@ func (p *adapter) failure(raw map[string]any) error {
 	text := humanError(raw)
 	if text == "" {
 		text = "Harness reported an error."
+	}
+	if p.turn != nil && p.turn.runner != nil {
+		p.runnerFailureText = text
 	}
 	// Retain the event type but not arbitrary diagnostic payloads, which can
 	// contain authentication headers or other credentials.

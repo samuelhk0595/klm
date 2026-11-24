@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"time"
 )
 
@@ -193,6 +194,9 @@ func (a *app) runnerToolReply(w http.ResponseWriter, r *http.Request) {
 		if execution.IntegrationID != owner {
 			return sql.ErrNoRows
 		}
+		if strings.HasPrefix(call.Name, "__mcp/") {
+			return controlError(409, "Library effect results are engine-owned.")
+		}
 		if call.State == "replied" && (!bytes.Equal(call.Reply, body.Result) || call.IsError != body.IsError) {
 			return controlError(409, "Tool call already has a different reply.")
 		}
@@ -268,6 +272,9 @@ func (a *app) runnerStopHTTP(w http.ResponseWriter, r *http.Request) {
 			return controlError(409, "Execution changed.")
 		}
 		execution.State = "cancelling"
+		if execution.Kind == "worker" {
+			execution.CancelRequested = true
+		}
 		if err := st.putRunnerExecution(execution); err != nil {
 			return err
 		}
@@ -299,7 +306,7 @@ func (s *runnerService) stopOwned(execution runnerExecution, t *turn) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var failure error
-	if t == nil && execution.Error != "" {
+	if t == nil && execution.Error != "" && !execution.ProcessesDrained {
 		failure = errors.New(execution.Error)
 	}
 	s.mu.Lock()
@@ -371,6 +378,8 @@ func (s *runnerService) stopOwned(execution runnerExecution, t *turn) {
 		if failure != nil {
 			current.State = "interrupted"
 			current.Error = failure.Error()
+		} else {
+			current.ProcessesDrained = true
 		}
 		return st.putRunnerExecution(current)
 	})
@@ -489,6 +498,12 @@ func (a *app) runnerRequestReply(w http.ResponseWriter, r *http.Request) {
 		}
 		if state != "pending" {
 			return controlError(409, "This exact native request is no longer pending.")
+		}
+		if execution.CancelRequested {
+			return controlError(409, "This execution is cancelled.")
+		}
+		if err := st.runnerGroupOpen(execution.IntegrationID, execution.ProjectID, execution.InstanceKey); err != nil {
+			return err
 		}
 		if err := a.validateRunnerAnswerLocked(execution.SessionID, nativeID, kind, body.Answer); err != nil {
 			return err

@@ -101,16 +101,17 @@ type runtimeProcessGroup struct {
 	fault    error
 }
 type ownedProcess struct {
-	mu        sync.Mutex
-	cmd       *exec.Cmd
-	group     *runtimeProcessGroup
-	exclusive bool
-	token     string
-	proxy     *os.File
-	ready     *os.File
-	nativePID int
-	stopped   bool
-	stopErr   error
+	mu           sync.Mutex
+	cmd          *exec.Cmd
+	group        *runtimeProcessGroup
+	exclusive    bool
+	token        string
+	proxy        *os.File
+	ready        *os.File
+	nativePID    int
+	stopped      bool
+	stopErr      error
+	beforeResume func() error
 }
 
 func linuxSupervisionAvailable() error {
@@ -240,6 +241,9 @@ func (o *ownedProcess) Attach() error {
 		return errors.New("Linux target admission failed before the native command was ready.")
 	}
 	o.nativePID = status.PID
+	if o.beforeResume != nil {
+		return o.beforeResume()
+	}
 	return nil
 }
 func (o *ownedProcess) Stop() error {

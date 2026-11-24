@@ -15,6 +15,9 @@ func (a *app) runnerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/runner/capabilities", a.runnerCapabilities)
 	mux.HandleFunc("POST /api/runner/connections", a.runnerConnect)
 	mux.HandleFunc("POST /api/runner/captures/validate", a.runnerValidateCaptureHTTP)
+	mux.HandleFunc("POST /api/runner/captures", a.runnerPrepareHTTP)
+	mux.HandleFunc("POST /api/runner/groups/{instanceKey}/cancel", a.runnerGroupHTTP)
+	mux.HandleFunc("GET /api/runner/groups/{instanceKey}", a.runnerGroupHTTP)
 	mux.HandleFunc("GET /api/runner/connections/{integrationId}", func(w http.ResponseWriter, r *http.Request) {
 		owner, err := a.runnerOwner(r)
 		if err != nil {
@@ -36,6 +39,7 @@ func (a *app) runnerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/runner/conversations/{runnerId}/inputs", a.runnerInputHTTP)
 	mux.HandleFunc("GET /api/runner/conversations/{runnerId}/inputs", a.runnerInputLookup)
 	mux.HandleFunc("POST /api/runner/work/{runnerId}/inputs", a.runnerInputHTTP)
+	mux.HandleFunc("GET /api/runner/work/{runnerId}/inputs", a.runnerInputLookup)
 	mux.HandleFunc("DELETE /api/runner/conversations/{runnerId}/inputs/{inputId}", a.runnerRemoveInput)
 	mux.HandleFunc("PATCH /api/runner/conversations/{runnerId}/configuration", a.runnerConfiguration)
 	mux.HandleFunc("POST /api/runner/conversations/{runnerId}/stop", a.runnerStopHTTP)
@@ -138,6 +142,7 @@ func (a *app) runnerCreate(w http.ResponseWriter, r *http.Request, kind string) 
 		SourceUID     string        `json:"source_uid"`
 		AgentRevision string        `json:"agent_revision"`
 		Prompt        string        `json:"prompt"`
+		PreparationID string        `json:"preparation_id"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -170,8 +175,42 @@ func (a *app) runnerCreate(w http.ResponseWriter, r *http.Request, kind string) 
 		fail(w, 404, "Project not found.")
 		return
 	}
+	if body.PreparationID == "" {
+		project.Folder, err = runnerCanonicalDirectory(project.Folder)
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+	}
 	var source *AgentCapture
-	if kind == "worker" {
+	var prepared runnerPreparation
+	if body.PreparationID != "" {
+		captureSupplied := revision(runnerCaptureJSON(body.Capture)) != revision(runnerCaptureJSON(runnerCapture{}))
+		if kind != "worker" || body.Agent != "" || body.SourceUID != "" || body.AgentRevision != "" || captureSupplied {
+			fail(w, 400, "Prepared work uses only its retained participant capture.")
+			return
+		}
+		prepared, err = a.readRunnerPreparation(r, owner, body.PreparationID)
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		if prepared.ProjectID != project.ID {
+			fail(w, 409, "Preparation belongs to another project.")
+			return
+		}
+		if err := a.runner.groupOpen(r.Context(), runnerExecution{IntegrationID: owner, ProjectID: project.ID, InstanceKey: prepared.InstanceKey}); err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		if err := validateRunnerLaunchDirectory(project, prepared.Workspace.Path); err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
+		project.Folder = prepared.Workspace.Path
+		source = prepared.Source
+		body.Capture = prepared.Capture
+	} else if kind == "worker" {
 		resolved, resolveErr := a.resolveNewAgent(r.Context(), NewAgentRequest{PreserveSource: true, ProjectID: body.ProjectID, Agent: body.Agent, SourceUID: body.SourceUID, Revision: body.AgentRevision, ExecutionCWD: project.Folder})
 		if resolveErr != nil {
 			sqlHTTPError(w, resolveErr)
@@ -186,12 +225,19 @@ func (a *app) runnerCreate(w http.ResponseWriter, r *http.Request, kind string) 
 		body.Capture.Selection = resolved.Config.Selection
 		body.Capture.Instructions = resolved.Config.Prompt + "\n\n" + body.Capture.Instructions
 	}
-	capture, err := a.validateRunnerCapture(r.Context(), body.Capture, project)
-	if err != nil {
-		sqlHTTPError(w, err)
-		return
+	capture := body.Capture
+	if body.PreparationID == "" {
+		capture, err = a.validateRunnerCapture(r.Context(), body.Capture, project)
+		if err != nil {
+			sqlHTTPError(w, err)
+			return
+		}
 	}
 	execution := runnerExecution{ID: newID(), IntegrationID: owner, ProjectID: project.ID, Key: body.Key, Kind: kind, SessionID: newID(), Generation: "1", Revision: "1", State: "idle", Desired: capture, Applied: capture, Source: source}
+	execution.PreparationID = body.PreparationID
+	execution.InstanceKey = prepared.InstanceKey
+	execution.Workspace = prepared.Workspace
+	execution.RecoveryPolicy = prepared.RecoveryPolicy
 	var receipt runnerOperation
 	a.mu.Lock()
 	err = a.writeSQLLocked(r.Context(), func(st *sqliteSessionTx) error {
@@ -212,8 +258,14 @@ func (a *app) runnerCreate(w http.ResponseWriter, r *http.Request, kind string) 
 			if execution.ProjectID != body.ProjectID {
 				return controlError(409, "External key is already bound to another project.")
 			}
+			if execution.PreparationID != body.PreparationID {
+				return controlError(409, "External key is already bound to another participant capture.")
+			}
 		} else {
 			if !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			if err := st.runnerGroupOpen(owner, project.ID, execution.InstanceKey); err != nil {
 				return err
 			}
 			session := Session{ID: execution.SessionID, Origin: runnerOrigin, IntegrationID: owner, RunnerID: execution.ID, Role: "runner_" + kind, ProjectID: project.ID, Title: "External execution", Harness: capture.Harness, Model: capture.Model, Effort: capture.Effort, YOLO: true, Status: "idle", ExecutionCWD: project.Folder, CreatedAt: now(), UpdatedAt: now(), Capabilities: ConversationCapabilities{Desired: capture.Selection}}
@@ -387,7 +439,21 @@ func (a *app) runnerGet(w http.ResponseWriter, r *http.Request) {
 		sqlHTTPError(w, err)
 		return
 	}
-	respond(w, 200, map[string]any{"execution": execution, "inputs": inputs, "requests": requests, "attention_only": attention, "owned_jobs_running": jobs})
+	var native nativeSession
+	err = a.store.readSnapshot(r.Context(), func(tx *sql.Tx) error {
+		var err error
+		native, err = (&sqliteSessionTx{ctx: r.Context(), tx: tx}).native(execution.SessionID)
+		return err
+	})
+	if err != nil {
+		sqlHTTPError(w, err)
+		return
+	}
+	respond(w, 200, map[string]any{
+		"execution": execution, "inputs": inputs, "requests": requests,
+		"attention_only": attention, "owned_jobs_running": jobs,
+		"native_context": map[string]string{"id": native.ID},
+	})
 }
 
 func runnerRawJSON(value any) json.RawMessage { body, _ := json.Marshal(value); return body }
@@ -415,6 +481,9 @@ func (a *app) runnerInputLookup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *runnerService) enqueueTx(st *sqliteSessionTx, execution runnerExecution, input runnerInput) error {
+	if err := st.runnerGroupOpen(execution.IntegrationID, execution.ProjectID, execution.InstanceKey); err != nil {
+		return err
+	}
 	if len(input.Text) > 128<<10 || input.SourceID == "" {
 		return controlError(400, "A bounded attributed input is required.")
 	}
@@ -503,7 +572,16 @@ func (a *app) runnerInputHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "Project not found.")
 		return
 	}
-	prepared, err := prepareMentions(r.Context(), project.Folder, "pi", input.Text, input.Mentions)
+	_, cwd, err := a.readSQLConversation(r.Context(), execution.SessionID)
+	if err != nil {
+		sqlHTTPError(w, err)
+		return
+	}
+	if err := validateRunnerLaunchDirectory(project, cwd); err != nil {
+		sqlHTTPError(w, err)
+		return
+	}
+	prepared, err := prepareMentions(r.Context(), cwd, "pi", input.Text, input.Mentions)
 	if err != nil {
 		sqlHTTPError(w, err)
 		return
@@ -525,7 +603,8 @@ func (a *app) runnerInputHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if current.Kind == "worker" && (current.State == "cancelled" || current.State == "cancelling" || current.State == "interrupted") {
+		workerUnavailable := current.CancelRequested || current.State == "cancelled" || current.State == "cancelling" || current.State == "interrupted"
+		if current.Kind == "worker" && workerUnavailable {
 			return controlError(409, "This worker cannot continue without reconciliation.")
 		}
 		if current.Kind == "worker" && current.State == "native_completed" {

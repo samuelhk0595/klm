@@ -94,17 +94,22 @@ type runtimeProcessGroup struct {
 }
 
 type ownedProcess struct {
-	mu        sync.Mutex
-	cmd       *exec.Cmd
-	group     *runtimeProcessGroup
-	process   syscall.Handle // Independent of the handle released by cmd.Wait.
-	exclusive bool
-	stopped   bool
-	stopErr   error
+	mu           sync.Mutex
+	cmd          *exec.Cmd
+	group        *runtimeProcessGroup
+	process      syscall.Handle // Independent of the handle released by cmd.Wait.
+	exclusive    bool
+	stopped      bool
+	stopErr      error
+	beforeResume func() error
 }
 
 func newRuntimeProcessGroup() (*runtimeProcessGroup, error) {
-	job, _, err := createJobObject.Call(0, 0)
+	return newWindowsRuntimeProcessGroup(0)
+}
+
+func newWindowsRuntimeProcessGroup(name uintptr) (*runtimeProcessGroup, error) {
+	job, _, err := createJobObject.Call(0, name)
 	if job == 0 {
 		return nil, errors.New("Cannot create the owned harness job.")
 	}
@@ -180,6 +185,19 @@ func (o *ownedProcess) Attach() error {
 	if ok, _, _ := assignProcessToJob.Call(uintptr(o.group.job), uintptr(h)); ok == 0 {
 		_ = o.cmd.Process.Kill()
 		return errors.New("Cannot contain the harness in its owned job; execution was refused.")
+	}
+	if o.beforeResume != nil {
+		o.group.mu.Unlock()
+		err := o.beforeResume()
+		o.group.mu.Lock()
+		if err != nil {
+			_ = o.cmd.Process.Kill()
+			return err
+		}
+		if o.group.closed {
+			_ = o.cmd.Process.Kill()
+			return errors.New("Owned runtime was sealed before resume.")
+		}
 	}
 	if status, _, _ := resumeOwnedProcess.Call(uintptr(h)); status != 0 {
 		_ = o.cmd.Process.Kill()

@@ -18,21 +18,22 @@ import (
 )
 
 type runnerJob struct {
-	Command           string `json:"command"`
-	Directory         string `json:"directory"`
-	Shell             string `json:"shell"`
-	EnvironmentDigest string `json:"environment_digest"`
-	Error             string `json:"error,omitempty"`
-	ContentID         string `json:"content_id,omitempty"`
-	Digest            string `json:"digest,omitempty"`
-	Bytes             int64  `json:"bytes"`
-	ID                string `json:"id"`
-	ExecutionID       string `json:"execution_id"`
-	TurnID            string `json:"turn_id"`
-	State             string `json:"state"`
-	PID               int    `json:"pid,omitempty"`
-	Output            string `json:"output"`
-	ExitCode          *int   `json:"exit_code,omitempty"`
+	Command           string               `json:"command"`
+	Directory         string               `json:"directory"`
+	Shell             string               `json:"shell"`
+	EnvironmentDigest string               `json:"environment_digest"`
+	Error             string               `json:"error,omitempty"`
+	ContentID         string               `json:"content_id,omitempty"`
+	Digest            string               `json:"digest,omitempty"`
+	Bytes             int64                `json:"bytes"`
+	ID                string               `json:"id"`
+	ExecutionID       string               `json:"execution_id"`
+	TurnID            string               `json:"turn_id"`
+	State             string               `json:"state"`
+	PID               int                  `json:"pid,omitempty"`
+	Output            string               `json:"output"`
+	ExitCode          *int                 `json:"exit_code,omitempty"`
+	Domain            *runnerProcessDomain `json:"process_domain,omitempty"`
 }
 type runnerLiveJob struct {
 	cancelRequested bool
@@ -69,19 +70,31 @@ func runnerJobTools() []map[string]any {
 }
 
 func (s *runnerService) saveJob(job runnerJob) error {
+	return s.saveJobState(job, false)
+}
+
+func (s *runnerService) saveJobState(job runnerJob, admission bool) error {
 	a := s.app
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.persistSQLLocked(context.Background(), func(st *sqliteSessionTx) error {
+		execution, err := st.runnerExecution(job.ExecutionID)
+		if err != nil {
+			return err
+		}
+		if admission {
+			if execution.CancelRequested || execution.State != "running" || execution.TurnID != job.TurnID {
+				return errors.New("Owned shell process admission is sealed.")
+			}
+			if err := st.runnerGroupOpen(execution.IntegrationID, execution.ProjectID, execution.InstanceKey); err != nil {
+				return err
+			}
+		}
 		body, err := runnerJSON(job)
 		if err != nil {
 			return err
 		}
 		if _, err := st.tx.ExecContext(st.ctx, `UPDATE runner_jobs SET state=?,body=? WHERE id=?`, job.State, body, job.ID); err != nil {
-			return err
-		}
-		execution, err := st.runnerExecution(job.ExecutionID)
-		if err != nil {
 			return err
 		}
 		return st.runnerEvent(execution, "job", job)
@@ -113,8 +126,13 @@ func (s *runnerService) jobCall(ctx context.Context, p *adapter, name, callID st
 			return nil, err
 		}
 		retained := false
+		var command *exec.Cmd
+		var owner *ownedProcess
+		settled := func() bool {
+			return command == nil || command.Process == nil || owner != nil && owner.Drained()
+		}
 		defer func() {
-			if !retained {
+			if !retained && settled() {
 				release()
 			}
 		}()
@@ -135,8 +153,18 @@ func (s *runnerService) jobCall(ctx context.Context, p *adapter, name, callID st
 		a := s.app
 		a.mu.Lock()
 		err = a.writeSQLLocked(ctx, func(st *sqliteSessionTx) error {
+			execution, err := st.runnerExecution(p.turn.runner.ExecutionID)
+			if err != nil {
+				return err
+			}
+			if execution.CancelRequested || execution.State != "running" || execution.TurnID != p.turn.runner.TurnID {
+				return errors.New("Shell admission belongs to a sealed turn.")
+			}
+			if err := st.runnerGroupOpen(execution.IntegrationID, execution.ProjectID, execution.InstanceKey); err != nil {
+				return err
+			}
 			var previous string
-			err := st.tx.QueryRowContext(ctx, `SELECT digest FROM runner_jobs WHERE id=?`, args.JobID).Scan(&previous)
+			err = st.tx.QueryRowContext(ctx, `SELECT digest FROM runner_jobs WHERE id=?`, args.JobID).Scan(&previous)
 			if err == nil {
 				if previous != digest {
 					return controlError(409, "Shell call arguments changed.")
@@ -162,14 +190,20 @@ func (s *runnerService) jobCall(ctx context.Context, p *adapter, name, callID st
 		}
 		if fresh {
 			cmd := exec.Command(shell, argv...)
+			command = cmd
 			cmd.Dir = p.cwd
+			var domain *runnerProcessDomain
 			cmd.Env = environment
-			owner, err := prepareOwnedProcess(cmd)
+			if p.turn.runner.RecoveryPolicy == "resume_drained" {
+				owner, domain, err = prepareRunnerOwnedProcess(cmd, a.dir)
+			} else {
+				owner, err = prepareOwnedProcess(cmd)
+			}
 			if err != nil {
 				return nil, err
 			}
-			live := &runnerLiveJob{record: runnerJob{ID: args.JobID, ExecutionID: p.turn.runner.ExecutionID, TurnID: p.turn.runner.TurnID, State: "running"}, owner: owner, done: make(chan struct{})}
-			live.record.Command, live.record.Directory, live.record.Shell, live.record.EnvironmentDigest = intent.Command, intent.Directory, intent.Shell, intent.EnvironmentDigest
+			live := &runnerLiveJob{record: intent, owner: owner, done: make(chan struct{})}
+			live.record.ID, live.record.ExecutionID, live.record.TurnID, live.record.State = args.JobID, p.turn.runner.ExecutionID, p.turn.runner.TurnID, "running"
 			outputDir := filepath.Join(s.app.dir, "runner-output")
 			if err := os.MkdirAll(outputDir, 0700); err != nil {
 				owner.Close()
@@ -182,6 +216,25 @@ func (s *runnerService) jobCall(ctx context.Context, p *adapter, name, callID st
 			}
 			live.file = output
 			live.record.ContentID = args.JobID
+			live.record.Domain = domain
+			if domain != nil {
+				pending := live.record
+				pending.State = "starting"
+				pending.Domain.PendingStarts = 1
+				if err := s.saveJob(pending); err != nil {
+					output.Close()
+					owner.Close()
+					return nil, err
+				}
+				owner.beforeResume = func() error {
+					live.mu.Lock()
+					live.record.Domain.Contained = true
+					live.record.Domain.PendingStarts = 0
+					record := live.record
+					live.mu.Unlock()
+					return s.saveJobState(record, true)
+				}
+			}
 			cmd.Stdout, cmd.Stderr = live, live
 			// A cancelled call cannot start an unowned job after Stop's admission barrier.
 			s.mu.Lock()
@@ -189,12 +242,14 @@ func (s *runnerService) jobCall(ctx context.Context, p *adapter, name, callID st
 				s.mu.Unlock()
 				output.Close()
 				owner.Close()
+				s.failedJobStart(live, err)
 				return nil, err
 			}
 			if err := cmd.Start(); err != nil {
 				s.mu.Unlock()
 				output.Close()
 				owner.Close()
+				s.failedJobStart(live, err)
 				return nil, err
 			}
 			if err := owner.Attach(); err != nil {
@@ -203,6 +258,7 @@ func (s *runnerService) jobCall(ctx context.Context, p *adapter, name, callID st
 				s.mu.Unlock()
 				output.Close()
 				owner.Close()
+				s.failedJobStart(live, err)
 				return nil, err
 			}
 			live.record.PID = cmd.Process.Pid
@@ -216,6 +272,7 @@ func (s *runnerService) jobCall(ctx context.Context, p *adapter, name, callID st
 				cmd.Wait()
 				owner.Close()
 				output.Close()
+				s.failedJobStart(live, err)
 				close(live.done)
 				return nil, err
 			}
@@ -310,6 +367,18 @@ func (s *runnerService) jobCall(ctx context.Context, p *adapter, name, callID st
 	result := live.record
 	result.Output = live.output.String()
 	return result, nil
+}
+
+func (s *runnerService) failedJobStart(live *runnerLiveJob, cause error) {
+	live.mu.Lock()
+	live.record.State = "unknown"
+	live.record.Error = cause.Error()
+	if live.owner.Drained() {
+		live.record.State = "failed"
+	}
+	record := live.record
+	live.mu.Unlock()
+	_ = s.saveJob(record)
 }
 
 func (s *runnerService) jobCompleted(job runnerJob) {

@@ -18,6 +18,16 @@ type runnerCapture struct {
 }
 
 type runnerExecution struct {
+	PreparationID      string                    `json:"preparation_id,omitempty"`
+	InstanceKey        string                    `json:"instance_key,omitempty"`
+	Workspace          *runnerWorkspace          `json:"workspace,omitempty"`
+	RecoveryPolicy     string                    `json:"recovery_policy,omitempty"`
+	CancelRequested    bool                      `json:"cancel_requested,omitempty"`
+	ProcessDomains     []runnerProcessDomain     `json:"process_domains,omitempty"`
+	ProcessesDrained   bool                      `json:"processes_drained"`
+	RecoveryBlocked    string                    `json:"recovery_blocked,omitempty"`
+	RecoveryAttempts   int                       `json:"recovery_attempts,omitempty"`
+	RecoveryRetryAfter string                    `json:"recovery_retry_after,omitempty"`
 	RecentConversation []runnerConversationEntry `json:"recent_conversation,omitempty"`
 	NativeWaiting      bool                      `json:"native_waiting"`
 	ID                 string                    `json:"id"`

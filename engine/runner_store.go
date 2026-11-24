@@ -143,6 +143,16 @@ func (st *sqliteSessionTx) retainRunnerChanges() error {
 					return err
 				}
 				requestID := revision([]byte(execution.ID + "/" + table + "/" + nativeID))
+				var previousState string
+				err := st.tx.QueryRowContext(st.ctx, `SELECT state FROM runner_requests WHERE id=?`, requestID).Scan(&previousState)
+				if err != nil && !errors.Is(err, sql.ErrNoRows) {
+					return err
+				}
+				if previousState == "callback_lost" || previousState == "unavailable" {
+					// A genuinely re-established native callback gets a fresh human
+					// request identity; an old protected answer is never rebound.
+					requestID = revision([]byte(requestID + "/" + execution.TurnID))
+				}
 				body, err := runnerJSON(map[string]any{"id": requestID, "execution_id": execution.ID, "native_id": nativeID, "kind": table, "request": value, "state": "pending"})
 				if err != nil {
 					return err

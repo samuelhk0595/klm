@@ -180,7 +180,7 @@ func (p *adapter) bridgeTools() []map[string]any {
 		return []map[string]any{}
 	}
 	if p.turn != nil && p.turn.runner != nil {
-		tools := append([]map[string]any{}, p.turn.runner.Capture.Manifest...)
+		tools := runnerManifestTools(p.turn.runner.Capture.Manifest)
 		tools = append(tools, runnerJobTools()...)
 		if p.mcp != nil {
 			tools = append(tools, p.mcp.tools...)

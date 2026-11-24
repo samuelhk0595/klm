@@ -26,5 +26,15 @@ func (a *app) runnerCapabilities(w http.ResponseWriter, r *http.Request) {
 		}
 		profiles = append(profiles, map[string]any{"id": harness.ID, "installed_version": harness.InstalledVersion, "required_version": harness.RequiredVersion, "ready": ready, "mechanisms": map[string]bool{"operational_manifest": ready, "owned_shell_jobs": ready, "next_step_input": ready, "native_questions": ready, "native_permissions": ready, "mcp_elicitation": ready, "native_continuation": ready}, "runtime_validation": map[string]any{"platform": "windows_amd64", "mechanism_probe_recorded": runtime.GOOS == "windows" && runtime.GOARCH == "amd64"}, "diagnostics": diagnostics})
 	}
-	respond(w, 200, map[string]any{"engine_id": engineID, "protocol": "1", "harnesses": profiles, "shell_wait_max_ms": 5000, "job_wait_max_ms": 5000, "question_kinds": []string{"question", "permission", "elicitation"}})
+	respond(w, 200, map[string]any{
+		"engine_id": engineID, "protocol": "1", "harnesses": profiles,
+		"shell_wait_max_ms": 5000, "job_wait_max_ms": 5000,
+		"question_kinds": []string{"question", "permission", "elicitation"},
+		"extensions": map[string]bool{
+			"immutable_participant_preparation": true, "linked_worktree_binding": false,
+			"initial_cwd_workspace": true,
+			"worker_input_lookup": true, "resume_drained": true,
+			"instance_cancellation_fence": true, "cold_process_reconciliation": true,
+		},
+	})
 }
