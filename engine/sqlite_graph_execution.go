@@ -162,6 +162,10 @@ func (a *app) runSQLGraph(runID string, g *graphExecution) {
 
 func (a *app) launchSQLGraphAgent(g *graphExecution, run GraphRun, x GraphActivation, send func(graphCompletion)) {
 	failure := func(err error) { send(graphCompletion{activationID: x.ID, drained: true, err: err}) }
+	if run.ProjectGit == nil {
+		failure(errors.New("Graph run has no admitted Git identity capture; admit a new run."))
+		return
+	}
 	compiled, err := compileGraphSnapshot(run.Snapshot)
 	if err != nil {
 		failure(err)
@@ -210,7 +214,7 @@ func (a *app) launchSQLGraphAgent(g *graphExecution, run GraphRun, x GraphActiva
 		return
 	}
 	ctx, cancel := context.WithCancel(g.ctx)
-	t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{}), projectGit: run.ProjectGit}
 	turnID := newID()
 	if run.Snapshot.Version == 2 {
 		t.graphDelegation = &graphDelegationBinding{Snapshot: run.Snapshot, OwnerID: run.ConversationID, Scope: DelegationGraphScope{RunID: run.ID, NodeID: x.NodeID, ActivationID: x.ID, TurnID: turnID, WorkspaceID: x.WorkspaceID, SnapshotDigest: run.Snapshot.Revision}}

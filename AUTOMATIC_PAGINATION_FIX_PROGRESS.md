@@ -1,5 +1,38 @@
 # Automatic pagination restoration
 
+## Latest follow-up: chat pages counted by messages
+
+At the user's request, interactive chat history now sends `unit=messages` and
+targets 25 messages (`user`, `assistant`, `agent_prompt`). Intervening reasoning,
+tools and status events stay in the timeline and do not consume that quota.
+This supersedes the earlier event-counted chat page/window descriptions below.
+Graph activity and other lists retain their existing units.
+
+- SQLite finds message boundaries using the existing owner/kind/position index,
+  merging bounded message-position candidates. It returns every event in the
+  selected ordinal interval, in order, with the same content references/cursors.
+- A response remains bounded to 2 MiB and 1,024 event records. Larger intervals
+  continue at the returned cursors; the limits are transport safety bounds, not
+  deductions from the 25-message quota. Legacy/internal readers that omit the
+  unit retain their existing event-counted behavior.
+- Chat retention counts up to 200 messages, with an independent 8,192-event
+  memory bound. Cursor calculation follows the actual retained event range, so
+  safety trimming does not make an unloaded region inaccessible.
+- Revalidation uses explicit `from`/`end` ordinal bounds and message-counted
+  chunks, preserving the loaded range rather than fetching beyond it.
+- `npx tsc -b` and scoped `git diff --check`: passed. The targeted
+  `sessionState.test.ts` run passed 12 tests.
+- Direct Go storage tests passed for `TestSQLiteMessageHistoryPages`,
+  `TestSQLiteMessageHistoryLongWorkContinuation` and the existing
+  `TestSQLitePagingBoundedContentAndDirections`. The first compile attempt was
+  blocked by a pre-existing concurrent `runner_jobs.go` declaration error. A
+  temporary overlay attempt also encountered evolving runner fields; after the
+  concurrent source update the three tests ran directly and passed, without any
+  overlay. No runner source was edited for this change.
+- Browser/native validation of this new message unit remains pending. Earlier
+  Playwright evidence documents the previous event-counted contract and does not
+  establish acceptance of the new backend message boundaries.
+
 ## Loading indicator flicker follow-up — 2026-11-11
 
 Streaming invalidations were being presented as pagination progress. In particular,

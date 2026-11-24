@@ -13,6 +13,7 @@ import (
 )
 
 const sqliteHistoryPageBytes = 2 << 20
+const sqliteMessageHistoryEventLimit = 1024
 
 type sqliteEventContent struct {
 	Key    string `json:"key"`
@@ -39,6 +40,7 @@ type sqliteEventPreview struct {
 }
 
 type sqliteHistoryPage struct {
+	Unit      string               `json:"unit,omitempty"`
 	SessionID string               `json:"sessionId"`
 	Revision  string               `json:"revision"`
 	Events    []sqliteHistoryEvent `json:"events"`
@@ -54,8 +56,19 @@ type sqliteHistoryPage struct {
 // records remain lossless behind the digest-bound, base64 byte-content contract.
 // before/after are exclusive absolute ordinals; empty selects the latest tail.
 func (s *sqliteStore) readHistory(ctx context.Context, sessionID, before, after string, limit int) (sqliteHistoryPage, error) {
+	return s.readHistoryWindow(ctx, sessionID, before, after, limit, false, "", "")
+}
+
+// Message-mode cursors remain absolute event ordinals. Events between messages
+// are never filtered out; byte/record continuations may split a large interval.
+// from/end restrict revalidation to the reader's already loaded event range.
+func (s *sqliteStore) readMessageHistory(ctx context.Context, sessionID, before, after string, limit int, from, end string) (sqliteHistoryPage, error) {
+	return s.readHistoryWindow(ctx, sessionID, before, after, limit, true, from, end)
+}
+
+func (s *sqliteStore) readHistoryWindow(ctx context.Context, sessionID, before, after string, limit int, messages bool, from, end string) (sqliteHistoryPage, error) {
 	page := sqliteHistoryPage{SessionID: sessionID, Events: []sqliteHistoryEvent{}}
-	if limit < 1 || limit > 50 || before != "" && after != "" || s.readers == nil {
+	if limit < 1 || limit > 50 || before != "" && (after != "" || from != "") || s.readers == nil {
 		return page, errors.New("invalid history request")
 	}
 	bound := int64(math.MaxInt64)
@@ -88,11 +101,57 @@ func (s *sqliteStore) readHistory(ctx context.Context, sessionID, before, after 
 		return page, err
 	}
 	page.Count = strconv.FormatInt(count, 10)
+	forward := after != "" || from != ""
 	query := `SELECT id,record_id,position,payload_bytes,digest,revision,kind,status,created_at,correlation_id FROM data_session_events WHERE owner_id=? AND position<? ORDER BY position DESC LIMIT ?`
-	if after != "" {
+	if forward {
 		query = `SELECT id,record_id,position,payload_bytes,digest,revision,kind,status,created_at,correlation_id FROM data_session_events WHERE owner_id=? AND position>? ORDER BY position ASC LIMIT ?`
 	}
-	rows, err := tx.QueryContext(ctx, query, sessionID, bound, limit)
+	args := []any{sessionID, bound, limit}
+	if messages {
+		page.Unit = "messages"
+		lower, upper := int64(0), count
+		if before != "" {
+			upper = min(upper, bound)
+		}
+		if after != "" {
+			lower = min(count, bound)
+			if lower < count {
+				lower++
+			}
+		}
+		if from != "" {
+			value, parseErr := strconv.ParseInt(from, 10, 64)
+			if parseErr != nil || value < 0 {
+				return page, controlError(400, "Invalid history range.")
+			}
+			lower = max(lower, value)
+		}
+		if end != "" {
+			value, parseErr := strconv.ParseInt(end, 10, 64)
+			if parseErr != nil || value < lower {
+				return page, controlError(400, "Invalid history range.")
+			}
+			upper = min(upper, value)
+		}
+		if lower < upper {
+			boundary, boundaryErr := historyMessageBoundary(ctx, tx, sessionID, lower, upper, limit, forward)
+			if boundaryErr != nil {
+				return page, boundaryErr
+			}
+			if forward {
+				upper = boundary
+			} else {
+				lower = boundary
+			}
+		}
+		order := "DESC"
+		if forward {
+			order = "ASC"
+		}
+		query = `SELECT id,record_id,position,payload_bytes,digest,revision,kind,status,created_at,correlation_id FROM data_session_events WHERE owner_id=? AND position>=? AND position<? ORDER BY position ` + order + ` LIMIT ?`
+		args = []any{sessionID, lower, upper, sqliteMessageHistoryEventLimit}
+	}
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return page, err
 	}
@@ -114,15 +173,12 @@ func (s *sqliteStore) readHistory(ctx context.Context, sessionID, before, after 
 	if err != nil {
 		return page, err
 	}
-	if after == "" {
-		slices.Reverse(metadata)
-	}
 	// Reserve room for envelope metadata and JSON escaping overhead. Payload
 	// bytes are stored encoded JSON; no giant text is decoded just to size it.
 	remaining := int64(sqliteHistoryPageBytes - 64<<10)
 	for _, m := range metadata {
 		entry := sqliteHistoryEvent{ID: m.id, Ordinal: strconv.FormatInt(m.position, 10), Revision: m.revision}
-		if m.size <= remaining {
+		if m.size+4096 <= remaining {
 			var buffer bytes.Buffer
 			if err := writeSQLiteRecordContent(ctx, tx, &buffer, "session_events", m.key); err != nil {
 				return page, err
@@ -134,7 +190,6 @@ func (s *sqliteStore) readHistory(ctx context.Context, sessionID, before, after 
 				return page, err
 			}
 			entry.Event = &event
-			remaining -= m.size
 		} else {
 			entry.Content = &sqliteEventContent{Key: m.key, Digest: m.digest, Bytes: m.size}
 			entry.Preview = &m.preview
@@ -153,14 +208,68 @@ func (s *sqliteStore) readHistory(ctx context.Context, sessionID, before, after 
 			}
 			entry.Preview.Text = preview
 		}
+		encoded, err := json.Marshal(entry)
+		if err != nil {
+			return page, err
+		}
+		if int64(len(encoded)+1) > remaining {
+			break
+		}
+		remaining -= int64(len(encoded) + 1)
 		page.Events = append(page.Events, entry)
 	}
-	if len(metadata) > 0 {
-		first, last := metadata[0].position, metadata[len(metadata)-1].position
+	if !forward {
+		slices.Reverse(page.Events)
+	}
+	if len(page.Events) > 0 {
+		first, _ := strconv.ParseInt(page.Events[0].Ordinal, 10, 64)
+		last, _ := strconv.ParseInt(page.Events[len(page.Events)-1].Ordinal, 10, 64)
 		page.Before, page.After = strconv.FormatInt(first, 10), strconv.FormatInt(last, 10)
 		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM data_session_events WHERE owner_id=? AND position<?),EXISTS(SELECT 1 FROM data_session_events WHERE owner_id=? AND position>?)`, sessionID, first, sessionID, last).Scan(&page.HasOlder, &page.HasNewer); err != nil {
 			return page, err
 		}
 	}
 	return page, tx.Commit()
+}
+
+func historyMessageBoundary(ctx context.Context, tx *sql.Tx, owner string, lower, upper int64, limit int, forward bool) (int64, error) {
+	order := "DESC"
+	if forward {
+		order = "ASC"
+	}
+	// Each branch uses (owner_id,kind,position). At most 3*(limit+1) message
+	// ordinals are merged; a long tool group does not cause a payload/cursor scan.
+	branch := `SELECT position FROM (SELECT position FROM data_session_events WHERE owner_id=? AND kind=? AND position>=? AND position<? ORDER BY position ` + order + ` LIMIT ?)`
+	query := `SELECT position FROM (` + branch + ` UNION ALL ` + branch + ` UNION ALL ` + branch + `) ORDER BY position ` + order + ` LIMIT ?`
+	args := []any{}
+	for _, kind := range []string{"user", "assistant", "agent_prompt"} {
+		args = append(args, owner, kind, lower, upper, limit+1)
+	}
+	args = append(args, limit+1)
+	rows, err := tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	positions := []int64{}
+	for rows.Next() {
+		var position int64
+		if err := rows.Scan(&position); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		positions = append(positions, position)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return 0, err
+	}
+	if forward {
+		if len(positions) > limit {
+			return positions[limit], nil
+		}
+		return upper, nil
+	}
+	if len(positions) > limit {
+		return positions[limit-1], nil
+	}
+	return lower, nil
 }

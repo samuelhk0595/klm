@@ -37,6 +37,9 @@ func serveSQLiteEngine(dir string, listener net.Listener) (result error) {
 		return err
 	}
 	a.store = store
+	if err := a.initializeRunner(ctx); err != nil {
+		return err
+	}
 	defer func() {
 		a.mu.Lock()
 		a.closing = true
@@ -100,6 +103,10 @@ func serveSQLiteEngine(dir string, listener net.Listener) (result error) {
 	}
 	a.mu.Lock()
 	a.scheduleLinkedLocked()
+	if err := a.runner.resumeUnclaimedLocked(); err != nil {
+		a.mu.Unlock()
+		return err
+	}
 	a.mu.Unlock()
 	if ctx.Err() != nil {
 		return nil

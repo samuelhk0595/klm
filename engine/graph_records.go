@@ -85,23 +85,24 @@ type GraphRunResult struct {
 	Error  string            `json:"error,omitempty"`
 }
 type GraphRun struct {
-	FinalityError      string                 `json:"finalityError,omitempty"`
-	ID                 string                 `json:"id"`
-	ActivityID         string                 `json:"activityId"`
-	ProjectID          string                 `json:"projectId"`
-	ConversationID     string                 `json:"conversationId"`
-	GraphID            string                 `json:"graphId"`                  // captured identity; catalog rename never rewrites this
-	CatalogGraphID     *string                `json:"catalogGraphId,omitempty"` // current catalog alias; empty after deletion
-	Input              GraphRunInput          `json:"input"`
-	Workspace          GraphWorkspaceDecision `json:"workspace"` // invocation-time decision retained across later attempts
-	Snapshot           GraphSnapshot          `json:"snapshot"`
-	Status             string                 `json:"status"` // starting | running | ending | completed | blocked | failed | interrupted
-	Revision           uint64                 `json:"revision"`
-	InitialWorkspaceID string                 `json:"initialWorkspaceId,omitempty"`
-	Result             *GraphRunResult        `json:"result,omitempty"`
-	CreatedAt          string                 `json:"createdAt"`
-	UpdatedAt          string                 `json:"updatedAt"`
-	EndedAt            string                 `json:"endedAt,omitempty"`
+	ProjectGit         *ProjectGitIdentitySnapshot `json:"projectGit,omitempty"` // nil is legacy, not frozen shared mode
+	FinalityError      string                      `json:"finalityError,omitempty"`
+	ID                 string                      `json:"id"`
+	ActivityID         string                      `json:"activityId"`
+	ProjectID          string                      `json:"projectId"`
+	ConversationID     string                      `json:"conversationId"`
+	GraphID            string                      `json:"graphId"`                  // captured identity; catalog rename never rewrites this
+	CatalogGraphID     *string                     `json:"catalogGraphId,omitempty"` // current catalog alias; empty after deletion
+	Input              GraphRunInput               `json:"input"`
+	Workspace          GraphWorkspaceDecision      `json:"workspace"` // invocation-time decision retained across later attempts
+	Snapshot           GraphSnapshot               `json:"snapshot"`
+	Status             string                      `json:"status"` // starting | running | ending | completed | blocked | failed | interrupted
+	Revision           uint64                      `json:"revision"`
+	InitialWorkspaceID string                      `json:"initialWorkspaceId,omitempty"`
+	Result             *GraphRunResult             `json:"result,omitempty"`
+	CreatedAt          string                      `json:"createdAt"`
+	UpdatedAt          string                      `json:"updatedAt"`
+	EndedAt            string                      `json:"endedAt,omitempty"`
 }
 type GraphChoiceSubmission struct {
 	OperationID string            `json:"operationId"`

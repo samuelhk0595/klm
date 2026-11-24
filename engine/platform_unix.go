@@ -64,9 +64,10 @@ type runtimeProcessGroup struct {
 }
 
 type ownedProcess struct {
-	cmd       *exec.Cmd
-	group     *runtimeProcessGroup
-	exclusive bool
+	cmd          *exec.Cmd
+	group        *runtimeProcessGroup
+	exclusive    bool
+	beforeResume func() error
 }
 
 func newRuntimeProcessGroup() (*runtimeProcessGroup, error) {

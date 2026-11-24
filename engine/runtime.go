@@ -29,6 +29,11 @@ type sessionRuntime struct {
 	refreshBeforeTurn bool // Retain idle resources, but never reuse their managed profile.
 	shutdownDone      chan struct{}
 	shutdownErr       error
+	runnerExecutionID string
+	runnerTurnID      string
+	runnerDomainID    string
+	runnerDomain      runnerProcessDomain
+	projectGitLeases  map[string]runtimeGitLease
 }
 
 type runtimeInteractive struct {
@@ -41,10 +46,11 @@ type runtimeInteractive struct {
 }
 
 type runtimeShutdown struct {
-	group       *runtimeProcessGroup
-	bridge      *linkedBridge
-	interactive *runtimeInteractive
-	openCode    *openCodeServer
+	group            *runtimeProcessGroup
+	bridge           *linkedBridge
+	interactive      *runtimeInteractive
+	openCode         *openCodeServer
+	projectGitLeases map[string]runtimeGitLease
 }
 
 func (a *app) beginSessionRuntime(id string) (*sessionRuntime, error) {
@@ -118,7 +124,14 @@ func (r *sessionRuntime) prepare(cmd *exec.Cmd) (*ownedProcess, error) {
 		return nil, context.Canceled
 	}
 	if r.group == nil {
-		group, err := newRuntimeProcessGroup()
+		var group *runtimeProcessGroup
+		var domain runnerProcessDomain
+		var err error
+		if r.runnerExecutionID != "" {
+			group, domain, err = newRunnerRuntimeProcessGroup(r.app.dir)
+		} else {
+			group, err = newRuntimeProcessGroup()
+		}
 		if err != nil {
 			r.mu.Unlock()
 			return nil, err
@@ -130,6 +143,37 @@ func (r *sessionRuntime) prepare(cmd *exec.Cmd) (*ownedProcess, error) {
 		}
 		r.group = group
 		created = true
+		if r.runnerExecutionID != "" {
+			executionID, turnID := r.runnerExecutionID, r.runnerTurnID
+			r.mu.Unlock()
+			err = r.app.runner.retainProcessDomain(executionID, turnID, domain)
+			r.mu.Lock()
+			if err != nil {
+				r.mu.Unlock()
+				group.Close()
+				return nil, err
+			}
+			if r.closed {
+				r.mu.Unlock()
+				return nil, context.Canceled
+			}
+			r.runnerDomainID = domain.ID
+			r.runnerDomain = domain
+		}
+	}
+	if !created && r.runnerExecutionID != "" {
+		domain, executionID, turnID := r.runnerDomain, r.runnerExecutionID, r.runnerTurnID
+		r.mu.Unlock()
+		err := r.app.runner.retainProcessDomain(executionID, turnID, domain)
+		r.mu.Lock()
+		if err != nil {
+			r.mu.Unlock()
+			return nil, err
+		}
+		if r.closed {
+			r.mu.Unlock()
+			return nil, context.Canceled
+		}
 	}
 	group := r.group
 	r.mu.Unlock()
@@ -137,6 +181,11 @@ func (r *sessionRuntime) prepare(cmd *exec.Cmd) (*ownedProcess, error) {
 		watchRuntimeGroup(group, r.supervisionFailed)
 	}
 	owner, err := prepareSessionOwnedProcess(cmd, group)
+	if err == nil && r.runnerDomainID != "" {
+		owner.beforeResume = func() error {
+			return r.app.runner.confirmProcessDomain(r.runnerExecutionID, r.runnerTurnID, r.runnerDomainID)
+		}
+	}
 	if err == nil {
 		r.publish()
 	}
@@ -444,8 +493,9 @@ func (r *sessionRuntime) shutdown() error {
 
 func (r *sessionRuntime) detachLocked() runtimeShutdown {
 	r.shutdownDone = make(chan struct{})
-	resources := runtimeShutdown{group: r.group, bridge: r.bridge, interactive: r.interactive, openCode: r.openCode}
+	resources := runtimeShutdown{group: r.group, bridge: r.bridge, interactive: r.interactive, openCode: r.openCode, projectGitLeases: r.projectGitLeases}
 	r.group, r.bridge, r.interactive, r.openCode = nil, nil, nil, nil
+	r.projectGitLeases = nil
 	r.openCodeKey = ""
 	return resources
 }
@@ -467,6 +517,14 @@ func closeRuntimeResources(resources runtimeShutdown) error {
 	}
 	if resources.bridge != nil {
 		resources.bridge.close()
+	}
+	// Leave the managed entrypoints in place if ownership is uncertain. Removing
+	// them while a possibly live shell still has the projected PATH would let
+	// that shell resolve the shared tools on its next command.
+	if err == nil {
+		for _, lease := range resources.projectGitLeases {
+			lease.cleanup()
+		}
 	}
 	return err
 }
@@ -572,6 +630,6 @@ func (p *adapter) runtimeToolKey() string {
 	if p.delegation != nil {
 		delegationTurn = p.delegation.parentTurnID
 	}
-	encoded, _ := json.Marshal(map[string]any{"delegationTurn": delegationTurn, "automationRunId": p.automationRunID, "tools": p.bridgeTools(), "yolo": p.yolo, "capabilities": p.capabilities, "internalSkills": p.internalSkills})
+	encoded, _ := json.Marshal(map[string]any{"delegationTurn": delegationTurn, "automationRunId": p.automationRunID, "tools": p.bridgeTools(), "yolo": p.yolo, "capabilities": p.capabilities, "internalSkills": p.internalSkills, "projectGit": projectGitSnapshotKey(p.turn.projectGit)})
 	return string(encoded)
 }

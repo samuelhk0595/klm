@@ -172,13 +172,15 @@ type linuxEvent struct {
 	err    error
 }
 type linuxSupervisor struct {
-	conn           *net.UnixConn
-	events         chan linuxEvent
-	tasks          map[string]*linuxTask
-	roots          map[int]*linuxTask
-	infrastructure map[string]bool
-	workload       map[string]bool
-	turnActive     bool
+	conn            *net.UnixConn
+	events          chan linuxEvent
+	tasks           map[string]*linuxTask
+	roots           map[int]*linuxTask
+	infrastructure  map[string]bool
+	workload        map[string]bool
+	turnActive      bool
+	recoveryReceipt *os.File
+	recoveryID      string
 }
 
 func runLinuxSupervisor() int {
@@ -212,14 +214,14 @@ func runLinuxSupervisor() int {
 		case event := <-s.events:
 			if event.kind == "control" {
 				if event.err != nil {
-					if s.drain() {
+					if s.drain() && s.retainDrainage() {
 						return 0
 					}
 					return 125
 				}
 				if event.packet.Op == "close" {
 					closeLinuxFiles(event.files)
-					confirmed := s.drain()
+					confirmed := s.drain() && s.retainDrainage()
 					_ = writeLinuxPacket(conn, linuxPacket{OK: confirmed, Confirmed: confirmed}, nil)
 					if confirmed {
 						return 0
@@ -236,11 +238,32 @@ func runLinuxSupervisor() int {
 	}
 }
 func (s *linuxSupervisor) reply(ok bool) { _ = writeLinuxPacket(s.conn, linuxPacket{OK: ok}, nil) }
+
+func (s *linuxSupervisor) retainDrainage() bool {
+	if s.recoveryReceipt == nil {
+		return true
+	}
+	defer s.recoveryReceipt.Close()
+	err := json.NewEncoder(s.recoveryReceipt).Encode(map[string]any{"id": s.recoveryID, "drained": true})
+	if err != nil {
+		return false
+	}
+	return s.recoveryReceipt.Sync() == nil
+}
+
 func (s *linuxSupervisor) control(p linuxPacket, files []*os.File) {
-	if p.Op != "prepare" {
+	if p.Op != "prepare" && p.Op != "recovery-receipt" {
 		closeLinuxFiles(files)
 	}
 	switch p.Op {
+	case "recovery-receipt":
+		if len(files) != 1 || s.recoveryReceipt != nil || len(s.tasks) > 0 || !validAgentSourceUID(p.Token) {
+			closeLinuxFiles(files)
+			s.reply(false)
+			return
+		}
+		s.recoveryReceipt, s.recoveryID = files[0], p.Token
+		s.reply(true)
 	case "prepare":
 		if len(files) != 2 || len(s.tasks) >= 4096 || p.Token == "" || s.tasks[p.Token] != nil || !filepath.IsAbs(p.Path) || len(p.Args) == 0 {
 			closeLinuxFiles(files)

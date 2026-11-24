@@ -416,6 +416,10 @@ func (a *app) launchGraphAgent(g *graphExecution, run GraphRun, x GraphActivatio
 		return
 	}
 	failure := func(err error) { send(graphCompletion{activationID: x.ID, drained: true, err: err}) }
+	if run.ProjectGit == nil {
+		failure(errors.New("Graph run has no admitted Git identity capture; admit a new run."))
+		return
+	}
 	compiled, err := compileGraphSnapshot(run.Snapshot)
 	if err != nil {
 		failure(err)
@@ -509,7 +513,7 @@ func (a *app) launchGraphAgent(g *graphExecution, run GraphRun, x GraphActivatio
 		sessionID = newID()
 	}
 	ctx, cancel := context.WithCancel(g.ctx)
-	t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{})}
+	t := &turn{ctx: ctx, cancel: cancel, done: make(chan struct{}), projectGit: run.ProjectGit}
 	turnID := newID()
 	hooks := GraphAdapterHooks{Node: true, ReserveChoice: func(ctx context.Context, callID string, raw json.RawMessage) (any, error) {
 		return a.reserveGraphChoice(ctx, run.ID, x.ID, turnID, callID, raw)

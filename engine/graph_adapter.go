@@ -176,6 +176,17 @@ func (p *adapter) graphSealed() bool {
 }
 
 func (p *adapter) bridgeTools() []map[string]any {
+	if strings.HasPrefix(p.role, "runner_") && (p.turn == nil || p.turn.runner == nil) {
+		return []map[string]any{}
+	}
+	if p.turn != nil && p.turn.runner != nil {
+		tools := runnerManifestTools(p.turn.runner.Capture.Manifest)
+		tools = append(tools, runnerJobTools()...)
+		if p.mcp != nil {
+			tools = append(tools, p.mcp.tools...)
+		}
+		return tools
+	}
 	tools := []map[string]any{}
 	if p.delegation != nil {
 		tools = append(tools, delegationOutputTool())

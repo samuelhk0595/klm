@@ -46,8 +46,18 @@ func startInteractive(t *turn, b binary, args []string, cwd string, runtime *ses
 	cmd := exec.CommandContext(ctx, b.path, append(append([]string{}, b.args...), args...)...)
 	cmd.Dir = cwd
 	cmd.Env = skillExecutionEnv(runtimeEnvironment(cmd.Environ(), b.node))
+	env, gitCleanup, err := t.projectNativeGitEnvironment(cmd.Env, runtime)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	cmd.Env = env
+	defer func() {
+		if !retained {
+			gitCleanup()
+		}
+	}()
 	var owner *ownedProcess
-	var err error
 	if runtime == nil {
 		owner, err = prepareOwnedProcess(cmd)
 	} else {
@@ -72,7 +82,7 @@ func startInteractive(t *turn, b binary, args []string, cwd string, runtime *ses
 		frames = make(chan map[string]any)
 	}
 	done := make(chan struct{})
-	p := &interactiveProcess{Frames: frames, Done: done, stdin: stdin, cancel: cancel, owner: owner, release: release}
+	p := &interactiveProcess{Frames: frames, Done: done, stdin: stdin, cancel: cancel, owner: owner, release: func() { gitCleanup(); release() }}
 	lines := &jsonLines{cancel: cancel, consume: func(line []byte) error {
 		var frame map[string]any
 		d := json.NewDecoder(bytes.NewReader(line))

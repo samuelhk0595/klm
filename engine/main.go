@@ -14,7 +14,10 @@ import (
 )
 
 type turn struct {
-	automationRunID       string // explicit admitted owner; never inferred from session metadata
+	runner                *runnerTurn
+	projectGit            *ProjectGitIdentitySnapshot // Reference-only capture of the owning project's authentication policy.
+	projectGitApp         *app                        // Set before native launch, including graph activations without a session runtime.
+	automationRunID       string                      // explicit admitted owner; never inferred from session metadata
 	protocolScope         *protocolContentScope
 	graphDelegation       *graphDelegationBinding
 	delegation            *delegationExecution
@@ -42,6 +45,7 @@ type turn struct {
 }
 
 type app struct {
+	runner                       *runnerService
 	contentDownloads             contentDownloadTickets
 	harnessInstallCancel         context.CancelFunc // app.mu; storage freeze cancels already-owned installer work.
 	harnessInstaller             *harnessInstallService
@@ -101,6 +105,9 @@ type app struct {
 }
 
 func main() {
+	if handled, code := projectGitLaunchCLI(); handled {
+		os.Exit(code)
+	}
 	if err := dispatchCLI(os.Args[1:]); err != nil {
 		log.Print(err)
 		os.Exit(1)

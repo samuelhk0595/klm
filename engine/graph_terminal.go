@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -47,11 +48,15 @@ func (e *graphUnconfirmedError) Unwrap() error { return e.cause }
 
 // Only pipe-drain confirmation has a bounded wait. There is no task timeout.
 func ownedGraphCommand(ctx context.Context, cwd, executable string, args []string, environment []string) (graphProcessResult, error) {
+	return ownedGraphCommandEnvironment(ctx, cwd, executable, args, append(ghConfigurationEnvironment(os.Environ()), environment...))
+}
+
+func ownedGraphCommandEnvironment(ctx context.Context, cwd, executable string, args []string, environment []string) (graphProcessResult, error) {
 	result := graphProcessResult{Drained: true}
 	cmd := exec.CommandContext(ctx, executable, args...)
 	cmd.Dir = cwd
 	cmd.Stdin = nil
-	cmd.Env = append(ghConfigurationEnvironment(os.Environ()), environment...)
+	cmd.Env = environment
 	// These shell startup hooks must not execute ambient code before an authored
 	// Terminal script. No payload value is interpreted as shell source.
 	if name := strings.TrimSuffix(strings.ToLower(filepath.Base(executable)), ".exe"); name == "bash" || name == "sh" {
@@ -160,6 +165,10 @@ func encodePowerShell(script string) string {
 
 func (a *app) executeGraphTerminal(g *graphExecution, run GraphRun, x GraphActivation) graphCompletion {
 	completion := graphCompletion{activationID: x.ID, drained: true}
+	if run.ProjectGit == nil {
+		completion.err = errors.New("Graph run has no admitted Git identity capture; admit a new run.")
+		return completion
+	}
 	node := run.Snapshot.Graph.Definition.Nodes[x.NodeID]
 	shell, err := terminalShellExecutable(node)
 	if err != nil {
@@ -223,7 +232,14 @@ func (a *app) executeGraphTerminal(g *graphExecution, run GraphRun, x GraphActiv
 	case "bash":
 		args = []string{"--noprofile", "--norc", scriptFile}
 	}
-	result, err := ownedGraphCommand(g.ctx, cwd, shell, args, []string{"KLM_GRAPH_PAYLOAD_FILE=" + inputFile, "KLM_GRAPH_SCRIPT_FILE=" + scriptFile})
+	result, err := a.ownedProjectGraphCommand(
+		g.ctx,
+		run.ProjectGit,
+		cwd,
+		shell,
+		args,
+		[]string{"KLM_GRAPH_PAYLOAD_FILE=" + inputFile, "KLM_GRAPH_SCRIPT_FILE=" + scriptFile},
+	)
 	completion.drained, completion.err = result.Drained, err
 	completion.command = &result
 	if err == nil {
@@ -242,7 +258,19 @@ func graphGit(ctx context.Context, cwd string, args ...string) (string, error) {
 	if !ok {
 		return "", errors.New("Git is not installed.")
 	}
-	result, err := ownedGraphCommand(ctx, cwd, path, args, []string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never"})
+	// These calls only inspect local metadata. In particular, partial-clone
+	// revision inspection must not acquire credentials through a lazy fetch.
+	result, err := ownedGraphCommand(
+		ctx,
+		cwd,
+		path,
+		args,
+		[]string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never", "GIT_NO_LAZY_FETCH=1"},
+	)
+	return graphGitResult(result, err, args)
+}
+
+func graphGitResult(result graphProcessResult, err error, args []string) (string, error) {
 	if err != nil {
 		return "", err
 	}
@@ -253,4 +281,72 @@ func graphGit(ctx context.Context, cwd string, args ...string) (string, error) {
 		return "", errors.New("Git metadata exceeded its capture limit.")
 	}
 	return strings.TrimSpace(result.Output), nil
+}
+
+func (a *app) ownedProjectGraphCommand(
+	ctx context.Context,
+	snapshot *ProjectGitIdentitySnapshot,
+	cwd, executable string,
+	args, environment []string,
+) (graphProcessResult, error) {
+	result := graphProcessResult{Drained: true}
+	if snapshot == nil {
+		return result, errors.New("Graph run has no admitted Git identity capture; admit a new run.")
+	}
+	env := append(ghConfigurationEnvironment(os.Environ()), environment...)
+	env, cleanup, err := a.projectGitEnvironment(env, snapshot)
+	if err != nil {
+		return result, err
+	}
+	defer func() {
+		if !result.Started || result.Drained {
+			cleanup()
+		}
+	}()
+	// Engine-owned worktree creation can invoke lazy fetch, checkout filters and
+	// hooks. Launch its Git entrypoint through the same shim as authored commands.
+	if snapshot.Configured() && executable == "git" {
+		executable, err = projectedGraphGitExecutable(env)
+		if err != nil {
+			return result, err
+		}
+	}
+	result, err = ownedGraphCommandEnvironment(ctx, cwd, executable, args, env)
+	return result, err
+}
+
+func projectedGraphGitExecutable(environment []string) (string, error) {
+	name := "git"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	for _, entry := range environment {
+		key, value, _ := strings.Cut(entry, "=")
+		if !strings.EqualFold(key, "PATH") {
+			continue
+		}
+		paths := filepath.SplitList(value)
+		if len(paths) == 0 || !filepath.IsAbs(paths[0]) {
+			break
+		}
+		path := filepath.Join(paths[0], name)
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() {
+			break
+		}
+		return path, nil
+	}
+	return "", errors.New("Managed Git entrypoint is unavailable.")
+}
+
+func (a *app) projectGraphGit(ctx context.Context, run GraphRun, cwd string, args ...string) (string, error) {
+	result, err := a.ownedProjectGraphCommand(
+		ctx,
+		run.ProjectGit,
+		cwd,
+		"git",
+		args,
+		[]string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=Never"},
+	)
+	return graphGitResult(result, err, args)
 }

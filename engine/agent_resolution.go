@@ -12,6 +12,7 @@ import (
 )
 
 type NewAgentRequest struct {
+	PreserveSource                                               bool
 	ProjectID, Agent, SourceUID, Revision, Harness, ExecutionCWD string
 	Overrides                                                    AgentConfigOverrides
 	InheritedCapabilities                                        CapabilitySelection
@@ -181,7 +182,7 @@ func (a *app) resolveNewAgent(ctx context.Context, req NewAgentRequest) (AgentRe
 	if err != nil {
 		return AgentResolution{}, err
 	}
-	if selected.Source.Scope == "project" {
+	if selected.Source.Scope == "project" && !req.PreserveSource {
 		a.authoringMu.Lock()
 		if err := a.recheckNewAgentLocked(ctx, AgentResolution{Capture: capture}, req.ProjectID); err != nil {
 			a.authoringMu.Unlock()

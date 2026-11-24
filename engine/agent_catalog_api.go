@@ -364,6 +364,15 @@ func (a *app) mutateCatalogAgentLocked(ctx context.Context, p Project, oldID str
 	if old != nil && (remove || !body.Agent.Enabled || id != old.ID) && !scan.referencesComplete {
 		return CatalogAgentRecord{}, agentProblem(409, "references_unavailable", "agent", "Restore access to graph references before disabling, deleting or renaming this agent.")
 	}
+	if old != nil && (remove || !body.Agent.Enabled) && a.runner != nil {
+		var used bool
+		if err := a.store.readers.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM runner_executions WHERE json_extract(body,'$.source.source.sourceUid')=? AND json_extract(body,'$.state') IN ('running','waiting_jobs','configuring','cancelling'))`, old.Source.SourceUID).Scan(&used); err != nil {
+			return CatalogAgentRecord{}, err
+		}
+		if used {
+			return CatalogAgentRecord{}, agentProblem(409, "agent_in_use", "agent", "This agent is in use and cannot be disabled or deleted.")
+		}
+	}
 	if old != nil && (remove || !body.Agent.Enabled) && len(old.References) > 0 {
 		problem := agentProblem(409, "agent_in_use", "agent", "This agent is referenced by a graph and cannot be disabled or deleted.")
 		problem.BlockingReferences = old.References[:min(len(old.References), 100)]

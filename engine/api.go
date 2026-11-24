@@ -99,8 +99,10 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("POST /api/engine/restart", a.restartEngineHTTP)
 	a.harnessRoutes(mux)
 	a.libraryRoutes(mux)
+	a.runnerRoutes(mux)
 	a.automationRoutes(mux)
 	a.activityBoardRoutes(mux)
+	a.projectGitIdentityRoutes(mux, projectGitIdentityVerifierForBuild())
 	mux.HandleFunc("GET /api/health", a.health)
 	mux.HandleFunc("GET /api/version", a.getVersion)
 	mux.HandleFunc("GET /api/state", a.getState)
@@ -189,6 +191,15 @@ func (a *app) routes() http.Handler {
 	mux.HandleFunc("DELETE /api/filesystem/directories", a.deleteFilesystemDirectory)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fail(w, 404, "Endpoint not found.") })
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if a.store != nil && strings.HasPrefix(r.URL.Path, "/api/sessions/") {
+			parts := strings.Split(r.URL.Path, "/")
+			if len(parts) > 3 {
+				if session, err := a.store.readSessionMeta(r.Context(), parts[3]); err == nil && externalSession(session) {
+					fail(w, 404, "Conversation not found.")
+					return
+				}
+			}
+		}
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		if a.store != nil {
@@ -217,9 +228,10 @@ func (a *app) routes() http.Handler {
 				return
 			}
 			webhookDelete := pattern == "DELETE /api/projects/{id}/webhooks/{webhookId}"
+			identityDelete := pattern == "DELETE /api/projects/{id}/git-identities/{identityId}"
 			transcriptionUpload := r.Method == http.MethodPost && r.URL.Path == "/api/transcriptions"
 			kind, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-			if (!transcriptionUpload && !webhookDelete && (err != nil || kind != "application/json")) ||
+			if (!transcriptionUpload && !webhookDelete && !identityDelete && (err != nil || kind != "application/json")) ||
 				(transcriptionUpload && (err != nil || kind != "multipart/form-data")) {
 				if transcriptionUpload {
 					fail(w, 415, "Transcriptions require multipart/form-data.")
@@ -253,8 +265,13 @@ func (a *app) health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	activeGraphs := 0
+	running := 0
+	for _, turn := range a.runs {
+		if turn.runner == nil {
+			running++
+		}
+	}
 	if a.store != nil {
-		running := len(a.runs)
 		a.mu.Unlock()
 		count, err := a.sqlHealth(r.Context())
 		if err != nil {
@@ -269,7 +286,7 @@ func (a *app) health(w http.ResponseWriter, r *http.Request) {
 			activeGraphs++
 		}
 	}
-	response := map[string]any{"status": "ok", "version": 2, "runningSessions": len(a.runs), "activeGraphRuns": activeGraphs}
+	response := map[string]any{"status": "ok", "version": 2, "runningSessions": running, "activeGraphRuns": activeGraphs}
 	a.mu.Unlock()
 	respond(w, 200, response)
 }

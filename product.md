@@ -48,12 +48,17 @@ mistaken for unavailable content. Topic/Library search applies to the requested
 engine/project scope before pagination. Background execution does not depend on
 open clients or subscriptions.
 
-Interactive histories and paged lists request up to 25 items per page and load
-additional pages about 300 px before the relevant scroll edge, without ordinary pagination
-buttons. A history item is a persisted event, including reasoning and tools;
-rendered work groups need not occupy 25 rows. Chat history opens at the newest
-tail and pages in both directions, keeping a separate bounded 200-event window
-per mounted reader, including compact work groups' internal scroll regions.
+Interactive chat history targets up to 25 messages per page: user messages,
+assistant responses and agent prompts. Reasoning, tools and status events remain
+in the contiguous timeline but do not consume that message quota. Other paged
+lists continue to request up to 25 items. Additional pages load about 300 px before
+the relevant scroll edge, without ordinary pagination buttons. Chat history opens
+at the newest tail and pages in both directions, keeping a separate window of up
+to 200 messages per mounted reader, including compact work groups' internal scroll
+regions. Independent safety bounds remain: a message-mode HTTP response has at
+most 1,024 event records within the 2 MiB byte contract, and a reader retains at
+most 8,192 event records. Oversized intervals use contiguous cursor continuations,
+and discarded regions remain reloadable. Graph activity retains its event paging.
 Each reader preserves its reading anchor and measured space for evicted rows;
 one reader's navigation does not move or block another. Streaming follows only
 at the real tail. Session
@@ -220,13 +225,35 @@ assistant messages provide Copy and a durable Favorite toggle; like and dislike 
 not used. Failed or cancelled partial responses remain copyable but cannot be marked
 as favorites.
 
-### Project Settings and GitHub Webhooks
+### Project Settings, Git Identities and GitHub Webhooks
 
 The **Project settings** button in the sessions sidebar opens a modal with
-**General**, **Webhooks**, **Tasks** and **Automations** sections. General edits the project's name and icon,
+**General**, **Git identities**, **Webhooks**, **Tasks** and **Automations** sections. General edits the project's name and icon,
 shows its fixed directory and provides confirmed project removal. Project creation
-and the rail's Edit/Remove menu retain their existing entry points. Webhooks belong
-to this project modal, not global Settings.
+and the rail's Edit/Remove menu retain their existing entry points.
+
+**Git identities** manages multiple GitHub tokens for the registered project. Each
+entry has a unique alias and the GitHub account returned by verification. Test
+connection does not save, and a failed replacement preserves the saved credential.
+The first identity becomes default. Removing the default promotes the oldest
+remaining identity; after removing the last entry, newly admitted work uses the
+existing shared `gh` setup. Projects that never configure a token keep that setup.
+
+Configured projects use the admitted default for managed `gh` and GitHub HTTPS
+commands. `klm-git-identity list` lists aliases; `klm-git-identity <alias> gh|git …`
+selects one alias for one operation. A failed or unavailable selected identity does
+not fall back to another account. The engine encrypts tokens and keeps only
+nonsecret references in execution records. Authentication follows the registered
+project, even if execution uses another directory. See [engine operations](engine/README.md#project-git-identities)
+for admission boundaries, API and command compatibility. This guarantee applies
+to managed commands; unrestricted processes under the engine's OS user are not isolated.
+
+The [November 19 Git identity publication](PROJECT_GIT_IDENTITIES_VPS_DEPLOYMENT_20261119.md)
+records focused Windows/Linux checks, the schema-7 VPS engine update and separate
+Windows desktop/engine installers for manual installation. Real-token and
+installed-client acceptance remain separate.
+
+**Webhooks** are configured in the same project modal.
 
 Each project can have multiple independent GitHub connections, with their own name,
 secret, stable ID, endpoint, enabled state and explicit event retention. The UI

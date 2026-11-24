@@ -202,6 +202,11 @@ func (a *app) startReservedGraphActivity(ctx context.Context, id string) error {
 		}
 	}
 	a.mu.Lock()
+	projectGit, err := a.captureProjectGitIdentities(ctx, activity.ProjectID)
+	if err != nil {
+		a.mu.Unlock()
+		return fail(err)
+	}
 	defer a.mu.Unlock()
 	current := a.state.graphActivity(id)
 	if current == nil || current.Version != activity.Version || !a.graphActivityReadyLocked(id) || a.graphFirstReadyLocked(activity.ConversationID) != id {
@@ -217,6 +222,7 @@ func (a *app) startReservedGraphActivity(ctx context.Context, id string) error {
 		return ctx.Err()
 	}
 	run := GraphRun{ID: newID(), ActivityID: id, ProjectID: activity.ProjectID, ConversationID: activity.ConversationID, GraphID: activity.GraphID, Input: GraphRunInput{Task: activity.Task}, Workspace: activity.Workspace, Snapshot: snapshot, Status: "starting", Revision: 1, CreatedAt: now(), UpdatedAt: now()}
+	run.ProjectGit = projectGit
 	if run.Input.Task == "" {
 		run.Input.Task = activity.Objective
 	}

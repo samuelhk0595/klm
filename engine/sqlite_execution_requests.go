@@ -70,11 +70,19 @@ func (p *adapter) requestSQLPermissionLocked(req *Permission, key, ruleHarness, 
 		if s.ProjectID == "" {
 			req.Decisions = slices.DeleteFunc(slices.Clone(req.Decisions), func(value string) bool { return value == "always" || value == "deny_project" })
 		}
+		if externalSession(s) {
+			req.Decisions = slices.DeleteFunc(slices.Clone(req.Decisions), func(value string) bool {
+				return value == "always" || value == "deny_project" || value == "allow_global" || value == "deny_global"
+			})
+		}
 		yolo, err := st.sessionYOLO(s)
 		if err != nil {
 			return err
 		}
-		if yolo {
+		humanRequired := externalSession(s) && yolo && !slices.Contains(req.Decisions, "once")
+		if humanRequired {
+			decision, reason = "", "explicit upstream response required"
+		} else if yolo {
 			reason, decision = "YOLO mode", "deny"
 			if slices.Contains(req.Decisions, "once") {
 				decision = "allow"
@@ -88,7 +96,7 @@ func (p *adapter) requestSQLPermissionLocked(req *Permission, key, ruleHarness, 
 		if decision == "deny" || decision == "allow" && slices.Contains(req.Decisions, "once") {
 			return nil
 		}
-		if key != "" && slices.Contains(req.Decisions, "once") {
+		if !externalSession(s) && key != "" && slices.Contains(req.Decisions, "once") {
 			var found bool
 			err := st.tx.QueryRowContext(st.ctx, `SELECT EXISTS(SELECT 1 FROM data_permission_grants g WHERE project_id=? AND x_harness=? AND x_kind=? AND x_key=? AND x_decision<>'deny' AND session_id IN ('',?) AND NOT EXISTS(SELECT 1 FROM permission_reply_intents i WHERE i.grant_id=g.id))`, s.ProjectID, p.harness, req.Kind, key, p.id).Scan(&found)
 			if err != nil {
@@ -99,7 +107,7 @@ func (p *adapter) requestSQLPermissionLocked(req *Permission, key, ruleHarness, 
 				return nil
 			}
 		}
-		if workspaceDecision == "deny" || workspaceDecision == "allow" && slices.Contains(req.Decisions, "once") {
+		if !humanRequired && (workspaceDecision == "deny" || workspaceDecision == "allow" && slices.Contains(req.Decisions, "once")) {
 			decision, reason = workspaceDecision, "workspace policy"
 			return nil
 		}
@@ -460,6 +468,9 @@ func (a *app) resolveSQLPermissions() {
 	ready := []resolution{}
 	a.mu.Lock()
 	for id, t := range a.runs {
+		if t.runner != nil {
+			continue
+		}
 		if t.ctx.Err() != nil || a.storageErr != nil {
 			continue
 		}

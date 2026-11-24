@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 )
 
 type MCPSelection struct {
@@ -212,7 +213,9 @@ func (p *adapter) prepareCapabilities(s Session) error {
 	}
 	var snapshot *CapabilitySnapshot
 	var err error
-	if p.agentPreparation != nil {
+	if p.turn.runner != nil {
+		snapshot = p.turn.runner.Capture.Capabilities
+	} else if p.agentPreparation != nil {
 		snapshot = p.agentPreparation.ExternalCapabilities
 	} else if p.app.store != nil {
 		snapshot, err = p.selectSQLCapabilities(s)
@@ -305,6 +308,9 @@ func (p *adapter) prepareCapabilities(s Session) error {
 	locked = false
 	if err := p.prepareMCP(); err != nil {
 		return err
+	}
+	if p.turn.runner != nil && snapshot != nil && len(snapshot.Diagnostics) > 0 {
+		return fmt.Errorf("Captured external capabilities are unavailable: %s", strings.Join(snapshot.Diagnostics, "; "))
 	}
 	return nil
 }

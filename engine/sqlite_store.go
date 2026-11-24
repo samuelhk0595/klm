@@ -17,7 +17,7 @@ import (
 
 const (
 	sqliteApplicationID = 0x4b4c4d31 // KLM1; independent of product version.
-	sqliteSchemaVersion = 5          // Content v2, catalog v3, delegation v4, explicit recovery v5.
+	sqliteSchemaVersion = 7          // Project Git identities.
 	sqliteReaderLimit   = 4
 )
 
@@ -163,7 +163,19 @@ func (s *sqliteStore) enableRuntime(ctx context.Context) error {
 	if err := s.upgradeDelegationRecoverySchema(ctx); err != nil {
 		return err
 	}
+	if err := s.write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, runnerSchema+"PRAGMA user_version=6;")
+		return err
+	}); err != nil {
+		return err
+	}
 	if err := s.upgradeAgentReferenceIndexes(ctx); err != nil {
+		return err
+	}
+	if err := s.write(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, projectGitIdentitySchema+"PRAGMA user_version=7;")
+		return err
+	}); err != nil {
 		return err
 	}
 	if err := s.recoverAgentCatalogChanges(ctx); err != nil {

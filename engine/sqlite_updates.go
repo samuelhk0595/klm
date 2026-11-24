@@ -57,7 +57,7 @@ func (a *app) scopedSQLUpdates(w http.ResponseWriter, r *http.Request) {
 				sqlHTTPError(w, err)
 				return
 			}
-			if s.GraphRunID != "" {
+			if s.GraphRunID != "" || externalSession(s) {
 				fail(w, 404, "Conversation not found.")
 				return
 			}

@@ -335,6 +335,7 @@ func (b *linkedBridge) serve(w http.ResponseWriter, r *http.Request) {
 		if params.Name == "graph_invoke" || params.Name == "graph_update_activity" {
 			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(graphToolServerTimeout))
 		}
+		if p!=nil&&p.turn!=nil&&p.turn.runner!=nil{_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(35*time.Second))}
 		value, err := b.call(r.Context(), params.Name, params.Arguments, string(message.ID))
 		text := ""
 		if err != nil {
@@ -364,6 +365,13 @@ func (b *linkedBridge) call(ctx context.Context, name string, raw json.RawMessag
 	}
 	if !known {
 		return nil, errors.New("Tool is not available to this turn capability.")
+	}
+	if p.turn.runner != nil {
+		callID := ""
+		if len(callIDs) > 0 {
+			callID = callIDs[0]
+		}
+		return p.app.runner.call(ctx, p, name, callID, raw)
 	}
 	if name == "session_topic_set" {
 		return p.setSessionTopic(raw)

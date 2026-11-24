@@ -16,6 +16,7 @@ import (
 func (st *sqliteSessionTx) libraryReferenceHash(kind, id string, visit func(LibraryReference) error) (string, error) {
 	h := sha256.New()
 	encoder := json.NewEncoder(h)
+	externalShown := false
 	rows, err := st.tx.QueryContext(st.ctx, `SELECT kind,id,title,project,revision FROM (
 	 SELECT 'session' AS kind,s.id,s.x_title AS title,s.project_id AS project,d.digest AS revision FROM selection_references r JOIN data_capability_selections d ON d.id=r.record_key JOIN data_session_capabilities c ON c.id=d.owner_id JOIN data_sessions s ON s.id=c.owner_id WHERE r.domain='capability_selections' AND r.kind=? AND r.item=?
 	 UNION ALL SELECT 'automation',a.id,a.x_name,a.project_id,a.digest FROM selection_references r JOIN data_automations a ON a.id=r.record_key WHERE r.domain='automations' AND r.kind=? AND r.item=? AND a.x_deleted<>'true'
@@ -38,6 +39,20 @@ func (st *sqliteSessionTx) libraryReferenceHash(kind, id string, visit func(Libr
 			return "", err
 		}
 		if visit != nil {
+			if ref.Kind == "session" || ref.Kind == "agent_binding" {
+				session, err := st.sessionMeta(ref.ID)
+				if err != nil {
+					rows.Close()
+					return "", err
+				}
+				if externalSession(session) {
+					if externalShown {
+						continue
+					}
+					externalShown = true
+					ref = LibraryReference{Kind: "external_execution", ID: "in_use", Title: "External execution"}
+				}
+			}
 			if err := visit(ref); err != nil {
 				rows.Close()
 				return "", err

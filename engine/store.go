@@ -40,6 +40,9 @@ type Event struct {
 }
 
 type Session struct {
+	Origin          string                   `json:"origin,omitempty"`
+	IntegrationID   string                   `json:"integrationId,omitempty"`
+	RunnerID        string                   `json:"runnerId,omitempty"`
 	AgentBinding    *SessionAgentBinding     `json:"agentBinding,omitempty"`
 	AgentConfig     *AgentConfigSummary      `json:"agentConfig,omitempty"`
 	Automation      *AutomationSession       `json:"automation,omitempty"`

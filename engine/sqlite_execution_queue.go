@@ -63,12 +63,21 @@ func (st *sqliteSessionTx) appendQueuedUser(sessionID string, q QueuedMessage) e
 		return err
 	}
 	kind := "user"
+	if q.RunnerSource != nil {
+		kind = "runner_input"
+	}
 	if q.Origin != nil {
 		kind = "agent_prompt"
 	}
 	e := event(kind, q.Text)
 	e.ID = q.ID
 	e.Data = map[string]any{"delivery": q.Mode}
+	if q.RunnerSource != nil {
+		e.Data["runnerSource"] = q.RunnerSource
+		if err := st.runnerInputState(q.ID, "included"); err != nil {
+			return err
+		}
+	}
 	if q.Origin != nil {
 		e.Data["origin"] = q.Origin
 	}
@@ -350,6 +359,11 @@ func (p *adapter) takeSQLSteeringLocked() (*QueuedMessage, submission, error) {
 				return err
 			}
 			q.Status = "sending"
+			if p.turn.runner != nil {
+				if err := st.runnerSteeringState(q.ID, "claimed", p.turn.runner.TurnID); err != nil {
+					return err
+				}
+			}
 			if err := st.putExistingRecord("queued_messages", key, q); err != nil {
 				return err
 			}

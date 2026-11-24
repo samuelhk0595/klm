@@ -592,7 +592,18 @@ func (a *app) sqlHistory(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	page, err := a.store.readHistory(r.Context(), r.PathValue("id"), r.URL.Query().Get("before"), r.URL.Query().Get("after"), limit)
+	unit := r.URL.Query().Get("unit")
+	if unit != "" && unit != "events" && unit != "messages" {
+		fail(w, 400, "Invalid history page unit.")
+		return
+	}
+	var page sqliteHistoryPage
+	var err error
+	if unit == "messages" {
+		page, err = a.store.readMessageHistory(r.Context(), r.PathValue("id"), r.URL.Query().Get("before"), r.URL.Query().Get("after"), limit, r.URL.Query().Get("from"), r.URL.Query().Get("end"))
+	} else {
+		page, err = a.store.readHistory(r.Context(), r.PathValue("id"), r.URL.Query().Get("before"), r.URL.Query().Get("after"), limit)
+	}
 	if err != nil {
 		sqlHTTPError(w, err)
 		return
@@ -631,6 +642,12 @@ func (a *app) sqlEventContent(w http.ResponseWriter, r *http.Request) {
 // Reuses paired-client protection and the existing routes. Until each remaining
 // handler is converted, SQL ownership never falls through into the JSON backend.
 func sqlRouteAvailable(pattern string) bool {
+	if strings.Contains(pattern, " /api/projects/{id}/git-identities") {
+		return true
+	}
+	if strings.Contains(pattern, " /api/runner/") {
+		return true
+	}
 	switch pattern {
 	case "POST /api/sessions/{id}/content-downloads", "POST /api/sessions/{id}/export-downloads", "GET /api/content-downloads/{ticket}":
 		return true

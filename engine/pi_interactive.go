@@ -134,7 +134,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 		cleanup := func() { _ = os.RemoveAll(extensionDir) }
 		extensionPath := filepath.Join(extensionDir, "pi-permissions.ts")
 		childExtension := ""
-		if !p.graphNode() && !p.subagent && p.delegation == nil {
+		if p.turn.runner == nil && !p.graphNode() && !p.subagent && p.delegation == nil {
 			children, err = newPiChildChannel(p)
 			if err != nil {
 				cleanup()
@@ -155,7 +155,7 @@ func (p *adapter) runPi(b binary, cwd, text string) (err error) {
 			cleanup()
 			return assetErr
 		}
-		bridgeConfig, _ := json.Marshal(map[string]any{"url": p.bridge.url, "token": p.bridge.token, "libraryUrl": p.bridge.libraryURL, "libraryToken": p.bridge.libraryToken, "graphNode": p.graphNode(), "delegation": p.delegation != nil, "nativeSubagents": children != nil, "nativeSubagentPath": childExtension, "tools": p.bridgeTools(), "toolTimeoutMs": linkedToolClientTimeout.Milliseconds()})
+		bridgeConfig, _ := json.Marshal(map[string]any{"runner": p.turn.runner != nil, "url": p.bridge.url, "token": p.bridge.token, "libraryUrl": p.bridge.libraryURL, "libraryToken": p.bridge.libraryToken, "graphNode": p.graphNode(), "delegation": p.delegation != nil, "nativeSubagents": children != nil, "nativeSubagentPath": childExtension, "tools": p.bridgeTools(), "toolTimeoutMs": linkedToolClientTimeout.Milliseconds()})
 		configPath := filepath.Join(extensionDir, "catalog.json")
 		if writeErr := os.WriteFile(configPath, bridgeConfig, 0600); writeErr != nil {
 			cleanup()
@@ -649,6 +649,9 @@ reading:
 				}
 			}
 			if message := object(raw["message"]); str(raw, "type") == "message_end" && (str(message, "role") == "user" || str(message, "customType") == "klm-steering") {
+				if err := p.runnerNativeInput(contentText(message["content"]), false); err != nil {
+					return err
+				}
 				if err := p.finishPiSteering(contentText(message["content"])); err != nil {
 					return err
 				}
