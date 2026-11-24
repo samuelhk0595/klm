@@ -1,0 +1,157 @@
+{
+  "positions": {
+    "0e492653-655e-491d-bcfb-38c364014e2b": {
+      "x": 0,
+      "y": -9.094299399062393
+    },
+    "278a75a6-1bc4-461f-be93-9272ff0d1585": {
+      "x": 906.2522778238665,
+      "y": -8.598566674630021
+    },
+    "choice:critiques-accepted-plan-adjusted": {
+      "x": 194.16475383206114,
+      "y": -155.41032350001117
+    },
+    "choice:invalid-critique-identified": {
+      "x": 193.47836112949125,
+      "y": -245.1517263511508
+    },
+    "choice:submit-critique": {
+      "x": 444.762386020675,
+      "y": 114.34362281686857
+    },
+    "choice:submit-plan-to-critique": {
+      "x": 451.64852796503965,
+      "y": -34.29999172987272
+    }
+  },
+  "viewport": {
+    "x": -67.86853937704439,
+    "y": 423.73343820068567,
+    "zoom": 0.6597539553864474
+  },
+  "handles": {
+    "0e492653-655e-491d-bcfb-38c364014e2b": [
+      {
+        "id": "src-5cabb410-e998-4c5d-a755-811a36890167",
+        "type": "source",
+        "side": "right",
+        "left": 100,
+        "top": 32.27459870281454
+      },
+      {
+        "id": "src-769fcc06-a47a-4691-b21e-c6ade4a4a9f1",
+        "type": "source",
+        "side": "top",
+        "left": 65.39201556063247,
+        "top": 0
+      },
+      {
+        "id": "src-5f0c241e-9271-4788-ba0b-01e5b8d89e8c",
+        "type": "source",
+        "side": "top",
+        "left": 39.956551220582185,
+        "top": 0
+      },
+      {
+        "id": "tgt-fbf188d0-ec43-45fc-9598-da060cdcd494",
+        "type": "target",
+        "side": "right",
+        "left": 100,
+        "top": 78.41549639959598
+      }
+    ],
+    "278a75a6-1bc4-461f-be93-9272ff0d1585": [
+      {
+        "id": "tgt-f8ff05d2-656a-4331-9ffb-73ae20032d9a",
+        "type": "target",
+        "side": "left",
+        "left": 0,
+        "top": 27.797240802122552
+      },
+      {
+        "id": "src-dd7cfb4b-c63b-44b3-b10f-dddb82b69b32",
+        "type": "source",
+        "side": "left",
+        "left": 0,
+        "top": 76.19712852069243
+      }
+    ],
+    "choice:critiques-accepted-plan-adjusted": [
+      {
+        "id": "tgt-b5608fd8-93be-4c3a-b800-df524b267e5d",
+        "type": "target",
+        "side": "left",
+        "left": 0,
+        "top": 70.19824858828582
+      }
+    ],
+    "choice:invalid-critique-identified": [
+      {
+        "id": "tgt-0531ad98-2e73-4212-8b89-f7b5a08a43e9",
+        "type": "target",
+        "side": "left",
+        "left": 0,
+        "top": 41.480783256714346
+      }
+    ],
+    "choice:submit-critique": [
+      {
+        "id": "tgt-c1f33e69-e6b3-44ee-a6ed-5c5b712b8e80",
+        "type": "target",
+        "side": "right",
+        "left": 100,
+        "top": 48.03957973831939
+      },
+      {
+        "id": "src-33993454-df97-4171-a085-f26ea8c08c70",
+        "type": "source",
+        "side": "left",
+        "left": 0,
+        "top": 56.46023202535858
+      }
+    ],
+    "choice:submit-plan-to-critique": [
+      {
+        "id": "src-d57c3314-88cd-4d22-b107-432141c7998b",
+        "type": "source",
+        "side": "right",
+        "left": 100,
+        "top": 51.900933157926
+      },
+      {
+        "id": "tgt-9f4436b5-ef0a-43b6-9260-5bfb3f6fab09",
+        "type": "target",
+        "side": "left",
+        "left": 0,
+        "top": 47.11468893599742
+      }
+    ]
+  },
+  "connections": {
+    "[\"0e492653-655e-491d-bcfb-38c364014e2b\",\"choices\",\"choice:critiques-accepted-plan-adjusted\"]": {
+      "sourceHandle": "src-769fcc06-a47a-4691-b21e-c6ade4a4a9f1",
+      "targetHandle": "tgt-b5608fd8-93be-4c3a-b800-df524b267e5d"
+    },
+    "[\"0e492653-655e-491d-bcfb-38c364014e2b\",\"choices\",\"choice:invalid-critique-identified\"]": {
+      "sourceHandle": "src-5f0c241e-9271-4788-ba0b-01e5b8d89e8c",
+      "targetHandle": "tgt-0531ad98-2e73-4212-8b89-f7b5a08a43e9"
+    },
+    "[\"0e492653-655e-491d-bcfb-38c364014e2b\",\"choices\",\"choice:submit-plan-to-critique\"]": {
+      "sourceHandle": "src-5cabb410-e998-4c5d-a755-811a36890167",
+      "targetHandle": "tgt-9f4436b5-ef0a-43b6-9260-5bfb3f6fab09"
+    },
+    "[\"278a75a6-1bc4-461f-be93-9272ff0d1585\",\"choices\",\"choice:submit-critique\"]": {
+      "sourceHandle": "src-dd7cfb4b-c63b-44b3-b10f-dddb82b69b32",
+      "targetHandle": "tgt-c1f33e69-e6b3-44ee-a6ed-5c5b712b8e80"
+    },
+    "[\"choice:submit-critique\",\"destination\",\"0e492653-655e-491d-bcfb-38c364014e2b\"]": {
+      "sourceHandle": "src-33993454-df97-4171-a085-f26ea8c08c70",
+      "targetHandle": "tgt-fbf188d0-ec43-45fc-9598-da060cdcd494"
+    },
+    "[\"choice:submit-plan-to-critique\",\"destination\",\"278a75a6-1bc4-461f-be93-9272ff0d1585\"]": {
+      "sourceHandle": "src-d57c3314-88cd-4d22-b107-432141c7998b",
+      "targetHandle": "tgt-f8ff05d2-656a-4331-9ffb-73ae20032d9a"
+    }
+  }
+}

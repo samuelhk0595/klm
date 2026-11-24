@@ -1,0 +1,60 @@
+name: Escrita de planos
+enabled: true
+initial_node: 0e492653-655e-491d-bcfb-38c364014e2b
+nodes:
+    0e492653-655e-491d-bcfb-38c364014e2b:
+        type: agent
+        name: Writer
+        agent: plan-writer
+        choices:
+            - submit-plan-to-critique
+            - critiques-accepted-plan-adjusted
+            - invalid-critique-identified
+    278a75a6-1bc4-461f-be93-9272ff0d1585:
+        type: agent
+        name: Critique
+        agent: klm-plan-critique
+        choices:
+            - submit-critique
+choices:
+    critiques-accepted-plan-adjusted:
+        name: critiques_accepted_plan_adjusted
+        description: After critiques you adjusted the plan
+        input:
+            plan_markdown_file_path:
+                type: string
+                required: true
+        output: {}
+        terminal: true
+    invalid-critique-identified:
+        name: invalid_critique_identified
+        description: The critique you received is not valid or is wrong
+        input:
+            invalid_critique:
+                type: string
+                required: true
+            reason:
+                type: string
+                required: true
+        output: {}
+        terminal: true
+    submit-critique:
+        name: submit_critique
+        description: Submit your critique
+        input:
+            critique:
+                type: string
+                required: true
+        output:
+            critique: "You plan received critiques. \nRead them and adjust the plan accordingly.\nThis is the critique:\n{{choice.critique}}"
+        to: 0e492653-655e-491d-bcfb-38c364014e2b
+    submit-plan-to-critique:
+        name: submit_plan_to_critique
+        description: You've just finished the plan and want to submit for critique
+        input:
+            plan_text:
+                type: string
+                required: true
+        output:
+            plan_to_critique: Critique this plan {{choice.plan_text}}
+        to: 278a75a6-1bc4-461f-be93-9272ff0d1585
